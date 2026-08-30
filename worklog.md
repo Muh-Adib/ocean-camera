@@ -119,3 +119,24 @@ Stage Summary:
 - Fish parts are mathematically seated on the hull → no detached-looking fins/eyes/tails at any distance
 - The ocean is now explorable: first-person free swim with inertial water feel and soft world bounds
 - Skill search outcome: external 3D-modeling services rejected on-architecture grounds; procedural math achieved the goal offline
+
+---
+Task ID: 7
+Agent: main (Super Z)
+Task: Camera rotation via hand-swim + keyboard, wider & more varied ocean, push to GitHub
+
+Work Log:
+- SwimController: A/D and ←/→ now TURN the swimmer (eased via yawVel damping), Q/E strafe, W/S + ↑/↓ glide, Space/C rise & sink; new setHandSteer(x, y, present, fist) palm joystick — dead-zone 0.13 with ^1.35 response curve, hand left/right of center turns, up/down pitches, closed fist kicks forward (thrustSmooth ~5/s); max speed 7.5→8.2
+- main.ts: feeds hand samples into swim.setHandSteer while swimming (steer only when tracker runs); swim bounds widened to ±74 / -96..18 / ceiling 11.5; swim toast now explains palm steering; Biomes module wired + disposed; dynamic bubble bursts widened
+- Biomes (new environment/Biomes.ts): NW kelp forest (330 instanced fronds, heavy-stipe GPU sway, olive→gold gradient, shares seaweed uCurrent/uCurrentDir uniform objects so all flora sways as one — via new Seaweed.uniforms getter); SW canyon with two fbm-weathered rock arches + 10 boulders + 4 wall fins; 5 northern monolith spires on the seamount; 3 sand-flat bommies; static rockwork merged to ONE vertex-coloured draw call (fixed: icosahedron parts are non-indexed — expand indexed parts via toNonIndexed before merge)
+- Seabed: 170→250 units, seg 140; terrain() gains a canyon basin (-3.8 gaussian @ -52,-46) and a northern seamount (+3.2 @ 10,-80) — heightAt stays the single source of truth; sand tinted per biome (olive under kelp, bright flats SE, cold silt north, dark canyon)
+- Opened up the world: BOUNDS ±68/-92..10, fog 0.0225→0.016, water surface 300×240, particles 150×122 spread, bubbles ±62/-88, ReefDecor radius 9..67, Rocks/CoralSystem/Seaweed scatter extended with SE flats, northern foothills, canyon rim, kelp fringe and far-horizon clusters (+12 coral clusters, +12 seaweed meadows)
+- FishManager: 8 new zone schools — kelp tang ×10, kelp bait-ball ×55, sand-flat tropicals ×12 + squirrelfish ×6, canyon idols ×4 + butterflyfish ×7, spire angelfish ×4 + pufferfish ×3 → ~300 fish total
+- UI/README: guide gains "Swim by hand" row + expanded free-swim keys; README rewrite of ecosystem/open-world/biome bullets + full swim-controls table (turn, strafe, palm steer, fist kick)
+- Verified: tsc clean; headless boot initially failed on Biomes merge (index mismatch) → fixed toNonIndexed normalization → clean boot; DIVE IN → F → SWIM MODE chip + GLIDE paddle; held A/D show clear left/right view rotation in screenshots; W+Space glide/ascend reveals kelp forest, monolith silhouettes, surface waves and mixed schools; Esc/F exits cleanly; fresh reload = zero console/page errors
+- Screenshots: download/ocean-open-1.png, ocean-swim-turnleft.png, ocean-swim-turnright.png, ocean-swim-forward.png, ocean-open-world.png
+
+Stage Summary:
+- The swimmer can now look/turn left-right with keyboard AND by sweeping the tracked hand; fist = forward burst
+- The ocean grew ~2.4× wider with four biomes (coral gardens, kelp forest, boulder canyon, sand flats) plus northern spires — all landmarks procedural, ~300 fish, still one draw call per school and one for all static biome rockwork
+- Ready to commit + push

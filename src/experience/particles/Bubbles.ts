@@ -48,8 +48,8 @@ export class BubbleSystem {
   }
 
   private spawn(rng: () => number, anywhere = false): Bubble {
-    const x = rand(-44, 44)
-    const z = rand(-62, 4)
+    const x = rand(-62, 62)
+    const z = rand(-88, 10)
     const y = anywhere ? rand(-12, 14) : this.heightAt(x, z) + rand(0.2, 1.5)
     return {
       pos: new THREE.Vector3(x, y, z),

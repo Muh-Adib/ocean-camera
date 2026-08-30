@@ -33,7 +33,8 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0225)
+    // lighter fog than the old lagoon — the open ocean is worth seeing
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.016)
     this.scene.fog = this.fog
 
     // ---- camera ----

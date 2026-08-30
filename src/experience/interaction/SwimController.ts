@@ -1,9 +1,12 @@
 // ---------------------------------------------------------------
 // SwimController — free-swim exploration of the open ocean.
-// Drag = look around · WASD/arrows = swim · Space = ascend ·
-// C / Shift = descend · F or HUD button = toggle · ESC = surface.
-// Movement is inertia-damped so it feels like finning through
-// water, with soft bounds at the reef floor and world edge.
+// Drag = look around · W/S = glide fwd/back · A/D or ←/→ = TURN ·
+// Q/E = strafe · Space = ascend · C / Shift = descend ·
+// F or HUD button = toggle · ESC = surface.
+// With the camera on, the open palm is a swim joystick: hand
+// left/right turns the view, up/down pitches, a closed fist
+// kicks a forward burst. Movement is inertia-damped so it feels
+// like finning through water, with soft bounds everywhere.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { clamp } from '../utils/math'
@@ -24,6 +27,11 @@ export class SwimController {
   /** set by the on-screen forward paddle (touch) 0..1 */
   forwardBoost = 0
   onChange?: (active: boolean) => void
+
+  // --- hand steering (palm joystick, fed by main when tracking) ---
+  private steer = { x: 0.5, y: 0.5, active: false, thrust: false }
+  private thrustSmooth = 0
+  private yawVel = 0
   /** injected by main — snapshots the live camera pose when swim starts */
   capturePose?: () => { pos: THREE.Vector3; yaw: number; pitch: number }
 
@@ -83,20 +91,52 @@ export class SwimController {
     return this.active
   }
 
+  /** feed the tracked palm (normalized 0..1, mirrored) — called by main each frame */
+  setHandSteer(x: number, y: number, present: boolean, fist: boolean) {
+    this.steer.x = x
+    this.steer.y = y
+    this.steer.active = present
+    this.steer.thrust = present && fist
+  }
+
   /** drive pose — call once per frame while active */
   update(dt: number) {
     if (!this.active) return
 
     // --- look damping is applied directly in onMove; here: movement ---
     const k = this.keys
-    let f = 0, s = 0, u = 0
+    let f = 0, s = 0, u = 0, turn = 0
     if (k.has('KeyW') || k.has('ArrowUp')) f += 1
     if (k.has('KeyS') || k.has('ArrowDown')) f -= 1
-    if (k.has('KeyD')) s += 1
-    if (k.has('KeyA')) s -= 1
+    if (k.has('KeyD') || k.has('ArrowRight')) turn += 1
+    if (k.has('KeyA') || k.has('ArrowLeft')) turn -= 1
+    if (k.has('KeyE')) s += 1
+    if (k.has('KeyQ')) s -= 1
     if (k.has('Space')) u += 1
     if (k.has('KeyC') || k.has('ShiftLeft') || k.has('ShiftRight')) u -= 1
     f += this.forwardBoost
+
+    // --- palm steering: hand left/right of center turns the swimmer ---
+    let steerTurn = 0
+    if (this.steer.active) {
+      const dz = 0.13
+      const dead = (v: number) => {
+        const a = Math.abs(v)
+        return a < dz ? 0 : Math.sign(v) * ((a - dz) / (1 - dz)) ** 1.35
+      }
+      steerTurn = -dead(this.steer.x - 0.5)   // hand left → look left
+      this.pitch = clamp(this.pitch - dead(this.steer.y - 0.5) * 0.85 * dt, -1.25, 1.25)
+      // closed fist → a fin kick forward
+      this.thrustSmooth += ((this.steer.thrust ? 1 : 0) - this.thrustSmooth) * Math.min(1, dt * 5)
+      f += this.thrustSmooth * 0.9
+    } else {
+      this.thrustSmooth *= Math.max(0, 1 - dt * 4)
+    }
+
+    // eased yaw so keyboard / palm turns bank in smoothly
+    const targetTurn = turn * 1.45 + steerTurn * 1.7
+    this.yawVel += (targetTurn - this.yawVel) * Math.min(1, dt * 7)
+    this.yaw -= this.yawVel * dt
 
     const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw)
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch)
@@ -112,7 +152,7 @@ export class SwimController {
     const drag = Math.max(0, 1 - dt * 2.6)
     this.vel.multiplyScalar(drag)
     const spd = this.vel.length()
-    if (spd > 7.5) this.vel.multiplyScalar(7.5 / spd)
+    if (spd > 8.2) this.vel.multiplyScalar(8.2 / spd)
 
     this.position.addScaledVector(this.vel, dt)
 
@@ -163,7 +203,7 @@ export class SwimController {
       return
     }
     if (!this.active) return
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight'].includes(e.code)) {
+    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space', 'KeyC', 'ShiftLeft', 'ShiftRight'].includes(e.code)) {
       if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault()
       this.keys.add(e.code)
     }

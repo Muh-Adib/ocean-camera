@@ -414,7 +414,8 @@ export class UI {
           <li><b>Open palm</b><span>curious fish approach</span></li>
           <li><b>Closed fist</b><span>fish keep their distance</span></li>
           <li><b>Fast / slow</b><span>stronger / softer reaction</span></li>
-          <li><b>Free swim</b><span>press <b>F</b> — drag to look, <b>WASD</b> glide, <b>Space</b>/<b>C</b> rise &amp; sink</span></li>
+          <li><b>Free swim</b><span>press <b>F</b> — drag to look, <b>A</b>/<b>D</b> turn, <b>W</b>/<b>S</b> glide, <b>Q</b>/<b>E</b> strafe, <b>Space</b>/<b>C</b> rise &amp; sink</span></li>
+          <li><b>Swim by hand</b><span>while swimming, your open palm steers — hand left / right to turn, <b>fist</b> kicks forward</span></li>
         </ul>
         <p class="guide-keys">No camera? <b>Move / drag</b> the pointer, <b>tap</b> to attract, <b>hold</b> to push, <b>Space</b> attract, <b>X</b> push. On touch, hold <b>▲ GLIDE</b> to swim ahead.</p>
         <button class="btn-primary" id="guide-close">BACK TO THE OCEAN</button>

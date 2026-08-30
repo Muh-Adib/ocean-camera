@@ -13,10 +13,11 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 ## ✨ Features
 
 - **Hand-gesture control** — swipe, push, pull, open palm and fist gestures, each with its own force field, animation and sound. Velocity-strength coupling means faster movements hit harder.
-- **A living ecosystem** — ~200 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and a 90-strong silver bait-ball) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces. Every fin, eye and tail is seated on the hull by surface-radius math, so no part ever floats detached.
-- **Open-world free swimming** — press **F** (or the waves HUD button) to leave the cinematic drift and explore the whole reef first-person: drag to look around, glide with WASD, rise and sink with Space / C, with soft collision against the seabed and the world edge. Touch devices get a hold-to-glide paddle.
+- **A living ecosystem** — ~300 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and two silver bait-balls) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces. Every fin, eye and tail is seated on the hull by surface-radius math, so no part ever floats detached.
+- **Open-world free swimming** — press **F** (or the waves HUD button) to leave the cinematic drift and explore the whole ocean first-person: drag to look around, turn with **A / D** or the arrow keys, glide with **W / S**, strafe with **Q / E**, rise and sink with Space / C — with soft collision against the seabed and the world edge. With the camera on, your **open palm becomes a swim joystick**: hold it left or right of center to turn, up / down to pitch, and close it into a fist for a forward kick. Touch devices get a hold-to-glide paddle.
+- **Four biomes to discover** — the coral gardens of the east, a swaying **kelp forest** in the north-west, a **boulder canyon** with two rock arches in the south-west, shell-bright **sand flats** in the south-east, and towering **monolith spires** on the northern seamount. Each biome has its own sand tint, resident schools and landmarks to navigate by.
 - **Special visitors** — a gliding manta ray, a cruising sea turtle and predatory silhouettes appear on random schedules. Pufferfish are camera-curious and will come say hello.
-- **Procedural reef** — fbm-dune seabed with pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed, starfish, sea urchins and scallop shells — zero external 3D assets.
+- **Procedural reef** — fbm-dune seabed with a canyon basin and seamount, biome-tinted sand, pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed and kelp, starfish, sea urchins and scallop shells — zero external 3D assets.
 - **Atmosphere** — animated water surface with Snell-window glow, procedural caustics, volumetric god rays, depth-graded fog, particle plankton, bubble clusters and a fully procedural WebAudio soundscape (drone, water noise, whale calls, gesture shimmer).
 - **Cinematic entry** — GSAP-sequenced loading, dive-in descent and staged reveals.
 - **Graceful everywhere** — three quality tiers with adaptive degradation, mobile/touch layout, reduced-motion support, and a mouse/keyboard fallback that keeps the ocean alive without a camera.
@@ -48,8 +49,12 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 |---|---|
 | `F` / waves HUD button | Toggle free swim |
 | Drag (mouse or touch) | Look around |
-| `W A S D` / arrows | Glide through the water |
+| `W` / `S` or `↑` / `↓` | Glide forward / back |
+| `A` / `D` or `←` / `→` | **Turn left / right** |
+| `Q` / `E` | Strafe left / right |
 | `Space` / `C` or `Shift` | Ascend / descend |
+| **Open palm** (camera on) | Steers: left / right of center turns, up / down pitches |
+| **Fist** (camera on) | Forward fin-kick burst |
 | `▲ GLIDE` paddle (touch) | Hold to swim forward |
 | `Esc` | Return to the cinematic drift |
 
@@ -104,7 +109,7 @@ Hand tracking also degrades gracefully: **GPU inference falls back to CPU** auto
 ```
 src/experience/
 ├── core/          SceneManager, CameraRig, Lighting, PerformanceManager, sharedUniforms
-├── environment/   Seabed, Rocks, CoralSystem, Seaweed, WaterSurface, ReefDecor
+├── environment/   Seabed, Rocks, CoralSystem, Seaweed, WaterSurface, ReefDecor, Biomes (kelp forest · rock arches · spires)
 ├── particles/     ParticleField, Bubbles, GestureBurst
 ├── fish/          FishGeometryFactory (procedural species), Boids, FishManager, SpecialCreatures
 ├── interaction/   HandTracker, GestureEngine, InteractionField, PointerFallback, SwimController

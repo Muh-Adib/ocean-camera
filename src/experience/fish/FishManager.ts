@@ -52,6 +52,19 @@ const SCHOOL_DEFS: SchoolDef[] = [
   { species: 'minnow', morph: 0, count: 90, anchor: [-2, 5.5, -32], spawnRadius: 5, params: { maxSpeed: 4.4, maxForce: 12, sepW: 1.3, aliW: 2.8, cohW: 1.7, wanderW: 1.5, separationR: 0.65, perceptionR: 2.8 }, scale: [0.42, 0.58], response: 1.4 },
   // curious wanderers
   { species: 'pufferfish', morph: 0, count: 4, anchor: [2, -1.5, -12], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, aliW: 0.1, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.25], response: 1.3 },
+  // Zone D — kelp forest (north-west): tang weaving through the fronds
+  { species: 'tang', morph: 0, count: 10, anchor: [-42, -1, -48], spawnRadius: 6, params: { maxSpeed: 2.1, cohW: 0.9 }, scale: [1.15, 1.5], response: 0.85 },
+  // second bait ball — silver flashes inside the kelp shadows
+  { species: 'minnow', morph: 0, count: 55, anchor: [-48, 4, -56], spawnRadius: 6, params: { maxSpeed: 4.2, maxForce: 12, sepW: 1.3, aliW: 2.6, cohW: 1.6, wanderW: 1.6, separationR: 0.65, perceptionR: 2.8 }, scale: [0.42, 0.58], response: 1.35 },
+  // Zone E — sand flats (south-east): cruisers over the open plain
+  { species: 'tropical', morph: 2, count: 12, anchor: [36, -2, -18], spawnRadius: 5, params: { maxSpeed: 3.4 }, scale: [0.6, 0.95], response: 1.15 },
+  { species: 'squirrel', morph: 0, count: 6, anchor: [42, -8.5, -27], spawnRadius: 3.5, params: { maxSpeed: 1.5, homeStrength: 1.2, homeRadius: 7, cohW: 0.4, wanderW: 3.0 }, scale: [1.0, 1.25], response: 0.75 },
+  // Zone F — boulder canyon (south-west): band-painted drifters
+  { species: 'moorish', morph: 0, count: 4, anchor: [-46, -5, -40], spawnRadius: 4, params: { maxSpeed: 1.8, cohW: 0.55, wanderW: 2.0 }, scale: [1.1, 1.4], response: 0.85 },
+  { species: 'butterflyfish', morph: 0, count: 7, anchor: [-53, -8, -47], spawnRadius: 4, params: { maxSpeed: 1.9, cohW: 0.3, wanderW: 3.0 }, scale: [0.9, 1.2], response: 0.8 },
+  // Zone G — the northern spires
+  { species: 'angelfish', morph: 0, count: 4, anchor: [12, 2, -72], spawnRadius: 4, params: { maxSpeed: 1.5, cohW: 0.5, wanderW: 1.6 }, scale: [1.1, 1.4], response: 0.7 },
+  { species: 'pufferfish', morph: 0, count: 3, anchor: [-14, -3, -66], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.2], response: 1.3 },
 ]
 
 interface Entry {

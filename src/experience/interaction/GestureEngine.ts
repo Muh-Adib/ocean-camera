@@ -172,8 +172,8 @@ export class GestureEngine {
     this.ray.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera)
     out.copy(this.ray.ray.origin).addScaledVector(this.ray.ray.direction, depth)
     // keep the field inside the living space
-    out.x = clamp(out.x, -36, 36)
+    out.x = clamp(out.x, -58, 58)
     out.y = clamp(out.y, -10, 13)
-    out.z = clamp(out.z, -44, 8)
+    out.z = clamp(out.z, -78, 12)
   }
 }

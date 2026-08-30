@@ -332,6 +332,20 @@ export class CoralSystem {
       { x: -46, z: -60, r: 11, n: 4, deep: true, weights: { fan: 2, table: 2, branch: 1 } },
       { x: 44, z: -58, r: 11, n: 4, deep: true, weights: { fan: 2, table: 1.5, brain: 1 } },
       { x: 2, z: -66, r: 13, n: 5, deep: true, weights: { fan: 2, table: 2, tube: 1 } },
+      // SE sand flats — sparse soft gardens between the bommies
+      { x: 38, z: -18, r: 8, n: 5, weights: { soft: 2, anemone: 1.5, tube: 1.5, brain: 1 } },
+      { x: 50, z: -30, r: 9, n: 4, weights: { tube: 2, soft: 1.5, fan: 1 } },
+      // northern spire foothills
+      { x: 12, z: -76, r: 9, n: 4, deep: true, weights: { fan: 2, tube: 1.5, table: 1 } },
+      { x: -20, z: -74, r: 9, n: 4, deep: true, weights: { fan: 2, table: 2 } },
+      // canyon rim colonies
+      { x: -48, z: -40, r: 8, n: 5, weights: { boulder: 2, tube: 1.5, brain: 1, fan: 1 } },
+      { x: -58, z: -52, r: 8, n: 4, deep: true, weights: { fan: 2, table: 1.5 } },
+      // kelp forest fringe
+      { x: -34, z: -56, r: 7, n: 4, weights: { boulder: 2, soft: 1.5, tube: 1 } },
+      // far horizons
+      { x: 56, z: -64, r: 11, n: 4, deep: true, weights: { fan: 2, table: 1.5 } },
+      { x: -30, z: -84, r: 12, n: 4, deep: true, weights: { fan: 2, branch: 1 } },
     ]
 
     const buckets: Record<string, THREE.BufferGeometry[]> = {}

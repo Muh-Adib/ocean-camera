@@ -104,6 +104,10 @@ export class Seaweed {
       [12, -12, 7], [-14, -14, 7], [30, -24, 8], [-30, -50, 8],
       [0, -52, 10], [-40, -22, 7], [38, -46, 8], [16, -60, 9],
       [-12, -58, 8], [42, -12, 6],
+      // extended meadows across the open ocean
+      [44, -22, 8], [52, -36, 8], [-52, -34, 8], [26, -70, 8],
+      [-26, -70, 8], [8, -80, 9], [-14, -82, 8], [58, -52, 7],
+      [-58, -64, 7], [-8, -70, 8], [36, -8, 6], [50, -14, 6],
     ]
 
     let i = 0
@@ -159,4 +163,7 @@ export class Seaweed {
   }
 
   get currentStrength() { return (this.mesh.material as THREE.ShaderMaterial).uniforms.uCurrent.value as number }
+
+  /** raw uniforms — shared with other flora (kelp) so the ocean sways as one */
+  get uniforms() { return (this.mesh.material as THREE.ShaderMaterial).uniforms as Record<string, { value: any }> }
 }

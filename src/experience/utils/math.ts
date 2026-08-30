@@ -8,9 +8,9 @@ export const SURFACE_Y = 20
 
 /** Soft living-space bounds for fish & particles */
 export const BOUNDS = {
-  minX: -42, maxX: 42,
+  minX: -68, maxX: 68,
   minY: -11.5, maxY: 14,
-  minZ: -62, maxZ: 6,
+  minZ: -92, maxZ: 10,
 }
 
 export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))

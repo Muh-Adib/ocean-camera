@@ -53,10 +53,10 @@ export class RockSystem {
       // zone C rocky reef (left) gets extra density, deep zone gets big distant formations
       let x: number, z: number
       const roll = rng()
-      if (large && roll < 0.5) { x = rand(-70, 70); z = rand(-78, -52) }        // distant silhouettes
-      else if (roll < 0.55) { x = rand(-34, -5); z = rand(-48, -8) }            // rocky reef
-      else if (roll < 0.8) { x = rand(-8, 36); z = rand(-52, -4) }              // scattered mid
-      else { x = rand(-50, 50); z = rand(-70, 4) }                              // anywhere
+      if (large && roll < 0.5) { x = rand(-90, 90); z = rand(-96, -56) }        // distant silhouettes
+      else if (roll < 0.55) { x = rand(-40, -5); z = rand(-52, -8) }            // rocky reef
+      else if (roll < 0.8) { x = rand(-8, 44); z = rand(-56, -4) }              // scattered mid
+      else { x = rand(-66, 66); z = rand(-88, 8) }                              // anywhere
       if (Math.abs(x) < 4 && z > -18) continue                                  // keep spawn view clear
 
       const y = this.heightAt(x, z) + scale * 0.32

@@ -132,9 +132,9 @@ export class ReefDecor {
     const p = new THREE.Vector3()
 
     const place = (geo: THREE.BufferGeometry, lift: number, tilt: number, scale: number) => {
-      // keep clear of the camera's start lagoon, scatter across the reef plain
+      // keep clear of the camera's start lagoon, scatter across the open plain
       const a = rng() * Math.PI * 2
-      const rad = 9 + rng() * 36
+      const rad = 9 + rng() * 58
       const x = Math.cos(a) * rad
       const z = -20 + Math.sin(a) * rad
       p.set(x, heightAt(x, z) + lift, z)

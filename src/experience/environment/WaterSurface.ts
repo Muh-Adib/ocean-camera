@@ -14,7 +14,7 @@ export class WaterSurface {
   private mat: THREE.ShaderMaterial
 
   constructor(scene: THREE.Scene) {
-    const geo = new THREE.PlaneGeometry(200, 160, 60, 48)
+    const geo = new THREE.PlaneGeometry(300, 240, 72, 58)
     geo.rotateX(Math.PI / 2)               // horizontal; normals face -Y (toward the diver)
 
     this.mat = new THREE.ShaderMaterial({

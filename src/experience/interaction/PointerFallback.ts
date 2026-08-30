@@ -189,9 +189,9 @@ export class PointerFallback {
   private toWorld(nx: number, ny: number, out: THREE.Vector3, depth = 13) {
     this.ray.setFromCamera(new THREE.Vector2(nx * 2 - 1, -(ny * 2 - 1)), this.camera)
     out.copy(this.ray.ray.origin).addScaledVector(this.ray.ray.direction, depth)
-    out.x = clamp(out.x, -36, 36)
+    out.x = clamp(out.x, -58, 58)
     out.y = clamp(out.y, -10, 13)
-    out.z = clamp(out.z, -44, 8)
+    out.z = clamp(out.z, -78, 12)
   }
 }
 

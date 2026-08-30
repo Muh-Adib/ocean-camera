@@ -17,6 +17,7 @@ import { CoralSystem } from './environment/CoralSystem'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
+import { Biomes } from './environment/Biomes'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
 import { GestureBurst } from './particles/GestureBurst'
@@ -80,6 +81,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
+  const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
   const obstacles = [...rocks.obstacles, ...coral.obstacles]
 
   // ---------------- particles ----------------
@@ -121,7 +123,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
 
   // ---------------- free swim (open-world exploration) ----------------
   const swim = new SwimController(sceneMgr.canvas, seabed.heightAt, {
-    x: 46, minZ: -62, maxZ: 14, maxY: 11, floorPad: 0.7,
+    x: 74, minZ: -96, maxZ: 18, maxY: 11.5, floorPad: 0.7,
   })
   swim.capturePose = () => cameraRig.snapshotSwim()
   swim.onChange = (on) => {
@@ -131,7 +133,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       cameraRig.enterSwim()
       ui.setStatus('SWIM MODE', 'hand')
       ui.hideGuide()
-      ui.toast('Free swim — drag to look, WASD to glide, Space / C to rise and sink.', 4600)
+      ui.toast(handTracker.isRunning
+        ? 'Free swim — your open palm steers: hand left / right to turn, fist to kick forward.'
+        : 'Free swim — drag to look, A / D to turn, W to glide, Space / C to rise and sink.', 5200)
       audio.gestureSpark(0.4)
     } else {
       cameraRig.exitSwim()
@@ -257,7 +261,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       () => creatures.triggerRay(),
       () => creatures.triggerTurtle(),
       () => fish.randomImpulse(),
-      () => bubbles.burstCluster(rand(-30, 30), rand(-50, -10), 16),
+      () => bubbles.burstCluster(rand(-55, 55), rand(-72, -8), 16),
       () => seaweed.setCurrent(rand(-1, 1), rand(-0.4, 0.4), rand(0.15, 0.55)),
       () => lighting.pulseEnergy(),
     ]
@@ -298,6 +302,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     if (handTracker.isRunning) {
       const sample = handTracker.detect(dt)
       gestureEngine.update(sample, dt)
+      // in swim mode the palm doubles as a steering joystick
+      if (swim.active) {
+        swim.setHandSteer(sample.x, sample.y, sample.present, sample.present && sample.openness < 0.28)
+      }
     }
     field.update(dt)
 
@@ -342,6 +350,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       sceneMgr.dispose()
       container.innerHTML = ''
       decor.dispose()
+      biomes.dispose()
       void particles
     },
   }

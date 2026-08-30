@@ -89,9 +89,9 @@ export class ParticleField {
     const seeds = new Float32Array(count * 3)
     const twinkle = new Float32Array(count)
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * 92
-      positions[i * 3 + 1] = (Math.random() - 0.5) * 30
-      positions[i * 3 + 2] = (Math.random() - 0.5) * 76
+      positions[i * 3] = (Math.random() - 0.5) * 150
+      positions[i * 3 + 1] = (Math.random() - 0.5) * 27
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 122
       seeds[i * 3] = Math.random()
       seeds[i * 3 + 1] = Math.random()
       seeds[i * 3 + 2] = Math.random()
@@ -100,7 +100,7 @@ export class ParticleField {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 3))
     geo.setAttribute('aTwinkle', new THREE.BufferAttribute(twinkle, 1))
-    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -15), 120)
+    geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, -18), 170)
 
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
