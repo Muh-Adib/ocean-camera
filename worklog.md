@@ -140,3 +140,25 @@ Stage Summary:
 - The swimmer can now look/turn left-right with keyboard AND by sweeping the tracked hand; fist = forward burst
 - The ocean grew ~2.4× wider with four biomes (coral gardens, kelp forest, boulder canyon, sand flats) plus northern spires — all landmarks procedural, ~300 fish, still one draw call per school and one for all static biome rockwork
 - Ready to commit + push
+
+---
+Task ID: 8
+Agent: main (Super Z)
+Task: Model realism overhaul (fish v4, turtle, manta, corals) + feeding interaction; push with fresh PAT
+
+Work Log:
+- FishGeometryFactory v4 — bodies rebuilt as organic swept hulls (34 rings × 44 radial, asymmetric cross-sections: dorsal ridge pinching, keel flattening, mid-body lateral compression; welded seam normals); replaced 2-triangle tail + flat fin strips with true ray systems: 13-ray caudal fan with fork curve + scalloped trailing edge, 9-ray dorsal / 7-ray anal grids following the hull with membrane sag + ray-column shading, petal-shaped pectoral/pelvic fans with cup curvature; 4-layer eyes (socket shadow, sclera, species iris, pupil, glint)
+- Textures 256→512px: two-layer scale plates, iridescent sheen bands, gill plates with ridged rays, bowed organic bands (angelfish/clownfish/moorish), clownfish band outlines, squirrelfish silver flank stripes, butterflyfish vermiculation rows, soft-edged spots; shared 512px scale BUMP map (neutral texel reserved for fins) wired via bumpScale 0.5; shader gains fin-tip flutter mask
+- Bug: resample clamp `segs - 1.0001` → NaN for 2-point fin stations (butterflyfish/pufferfish/squirrel/minnow) AND truncated profiles short of the nose tip on every species → fixed to `Math.min(t, segs - 1e-6)`; verified via bun scripts/nan-probe.ts → 0 NaN across all 9 species
+- SpecialCreatures v2 — turtle: scute canvas texture on carapace + marginal rim torus + plastron texture, neck, beak, eyes, paddle flippers (4 shaped, individual rotations), tail stub; manta: lathe fuselage core with thickness + cambered forward-swept wing sheets with leading-edge shading + cephalic fins + whip tail (merged, fixed missing color attribute crash)
+- CoralSystem detail — branch corals: 7-seg tapered cylinders with organic bend + larger polyp tips; brain: dual-octave maze ridges + micro relief (26×17); table: substructure skirt, 28-seg disc with dual-frequency rim waves + radial ridges; fan: 11×15 segments; tube: darkened hollow opening rims
+- Feeding system (new fish/Feeding.ts) — G key + pellets HUD button drops 11 crumb pellets ahead of the camera; pellets tumble, sink with drag + swirl, rest on seabed, expire ~15s; Boids gains pellet-seek steering (26u range, frenzy 1.55× speed, excited tail beats, first-fish claim → pellet shrinks away); FishManager/update plumbing + dispose
+- UI: feed icon button, "G · feed" hint chip, guide row; README: feeding feature + realism bullets + controls row
+- Verified: tsc clean; headless fresh boot → zero page errors, zero console errors; swim + turn + glide + feed exercised; screenshots curated (ocean-v4-reef-biomes / feeding / swim-kelp / pellets-seabed / approach)
+- Push: commit + push to github.com/Muh-Adib/ocean-camera with user-provided PAT (one-off URL, not persisted)
+
+Stage Summary:
+- Fish read as smooth continuous organisms: asymmetric hulls, ray-finned tails/fins, bump-mapped scales, iris eyes — no more simple/flat shapes
+- Turtle & manta no longer blob/flat-plane; corals gained organic bend, maze textures, hollow tubes, ridged tables
+- New interactive highlight: feeding frenzy (G) — pellets sink, schools break formation and race, bites claimed on touch
+- All previous behaviors (swim steering, biomes, camera paths) intact; zero runtime errors

@@ -15,6 +15,7 @@ export interface UICallbacks {
   onShowGuide: () => void
   onToggleSwim: () => void
   onSwimBoost: (on: boolean) => void
+  onFeed: () => void
 }
 
 export class UI {
@@ -34,6 +35,7 @@ export class UI {
   private soundBtn!: HTMLButtonElement
   private camBtn!: HTMLButtonElement
   private swimBtn!: HTMLButtonElement
+  private feedBtn!: HTMLButtonElement
   private paddleEl: HTMLElement | null = null
   private privacyNote!: HTMLElement
   cb: UICallbacks
@@ -205,9 +207,10 @@ export class UI {
     this.soundBtn = this.iconButton('sound', 'Sound', this.cb.onToggleSound, 'M4 9v6h4l5 4V5L8 9H4z M16.5 12a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z')
     this.camBtn = this.iconButton('cam', 'Camera hand tracking', this.cb.onToggleCamera, 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z M9 3l-1.5 2h-3A2.5 2.5 0 0 0 2 7.5v9A2.5 2.5 0 0 0 4.5 19h15a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 19.5 5h-3L15 3H9z')
     this.swimBtn = this.iconButton('swim', 'Free swim — explore the open ocean', this.cb.onToggleSwim, 'M2 12c4-5.2 10.5-5.2 14.5-.6L22 7.4v9.2l-5.5-4C12.5 17.2 6 17.2 2 12z')
+    this.feedBtn = this.iconButton('feed', 'Scatter food — feed the fish (G)', this.cb.onFeed, 'M12 3.2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M6.2 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M17.8 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M9 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M15 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z')
     const helpBtn = this.iconButton('help', 'Gesture guide', this.cb.onShowGuide, 'M11 18h2v-2h-2v2z M12 6a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 .9-.4 1.4-1.2 2-.9.7-1.8 1.4-1.8 3h2c0-.7.4-1.1 1.1-1.7.9-.7 1.9-1.5 1.9-3.3A4 4 0 0 0 12 6z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z')
 
-    controls.append(this.soundBtn, this.camBtn, this.swimBtn, helpBtn)
+    controls.append(this.soundBtn, this.camBtn, this.swimBtn, this.feedBtn, helpBtn)
     this.hudEl.appendChild(controls)
 
     // touch forward paddle — hold to glide ahead while free-swimming
@@ -243,7 +246,8 @@ export class UI {
       <span class="hint">push / pull</span>
       <span class="hint">open palm · attract</span>
       <span class="hint">fist · caution</span>
-      <span class="hint">F · free swim</span>`
+      <span class="hint">F · free swim</span>
+      <span class="hint">G · feed</span>`
     this.hudEl.appendChild(this.hintsEl)
 
     this.root.appendChild(this.hudEl)
@@ -416,6 +420,7 @@ export class UI {
           <li><b>Fast / slow</b><span>stronger / softer reaction</span></li>
           <li><b>Free swim</b><span>press <b>F</b> — drag to look, <b>A</b>/<b>D</b> turn, <b>W</b>/<b>S</b> glide, <b>Q</b>/<b>E</b> strafe, <b>Space</b>/<b>C</b> rise &amp; sink</span></li>
           <li><b>Swim by hand</b><span>while swimming, your open palm steers — hand left / right to turn, <b>fist</b> kicks forward</span></li>
+          <li><b>Feed the fish</b><span>press <b>G</b> — pellets sink slowly and nearby schools race in to feast</span></li>
         </ul>
         <p class="guide-keys">No camera? <b>Move / drag</b> the pointer, <b>tap</b> to attract, <b>hold</b> to push, <b>Space</b> attract, <b>X</b> push. On touch, hold <b>▲ GLIDE</b> to swim ahead.</p>
         <button class="btn-primary" id="guide-close">BACK TO THE OCEAN</button>

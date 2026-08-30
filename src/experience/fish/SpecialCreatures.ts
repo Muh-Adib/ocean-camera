@@ -2,42 +2,168 @@
 // SpecialCreatures — rare cinematic visitors: a gliding manta ray,
 // a calm sea turtle and distant predator silhouettes. They appear
 // on randomised schedules to make the ocean feel alive & endless.
+//
+// v2 realism pass: textured scute shell + real proportions turtle,
+// 3D manta with a thick fuselage core, cambered wings, cephalic
+// fins and a whip tail (was a flat plane).
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { rand, randInt } from '../utils/math'
 
+// ---------- shared canvas textures ----------
+let scuteTex: THREE.CanvasTexture | null = null
+function getScuteTexture(): THREE.CanvasTexture {
+  if (scuteTex) return scuteTex
+  const S = 256
+  const c = document.createElement('canvas')
+  c.width = c.height = S
+  const g = c.getContext('2d')!
+  // olive-brown gradient base
+  const grad = g.createLinearGradient(0, 0, 0, S)
+  grad.addColorStop(0, '#77854f')
+  grad.addColorStop(0.55, '#5d6e44')
+  grad.addColorStop(1, '#4a5c3c')
+  g.fillStyle = grad
+  g.fillRect(0, 0, S, S)
+  // mottling
+  const rng = (() => { let s = 7; return () => (s = (s * 16807) % 2147483647) / 2147483647 })()
+  for (let i = 0; i < 260; i++) {
+    const x = rng() * S, y = rng() * S, r = 2 + rng() * 7
+    g.fillStyle = rng() > 0.5 ? 'rgba(30,42,24,0.10)' : 'rgba(190,200,140,0.08)'
+    g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill()
+  }
+  // scute plates: offset rounded-rect grid with dark seams + light bevel
+  const rows = 6, cols = 7
+  const cw = S / cols, ch = S / rows
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      const x = (col + (r % 2) * 0.5) * cw
+      const y = r * ch
+      const w = cw * 0.86, h = ch * 0.82
+      g.strokeStyle = 'rgba(18,26,14,0.55)'
+      g.lineWidth = 3
+      g.strokeRect(x - w / 2, y - h / 2, w, h)
+      g.strokeStyle = 'rgba(210,220,160,0.16)'
+      g.lineWidth = 1.6
+      g.strokeRect(x - w / 2 + 2.5, y - h / 2 + 2.5, w - 5, h - 5)
+    }
+  }
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  scuteTex = tex
+  return tex
+}
+
+let plastronTex: THREE.CanvasTexture | null = null
+function getPlastronTexture(): THREE.CanvasTexture {
+  if (plastronTex) return plastronTex
+  const S = 128
+  const c = document.createElement('canvas')
+  c.width = c.height = S
+  const g = c.getContext('2d')!
+  g.fillStyle = '#cdb98c'
+  g.fillRect(0, 0, S, S)
+  const rows = 4, cols = 5
+  const cw = S / cols, ch = S / rows
+  for (let r = 0; r < rows; r++) {
+    for (let col = 0; col < cols; col++) {
+      g.strokeStyle = 'rgba(90,70,44,0.5)'
+      g.lineWidth = 2.4
+      g.strokeRect((col + 0.5) * cw, (r + 0.5) * ch, cw * 0.8, ch * 0.72)
+    }
+  }
+  const tex = new THREE.CanvasTexture(c)
+  tex.colorSpace = THREE.SRGBColorSpace
+  plastronTex = tex
+  return tex
+}
+
 // ---------- manta ray ----------
 function buildRay(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
-  const geo = new THREE.PlaneGeometry(8, 4.2, 14, 8)
-  geo.rotateX(-Math.PI / 2)
-  const p = geo.attributes.position as THREE.BufferAttribute
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), z = p.getZ(i)
-    const wingT = Math.min(1, Math.abs(x) / 4)
-    // wing taper toward tips + slight forward sweep
-    let nz = z * (1 - wingT * 0.55) + wingT * 0.7
-    // body bulge
-    const bodyT = 1 - Math.min(1, Math.abs(x) / 1.1)
-    p.setZ(i, nz)
-    p.setY(i, bodyT * 0.34)
-    nz = nz
+  const parts: THREE.BufferGeometry[] = []
+
+  // ---- fuselage core: lathe body flattened, nose +z ----
+  const core = new THREE.LatheGeometry(
+    [0.015, 0.2, 0.34, 0.38, 0.32, 0.18, 0.05].map((r, i, a) => new THREE.Vector2(r, -0.5 + i / (a.length - 1))),
+    14,
+  )
+  core.rotateX(Math.PI / 2)
+  core.scale(1.0, 0.55, 1.55)
+  core.translate(0, 0, 0.35)
+  core.setAttribute('color', new THREE.BufferAttribute(new Float32Array(core.attributes.position.count * 3).fill(0.85), 3))
+  core.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(core.attributes.position.count * 2).fill(0.5), 2))
+  parts.push(core)
+
+  // ---- wings: cambered sheets tapering to tips, forward-swept ----
+  const buildWing = (side: 1 | -1) => {
+    const SEG_S = 12, SEG_C = 7
+    const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+    for (let i = 0; i <= SEG_S; i++) {
+      const s = i / SEG_S                       // 0 root → 1 tip
+      const x = (0.32 + s * 3.85) * side
+      const chord = 1.9 - s * 1.05              // chord taper
+      const zC = 0.35 + s * 0.62                // forward sweep
+      for (let j = 0; j <= SEG_C; j++) {
+        const t = j / SEG_C                     // 0 leading → 1 trailing
+        const z = zC + (t - 0.42) * chord
+        const y = Math.sin(t * Math.PI) * 0.16 * (1 - s * 0.6)   // chordwise camber
+          + s * s * 0.1                         // slight dihedral
+        pos.push(x, y, z)
+        const shadeC = 0.62 + (1 - t) * 0.3     // leading edge darker
+        cols.push(shadeC, shadeC * 1.02, shadeC * 1.05)
+        uvs.push(s, t)
+      }
+    }
+    for (let i = 0; i < SEG_S; i++) {
+      for (let j = 0; j < SEG_C; j++) {
+        const a0 = i * (SEG_C + 1) + j
+        const b0 = a0 + 1
+        const a1 = (i + 1) * (SEG_C + 1) + j
+        const b1 = a1 + 1
+        idx.push(a0, b0, a1, b0, b1, a1)
+      }
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+    g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+    g.setIndex(idx)
+    g.computeVertexNormals()
+    return g
   }
-  // wing thickness illusion via vertex colors (darker center line)
-  const colors = new Float32Array(p.count * 3)
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i)
-    const bodyT = 1 - Math.min(1, Math.abs(x) / 2.2)
-    const c = 0.55 + bodyT * 0.45
-    colors[i * 3] = c; colors[i * 3 + 1] = c; colors[i * 3 + 2] = c
+  parts.push(buildWing(1), buildWing(-1))
+
+  // ---- cephalic fins (the two horns that funnel plankton) ----
+  for (const side of [1, -1] as const) {
+    const horn = new THREE.ConeGeometry(0.09, 0.55, 6, 2)
+    horn.rotateX(-Math.PI / 2.4)
+    horn.rotateZ(side * 0.55)
+    horn.translate(side * 0.42, 0.12, 1.45)
+    const col = new Float32Array(horn.attributes.position.count * 3).fill(0.72)
+    horn.setAttribute('color', new THREE.BufferAttribute(col, 3))
+    const uvArr = new Float32Array(horn.attributes.position.count * 2).fill(0.5)
+    horn.setAttribute('uv', new THREE.BufferAttribute(uvArr, 2))
+    parts.push(horn)
   }
-  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
-  geo.computeVertexNormals()
+
+  // ---- whip tail, thin and long, angled slightly up ----
+  const tail = new THREE.CylinderGeometry(0.015, 0.035, 1.7, 5, 2)
+  tail.rotateX(-Math.PI / 2 - 0.14)
+  tail.translate(0, 0.08, -1.45)
+  const tailCol = new Float32Array(tail.attributes.position.count * 3).fill(0.6)
+  tail.setAttribute('color', new THREE.BufferAttribute(tailCol, 3))
+  tail.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(tail.attributes.position.count * 2).fill(0.5), 2))
+  parts.push(tail)
+
+  const merged = mergeGeometries(parts, false)!
+
+  if (!merged) throw new Error('[ocean] manta merge failed')
 
   const mat = new THREE.MeshStandardMaterial({
     color: '#31465c', vertexColors: true,
-    roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide, transparent: true, opacity: 0,
+    roughness: 0.62, metalness: 0.14, side: THREE.DoubleSide, transparent: true, opacity: 0,
   })
   // wing flap
   mat.onBeforeCompile = (shader) => {
@@ -48,13 +174,13 @@ function buildRay(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
       #include <begin_vertex>
       {
-        float w = abs(position.x) / 4.0;
-        transformed.y += sin(uTime * 1.15 - w * 2.2) * w * 0.9;
+        float w = abs(position.x) / 4.2;
+        transformed.y += sin(uTime * 1.15 - w * 2.2) * w * 0.95;
       }
     `)
   }
-  mat.customProgramCacheKey = () => 'ray-flap'
-  const mesh = new THREE.Mesh(geo, mat)
+  mat.customProgramCacheKey = () => 'ray-flap-v2'
+  const mesh = new THREE.Mesh(merged, mat)
   mesh.frustumCulled = false
   return { mesh, mat }
 }
@@ -63,40 +189,71 @@ function buildRay(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
 function buildTurtle(): { group: THREE.Group; flippers: THREE.Mesh[]; mats: THREE.MeshStandardMaterial[] } {
   const group = new THREE.Group()
   const mats: THREE.MeshStandardMaterial[] = []
-  const mkMat = (c: string, r = 0.75) => {
-    const m = new THREE.MeshStandardMaterial({ color: c, roughness: r, transparent: true, opacity: 0 })
+  const mkMat = (c: string, r = 0.75, map?: THREE.Texture) => {
+    const m = new THREE.MeshStandardMaterial({ color: c, roughness: r, map, transparent: true, opacity: 0 })
     mats.push(m)
     return m
   }
-  const shellMat = mkMat('#4f6b46')
-  const skinMat = mkMat('#7a8a5a')
+  const shellMat = mkMat('#a8b488', 0.66, getScuteTexture())
+  const plastronMat = mkMat('#e8dcc0', 0.8, getPlastronTexture())
+  const skinMat = mkMat('#7a8a5a', 0.82)
 
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 10), shellMat)
-  shell.scale.set(1.15, 0.55, 1.4)
+  // carapace — textured dome
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 13), shellMat)
+  shell.scale.set(1.15, 0.5, 1.42)
   group.add(shell)
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.92, 12, 8), mkMat('#c8b482'))
-  belly.scale.set(1.05, 0.3, 1.28)
-  belly.position.y = -0.18
+  // marginal rim around the shell edge
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.06, 0.13, 8, 26), shellMat)
+  rim.rotation.x = Math.PI / 2
+  rim.scale.set(1.1, 1.36, 1)
+  rim.position.y = -0.02
+  group.add(rim)
+  // plastron (belly plate)
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.94, 14, 8), plastronMat)
+  belly.scale.set(1.0, 0.26, 1.24)
+  belly.position.y = -0.16
   group.add(belly)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 10, 8), skinMat)
-  head.scale.set(0.85, 0.8, 1.15)
-  head.position.set(0, 0.12, 1.55)
-  group.add(head)
 
+  // neck + head + beak
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 0.55, 8), skinMat)
+  neck.position.set(0, 0.08, 1.42)
+  neck.rotation.x = 1.15
+  group.add(neck)
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 9), skinMat)
+  head.scale.set(0.88, 0.76, 1.18)
+  head.position.set(0, 0.3, 1.68)
+  group.add(head)
+  const beak = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), skinMat)
+  beak.scale.set(1.15, 0.55, 1.05)
+  beak.position.set(0, 0.27, 1.95)
+  group.add(beak)
+  for (const side of [1, -1] as const) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), mkMat('#14100c', 0.4))
+    eye.position.set(side * 0.19, 0.4, 1.78)
+    group.add(eye)
+  }
+
+  // paddle flippers — front pair long & swept, rear pair shorter
   const flippers: THREE.Mesh[] = []
-  const flipGeo = new THREE.SphereGeometry(0.5, 8, 6)
-  const mkFlip = (x: number, z: number, s: number, rotZ: number) => {
-    const f = new THREE.Mesh(flipGeo, skinMat)
-    f.scale.set(s * 0.22, s * 0.1, s)
+  const mkFlip = (x: number, z: number, s: number, rotZ: number, rotY: number) => {
+    const f = new THREE.Mesh(new THREE.SphereGeometry(0.5, 10, 7), skinMat)
+    f.scale.set(s * 0.16, s * 0.075, s * 1.15)
     f.position.set(x, -0.05, z)
     f.rotation.z = rotZ
+    f.rotation.y = rotY
     flippers.push(f)
     group.add(f)
   }
-  mkFlip(1.05, 0.85, 1.5, -0.9)
-  mkFlip(-1.05, 0.85, 1.5, 0.9)
-  mkFlip(0.95, -0.9, 1.0, -1.1)
-  mkFlip(-0.95, -0.9, 1.0, 1.1)
+  mkFlip(1.1, 0.82, 1.55, -0.95, 0.35)
+  mkFlip(-1.1, 0.82, 1.55, 0.95, -0.35)
+  mkFlip(0.92, -0.95, 1.0, -1.15, -0.3)
+  mkFlip(-0.92, -0.95, 1.0, 1.15, 0.3)
+  // tiny tail stub
+  const tailStub = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.26, 6), skinMat)
+  tailStub.rotation.x = Math.PI / 2 + 0.5
+  tailStub.position.set(0, -0.02, -1.42)
+  group.add(tailStub)
+
   group.scale.setScalar(1.6)
   return { group, flippers, mats }
 }

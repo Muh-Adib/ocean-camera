@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import { BOUNDS, clamp, rand } from '../utils/math'
 import type { Obstacle } from '../environment/Rocks'
+import type { Pellet } from './Feeding'
 
 export interface FieldCtx {
   active: boolean
@@ -102,7 +103,7 @@ export class School {
     }
   }
 
-  update(dt: number, time: number, field: FieldCtx, obstacles: Obstacle[], camera: THREE.Vector3, speedScale = 1) {
+  update(dt: number, time: number, field: FieldCtx, obstacles: Obstacle[], camera: THREE.Vector3, speedScale = 1, pellets?: Pellet[]) {
     const p = this.params
     const fish = this.fish
     const n = fish.length
@@ -114,6 +115,32 @@ export class School {
       f.acc.set(0, 0, 0)
       _sep.set(0, 0, 0); _ali.set(0, 0, 0); _coh.set(0, 0, 0)
       let sepCount = 0, neiCount = 0
+      let frenzy = 1
+
+      // ---- feeding frenzy: race to the nearest unclaimed pellet ----
+      if (pellets && pellets.length) {
+        let best: Pellet | null = null
+        let bd = 26 * 26
+        for (let k = 0; k < pellets.length; k++) {
+          const pel = pellets[k]
+          if (!pel.active || pel.claimed) continue
+          const d2 = f.pos.distanceToSquared(pel.pos)
+          if (d2 < bd) { bd = d2; best = pel }
+        }
+        if (best) {
+          _tmp.subVectors(best.pos, f.pos)
+          const d = Math.sqrt(bd)
+          if (d > 0.5) {
+            _tmp.multiplyScalar(1 / d)
+            _tmp.setLength(maxSpeed * 1.5).sub(f.vel)
+            this.limit(_tmp, p.maxForce * 1.9)
+            f.acc.addScaledVector(_tmp, 2.1)
+          }
+          frenzy = 1.55
+          f.speedNorm = Math.min(1, f.speedNorm + dt * 2.4)   // excited tail beats
+          if (d < 0.62 + f.scale * 0.16) best.claimed = true   //gulp
+        }
+      }
 
       // ---- flocking within school ----
       for (let j = 0; j < n; j++) {
@@ -235,7 +262,7 @@ export class School {
       f.vel.addScaledVector(f.acc, dt)
       f.vel.multiplyScalar(1 - Math.min(1, dt * (field.mode === 'pull' ? 1.2 : 0.35)))
       const sp = f.vel.length()
-      const maxSp = maxSpeed * scatterBoost * (1 + field.strength * 0.35)
+      const maxSp = maxSpeed * scatterBoost * frenzy * (1 + field.strength * 0.35)
       if (sp > maxSp) f.vel.multiplyScalar(maxSp / sp)
       if (sp < maxSpeed * 0.22 && sp > 1e-5) f.vel.multiplyScalar((maxSpeed * 0.22) / sp)
       f.pos.addScaledVector(f.vel, dt)

@@ -23,6 +23,7 @@ import { BubbleSystem } from './particles/Bubbles'
 import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
 import { SpecialCreatures } from './fish/SpecialCreatures'
+import { Feeding } from './fish/Feeding'
 import { InteractionField } from './interaction/InteractionField'
 import { HandTracker } from './interaction/HandTracker'
 import { GestureEngine } from './interaction/GestureEngine'
@@ -94,6 +95,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   // ---------------- fish ----------------
   const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
   const creatures = new SpecialCreatures(sceneMgr.scene)
+  const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
   // ---------------- audio / tracking ----------------
   const audio = new AudioManager()
@@ -174,6 +176,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     onShowGuide: () => ui.showGuide(),
     onToggleSwim: () => swim.setActive(!swim.active),
     onSwimBoost: (on) => { swim.forwardBoost = on ? 1 : 0 },
+    onFeed: () => doFeed(),
   })
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
@@ -205,6 +208,25 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     ui.setStatus('MOUSE MODE', 'mouse')
     ui.showCameraHelp(reason, () => { void startCamera() })
   }
+
+  // ---------------- feeding ----------------
+  let firstFeed = true
+  function doFeed() {
+    if (!entered) return
+    const dir = new THREE.Vector3()
+    sceneMgr.camera.getWorldDirection(dir)
+    const origin = cameraRig.group.position.clone().addScaledVector(dir, 4.5)
+    origin.y = Math.min(origin.y + 1.4, 10.2)
+    feeding.drop(origin, 11)
+    audio.gestureSpark(0.3)
+    ui.toast(firstFeed ? 'Snacks away — watch the schools race in to eat!' : 'Snacks away.', firstFeed ? 3600 : 1800)
+    firstFeed = false
+  }
+  const onFeedKey = (e: KeyboardEvent) => {
+    if (e.code === 'KeyG' && !e.repeat) doFeed()
+  }
+  window.addEventListener('keydown', onFeedKey)
+  disposers.push(() => window.removeEventListener('keydown', onFeedKey))
 
   // ---------------- enter flow ----------------
   function enterExperience(withCamera: boolean) {
@@ -325,8 +347,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     swU.uCurrentDir.value.y += (seaweedCurrent.z * 0.35 + field.ambientCurrent.y * 0.3 - swU.uCurrentDir.value.y) * blend
     swU.uCurrent.value += ((0.25 + field.strength * 0.5) - swU.uCurrent.value) * blend
 
-    fish.update(dt, elapsed, field.snapshot())
+    fish.update(dt, elapsed, field.snapshot(), feeding.pellets)
     creatures.update(dt, elapsed)
+    feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
     bursts.update(dt)
     dynamicEvents(dt)
@@ -351,6 +374,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       container.innerHTML = ''
       decor.dispose()
       biomes.dispose()
+      feeding.dispose()
       void particles
     },
   }

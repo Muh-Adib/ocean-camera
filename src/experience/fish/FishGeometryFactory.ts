@@ -1,13 +1,21 @@
 // ---------------------------------------------------------------
-// FishGeometryFactory — procedural, stylized-realistic fish built
-// from smooth lathe bodies + parametric fins. Nose points +Z, tail -Z.
+// FishGeometryFactory — procedural, realism-first fish.
+// Nose points +Z, tail -Z. Everything is generated math, no assets.
 //
-// v2 realism pass:
-//   • 256px canvas textures: procedural scale rows, gill plates,
-//     lateral lines, mouth shading, true counter-shading
-//   • Catmull-Rom resampled body profiles → organic silhouettes
-//   • 3-layer eyes (sclera + pupil + glint) and pelvic fins
-//   • wet-look material (low roughness) + underwater fresnel rim
+// v4 realism pass ("halus & asli"):
+//   • organic swept hull: 34 rings × 44 radial vertices with
+//     asymmetric cross-sections — dorsal ridge line, rounded belly,
+//     lateral compression mid-body (real fish are NOT revolved
+//     ellipses). Smooth welded normals, no seam.
+//   • fins are built like real fins: radiating fin rays with
+//     membrane sag, scalloped trailing edges and ray streak
+//     colouring (tail fan 13 rays, dorsal/anal ray grids).
+//   • 4-layer eyes: socket shadow, sclera, species iris, pupil,
+//     glint.
+//   • 512px canvas textures: two-scale-layer skin, iridescent
+//     sheen, curved species bands, gill plates, lateral lines,
+//     counter-shading. Plus a shared scale BUMP map so scales
+//     catch the light as micro-relief.
 // Patterns are painted on canvas textures; fins/eyes sample a
 // reserved white texel and get their colour from vertex colors.
 // Every geometry carries: position, normal, uv, color and is
@@ -54,25 +62,47 @@ function shade(hex: string, f: number): string {
 }
 
 // ---------------------------------------------------------------
-// smooth body profiles — Catmull-Rom through the control radii
+// Catmull-Rom helpers
 // ---------------------------------------------------------------
-function resampleProfile(profile: number[], n = 18): number[] {
+function cr1(p0: number, p1: number, p2: number, p3: number, f: number): number {
+  return p1 + 0.5 * f * (p2 - p0
+    + f * (2 * p0 - 5 * p1 + 4 * p2 - p3
+    + f * (3 * (p1 - p2) + p3 - p0)))
+}
+
+function resampleProfile(profile: number[], n: number): number[] {
   const pts = profile
   const segs = pts.length - 1
   const out: number[] = []
   for (let i = 0; i < n; i++) {
     const t = (i / (n - 1)) * segs
-    const s = Math.min(segs - 1.0001, t)
+    const s = Math.min(t, segs - 1e-6)          // always inside the last segment
     const k = Math.floor(s)
     const f = s - k
-    const p0 = pts[Math.max(0, k - 1)]
-    const p1 = pts[k]
-    const p2 = pts[Math.min(segs, k + 1)]
-    const p3 = pts[Math.min(segs, k + 2)]
-    const v = p1 + 0.5 * f * (p2 - p0
-      + f * (2 * p0 - 5 * p1 + 4 * p2 - p3
-      + f * (3 * (p1 - p2) + p3 - p0)))
+    const v = cr1(
+      pts[Math.max(0, k - 1)], pts[k],
+      pts[Math.min(segs, k + 1)], pts[Math.min(segs, k + 2)], f,
+    )
     out.push(Math.max(0.004, v))
+  }
+  return out
+}
+
+/** resample a polyline of [a, b] stations to n smooth stations */
+function resampleStations(pts: [number, number][], n: number): [number, number][] {
+  const as = pts.map((p) => p[0])
+  const bs = pts.map((p) => p[1])
+  const segs = pts.length - 1
+  const out: [number, number][] = []
+  for (let i = 0; i < n; i++) {
+    const t = (i / (n - 1)) * segs
+    const s = Math.min(t, segs - 1e-6)          // always inside the last segment
+    const k = Math.floor(s)
+    const f = s - k
+    out.push([
+      cr1(as[Math.max(0, k - 1)], as[k], as[Math.min(segs, k + 1)], as[Math.min(segs, k + 2)], f),
+      cr1(bs[Math.max(0, k - 1)], bs[k], bs[Math.min(segs, k + 1)], bs[Math.min(segs, k + 2)], f),
+    ])
   }
   return out
 }
@@ -81,13 +111,16 @@ function resampleProfile(profile: number[], n = 18): number[] {
 interface TexSpec {
   back: string
   belly: string
-  bands?: { v: number; w: number; color: string; soft?: boolean }[]
+  bands?: { v: number; w: number; color: string; soft?: boolean; bow?: number }[]
   spots?: { color: string; n: number; r: number }
   grayscale?: boolean
+  flankLines?: { color: string; n: number; alpha: number }   // stripes running head→tail
+  bandOutline?: boolean                                      // dark band margins (clownfish)
+  vermiculation?: boolean                                    // fine wiggly rows (butterflyfish)
 }
 
 function fishTexture(spec: TexSpec): THREE.CanvasTexture {
-  const S = 256
+  const S = 512
   const c = document.createElement('canvas')
   c.width = c.height = S
   const g = c.getContext('2d')!
@@ -105,28 +138,40 @@ function fishTexture(spec: TexSpec): THREE.CanvasTexture {
   g.fillStyle = grad
   g.fillRect(0, 0, S, S)
 
-  // ---- procedural scales: subtle overlapping crescents ----
-  // rows run along the body (canvas y), columns wrap the flank (canvas x)
-  const rng = mulberry32(11)
-  const rows = 30, cols = 34
-  const cw = S / cols, ch = S / rows
-  for (let r = 0; r <= rows; r++) {
-    const off = (r % 2) * 0.5
-    for (let col = 0; col <= cols; col++) {
-      const x = (col + off) * cw
-      const y = r * ch
-      const rad = cw * (0.68 + rng() * 0.16)
-      g.strokeStyle = 'rgba(8,14,20,0.13)'
-      g.lineWidth = 1.4
-      g.beginPath()
-      g.arc(x, y - rad * 0.3, rad, Math.PI * 0.12, Math.PI * 0.88)
-      g.stroke()
-      g.strokeStyle = 'rgba(255,255,255,0.085)'
-      g.lineWidth = 1.1
-      g.beginPath()
-      g.arc(x, y - rad * 0.38, rad * 0.95, Math.PI * 0.18, Math.PI * 0.82)
-      g.stroke()
+  // ---- procedural scales, two layers: coarse plates + fine overlay ----
+  const drawScales = (rows: number, cols: number, dark: string, light: string, lw: number) => {
+    const rng = mulberry32(11)
+    const cw = S / cols, ch = S / rows
+    for (let r = 0; r <= rows; r++) {
+      const off = (r % 2) * 0.5
+      for (let col = 0; col <= cols; col++) {
+        const x = (col + off) * cw
+        const y = r * ch
+        const rad = cw * (0.68 + rng() * 0.16)
+        g.strokeStyle = dark
+        g.lineWidth = lw
+        g.beginPath()
+        g.arc(x, y - rad * 0.3, rad, Math.PI * 0.12, Math.PI * 0.88)
+        g.stroke()
+        g.strokeStyle = light
+        g.lineWidth = lw * 0.8
+        g.beginPath()
+        g.arc(x, y - rad * 0.38, rad * 0.95, Math.PI * 0.18, Math.PI * 0.82)
+        g.stroke()
+      }
     }
+  }
+  drawScales(44, 50, 'rgba(8,14,20,0.15)', 'rgba(255,255,255,0.09)', 1.6)
+  drawScales(86, 96, 'rgba(8,14,20,0.06)', 'rgba(255,255,255,0.045)', 0.9)
+
+  // ---- iridescent sheen: soft diagonal light bands ----
+  for (const [cx, w, a] of [[0.3, 0.16, 0.05], [0.72, 0.1, 0.04], [0.52, 0.3, 0.025]] as const) {
+    const sh = g.createLinearGradient((cx - w) * S, 0, (cx + w) * S, S * 0.5)
+    sh.addColorStop(0, 'rgba(255,255,255,0)')
+    sh.addColorStop(0.5, `rgba(255,255,255,${a})`)
+    sh.addColorStop(1, 'rgba(255,255,255,0)')
+    g.fillStyle = sh
+    g.fillRect(0, 0, S, S)
   }
 
   // ---- gill plates (operculum) on each flank ----
@@ -134,38 +179,81 @@ function fishTexture(spec: TexSpec): THREE.CanvasTexture {
     const x = gx * S
     const yTop = 0.16 * S, yBot = 0.43 * S
     const dir = gx < 0.5 ? 1 : -1
-    g.strokeStyle = 'rgba(10,16,22,0.34)'
-    g.lineWidth = 3.4
+    g.strokeStyle = 'rgba(10,16,22,0.36)'
+    g.lineWidth = 5.5
+    g.lineCap = 'round'
     g.beginPath()
-    g.moveTo(x - 6 * dir, yTop)
-    g.quadraticCurveTo(x + 10 * dir, (yTop + yBot) / 2, x - 5 * dir, yBot)
+    g.moveTo(x - 9 * dir, yTop)
+    g.quadraticCurveTo(x + 15 * dir, (yTop + yBot) / 2, x - 7 * dir, yBot)
     g.stroke()
-    g.strokeStyle = 'rgba(10,16,22,0.15)'
-    g.lineWidth = 2
+    g.strokeStyle = 'rgba(10,16,22,0.16)'
+    g.lineWidth = 3
     g.beginPath()
-    g.moveTo(x - 17 * dir, yTop + 7)
-    g.quadraticCurveTo(x - 2 * dir, (yTop + yBot) / 2, x - 14 * dir, yBot - 4)
+    g.moveTo(x - 26 * dir, yTop + 10)
+    g.quadraticCurveTo(x - 3 * dir, (yTop + yBot) / 2, x - 21 * dir, yBot - 6)
     g.stroke()
+    // faint ridged rays behind the main plate
+    g.strokeStyle = 'rgba(255,255,255,0.07)'
+    g.lineWidth = 2.2
+    for (let k = 1; k <= 3; k++) {
+      g.beginPath()
+      g.moveTo(x + k * 9 * dir, yTop + 8 + k * 4)
+      g.quadraticCurveTo(x + (k * 9 - 12) * dir, (yTop + yBot) / 2, x + k * 8 * dir, yBot - 4 - k * 3)
+      g.stroke()
+    }
   }
 
-  // ---- lateral lines (faint dashed) ----
-  g.setLineDash([8, 7])
-  g.strokeStyle = 'rgba(238,248,252,0.1)'
-  g.lineWidth = 2
+  // ---- lateral lines (faint dashed sensory canals) ----
+  g.setLineDash([13, 10])
+  g.strokeStyle = 'rgba(238,248,252,0.11)'
+  g.lineWidth = 2.6
   for (const lx of [0.25, 0.75]) {
     g.beginPath()
     g.moveTo(lx * S, 0.3 * S)
-    g.lineTo(lx * S, 0.88 * S)
+    g.lineTo(lx * S, 0.9 * S)
     g.stroke()
   }
   g.setLineDash([])
 
   // ---- mouth shading on the snout ----
-  g.fillStyle = 'rgba(8,10,14,0.32)'
+  g.fillStyle = 'rgba(8,10,14,0.34)'
   for (const mx of [0.25, 0.75]) {
     g.beginPath()
-    g.ellipse(mx * S, 0.016 * S, 8, 3.6, 0, 0, Math.PI * 2)
+    g.ellipse(mx * S, 0.012 * S, 14, 6, 0, 0, Math.PI * 2)
     g.fill()
+  }
+
+  // ---- flank stripes running head→tail (squirrelfish etc.) ----
+  if (spec.flankLines) {
+    const fl = spec.flankLines
+    g.strokeStyle = fl.color
+    g.globalAlpha = fl.alpha
+    g.lineWidth = 4.5
+    g.lineCap = 'round'
+    for (const fx of [0.11, 0.185, 0.26, 0.315, 0.685, 0.74, 0.815, 0.89].slice(0, fl.n * 2)) {
+      g.beginPath()
+      g.moveTo(fx * S, 0.06 * S)
+      g.quadraticCurveTo(fx * S + (fx < 0.5 ? 8 : -8), S / 2, fx * S, 0.97 * S)
+      g.stroke()
+    }
+    g.globalAlpha = 1
+  }
+
+  // ---- fine vermiculation rows (butterflyfish) ----
+  if (spec.vermiculation) {
+    g.strokeStyle = 'rgba(30,34,40,0.24)'
+    g.lineWidth = 2
+    const rng = mulberry32(31)
+    for (let row = 0; row < 16; row++) {
+      const y = (0.1 + row * 0.055) * S
+      g.beginPath()
+      for (let x = 0; x <= S; x += 14) {
+        const yy = y + Math.sin(x * 0.09 + row * 2.4 + rng() * 0.4) * 5
+        if (x === 0) g.moveTo(x, yy)
+        else g.lineTo(x, yy)
+      }
+      g.stroke()
+    }
   }
 
   if (spec.spots) {
@@ -174,16 +262,24 @@ function fishTexture(spec: TexSpec): THREE.CanvasTexture {
     for (let i = 0; i < spec.spots.n; i++) {
       const x = 30 + srng() * (S - 60)
       const y = 22 + srng() * (S - 44)
+      const r = spec.spots.r * (0.6 + srng() * 0.8) * 2
+      // soft-edged spot
+      const sg = g.createRadialGradient(x, y, r * 0.2, x, y, r)
+      sg.addColorStop(0, spec.spots.color)
+      sg.addColorStop(0.75, spec.spots.color)
+      sg.addColorStop(1, 'rgba(0,0,0,0)')
+      g.fillStyle = sg
       g.beginPath()
-      g.arc(x, y, spec.spots.r * (0.6 + srng() * 0.8), 0, Math.PI * 2)
+      g.arc(x, y, r, 0, Math.PI * 2)
       g.fill()
     }
   }
 
-  // bands: v (0 tail → 1 nose) → canvas y = (1 - v) * S
+  // bands: v (0 tail → 1 nose) → canvas y = (1 - v) * S; optional bow + dark margins
   if (spec.bands) {
     for (const b of spec.bands) {
       const y = (1 - b.v) * S
+      const bow = b.bow ?? 0
       g.fillStyle = b.color
       if (b.soft) {
         const bg = g.createLinearGradient(0, y - b.w * S, 0, y + b.w * S)
@@ -192,8 +288,27 @@ function fishTexture(spec: TexSpec): THREE.CanvasTexture {
         bg.addColorStop(1, 'rgba(0,0,0,0)')
         g.fillStyle = bg
         g.fillRect(0, y - b.w * S, S, b.w * S * 2)
+      } else if (bow !== 0) {
+        // organically bowed band drawn as a fat stroked curve
+        g.strokeStyle = b.color
+        g.lineWidth = b.w * S
+        g.lineCap = 'butt'
+        g.beginPath()
+        g.moveTo(0, y)
+        g.quadraticCurveTo(S / 2, y + bow * S, S, y)
+        g.stroke()
       } else {
         g.fillRect(0, y - b.w * S * 0.5, S, b.w * S)
+      }
+      if (spec.bandOutline && !b.soft) {
+        g.strokeStyle = 'rgba(24,24,30,0.55)'
+        g.lineWidth = 3.4
+        for (const ey of [y - b.w * S * 0.5, y + b.w * S * 0.5]) {
+          g.beginPath()
+          if (bow !== 0) { g.moveTo(0, ey); g.quadraticCurveTo(S / 2, ey + bow * S, S, ey) }
+          else { g.moveTo(0, ey); g.lineTo(S, ey) }
+          g.stroke()
+        }
       }
     }
   }
@@ -209,12 +324,50 @@ function fishTexture(spec: TexSpec): THREE.CanvasTexture {
 
   // reserved white texel for fins & eyes (bottom-right corner)
   g.fillStyle = '#ffffff'
-  g.fillRect(S - 12, S - 12, 12, 12)
+  g.fillRect(S - 16, S - 16, 16, 16)
 
   const tex = new THREE.CanvasTexture(c)
   tex.colorSpace = THREE.SRGBColorSpace
   tex.anisotropy = 4
   return tex
+}
+
+/** shared scale bump map — scales read as micro-relief under the key light */
+let fishBump: THREE.CanvasTexture | null = null
+function fishBumpTexture(): THREE.CanvasTexture {
+  if (fishBump) return fishBump
+  const S = 512
+  const c = document.createElement('canvas')
+  c.width = c.height = S
+  const g = c.getContext('2d')!
+  g.fillStyle = '#808080'
+  g.fillRect(0, 0, S, S)
+  const rng = mulberry32(23)
+  const rows = 44, cols = 50
+  const cw = S / cols, ch = S / rows
+  for (let r = 0; r <= rows; r++) {
+    const off = (r % 2) * 0.5
+    for (let col = 0; col <= cols; col++) {
+      const x = (col + off) * cw
+      const y = r * ch
+      const rad = cw * (0.7 + rng() * 0.14)
+      g.strokeStyle = 'rgba(255,255,255,0.5)'     // raised scale edge
+      g.lineWidth = 2.4
+      g.beginPath()
+      g.arc(x, y - rad * 0.3, rad, Math.PI * 0.15, Math.PI * 0.85)
+      g.stroke()
+      g.strokeStyle = 'rgba(30,30,30,0.5)'        // shadowed groove below
+      g.lineWidth = 2
+      g.beginPath()
+      g.arc(x, y - rad * 0.12, rad * 0.98, Math.PI * 0.18, Math.PI * 0.82)
+      g.stroke()
+    }
+  }
+  // neutral texel for fins & eyes (they sample WHITE_UV)
+  g.fillStyle = '#808080'
+  g.fillRect(S - 20, S - 20, 20, 20)
+  fishBump = new THREE.CanvasTexture(c)
+  return fishBump
 }
 
 // ------------------------- parts builders -------------------------
@@ -223,125 +376,302 @@ interface BodySpec {
   w: number; h: number; len: number
 }
 
-/** body hull + exact surface-radius lookup so every limb sits ON the skin */
-function makeBody(spec: BodySpec): { geo: THREE.BufferGeometry; radiusAt: (z: number) => number } {
-  const smooth = resampleProfile(spec.profile, 18)
-  const pts = smooth.map((r, i) => new THREE.Vector2(Math.max(0.004, r), -0.5 + i / (smooth.length - 1)))
-  const geo = new THREE.LatheGeometry(pts, 24)
-  geo.rotateX(Math.PI / 2)                      // profile y → world z, nose +z
-  geo.scale(spec.w, spec.h, spec.len)
-  // white base color so texture shows unmodified
-  const count = geo.attributes.position.count
-  const arr = new Float32Array(count * 3).fill(1)
-  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3))
-
-  // smooth radius (in profile units) at world z — the single source of truth
-  // for placing fins, eyes and the tail flush against the hull
-  const radiusAt = (z: number) => {
-    const t = clamp((z / spec.len) * 0.5 + 0.5, 0, 1)
-    const f = t * (smooth.length - 1)
-    const i = Math.floor(f)
-    const fr = f - i
-    const r0 = smooth[i]
-    const r1 = smooth[Math.min(i + 1, smooth.length - 1)]
-    return r0 + (r1 - r0) * fr
-  }
-  return { geo, radiusAt }
+export interface Hull {
+  geo: THREE.BufferGeometry
+  radiusAt: (z: number) => number     // vertical radius (profile units)
+  widthAt: (z: number) => number      // lateral half-width (profile units, pre-w scale)
 }
 
-/** tail fan in the YZ plane — root is buried inside the hull so no seam shows */
-function makeTail(len: number, spread: number, fork: number, color: THREE.Color): THREE.BufferGeometry {
+/**
+ * Organic swept hull — the heart of the v4 realism pass.
+ * Cross-sections are asymmetric: a pinched dorsal ridge line, a
+ * rounded slightly-flattened belly and lateral compression that
+ * peaks mid-body (like laterally-compressed reef fish). 34 rings ×
+ * 44 radial verts, indexed with a welded seam → perfectly smooth
+ * normals everywhere.
+ */
+function makeHull(spec: BodySpec): Hull {
+  const RINGS = 34, RAD = 44
+  const smooth = resampleProfile(spec.profile, RINGS)
+  const L = spec.len, H = spec.h, W = spec.w
+  const bell = (t: number, c: number, w: number) => Math.exp(-((t - c) * (t - c)) / (2 * w * w))
+
+  const pos: number[] = [], uv: number[] = [], idx: number[] = []
+
+  for (let i = 0; i < RINGS; i++) {
+    const t = i / (RINGS - 1)
+    const r = smooth[i]
+    const z = (-0.5 + t) * L
+    const comp = 0.22 * bell(t, 0.55, 0.27)        // lateral compression mid-body
+    const pin = 0.4 * bell(t, 0.52, 0.3)           // dorsal ridge narrowing
+    const belly = 0.16 * bell(t, 0.34, 0.26)       // keel flattening
+    for (let j = 0; j <= RAD; j++) {
+      const u = j / RAD
+      const a = u * Math.PI * 2                    // 0 = belly seam, 0.5 = dorsal line
+      const cy = -Math.cos(a)                      // -1 belly → +1 back
+      const sx = Math.sin(a)
+      let x = sx * r * (1 - comp)
+      let y = cy * r
+      if (cy > 0) {
+        x *= 1 - pin * Math.pow(cy, 1.6)           // ridge
+      } else {
+        const k = -cy
+        y *= 1 - belly * Math.pow(k, 1.3)
+        x *= 1 - belly * 0.22 * k * k
+      }
+      pos.push(x * W, y * H, z)
+      uv.push(u, t)
+    }
+  }
+  for (let i = 0; i < RINGS - 1; i++) {
+    for (let j = 0; j < RAD; j++) {
+      const a0 = i * (RAD + 1) + j
+      const b0 = a0 + 1
+      const a1 = (i + 1) * (RAD + 1) + j
+      const b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+
+  // weld the duplicated seam vertices' normals (belly line)
+  const n = geo.attributes.normal as THREE.BufferAttribute
+  for (let i = 0; i < RINGS; i++) {
+    const a = i * (RAD + 1), b = a + RAD
+    const nx = n.getX(a) + n.getX(b)
+    const ny = n.getY(a) + n.getY(b)
+    const nz = n.getZ(a) + n.getZ(b)
+    const l = Math.hypot(nx, ny, nz) || 1
+    n.setXYZ(a, nx / l, ny / l, nz / l)
+    n.setXYZ(b, nx / l, ny / l, nz / l)
+  }
+
+  // white base color so the texture shows unmodified
+  const count = geo.attributes.position.count
+  geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3))
+
+  // smooth lookups along the body (world z → profile space)
+  const stat = (z: number) => clamp((z / L) * 0.5 + 0.5, 0, 1)
+  const radiusAt = (z: number) => {
+    const f = stat(z) * (smooth.length - 1)
+    const i = Math.floor(f)
+    const fr = f - i
+    return smooth[i] + (smooth[Math.min(i + 1, smooth.length - 1)] - smooth[i]) * fr
+  }
+  const widthAt = (z: number) => {
+    const t = stat(z)
+    const comp = 0.22 * bell(t, 0.55, 0.27)
+    return radiusAt(z) * (1 - comp)
+  }
+  return { geo, radiusAt, widthAt }
+}
+
+/**
+ * Caudal fin as a ray fan — 13 radiating fin rays with a forked
+ * profile, scalloped trailing edge, darker ray columns and a
+ * membrane that fades toward translucent white at the edge.
+ */
+function makeTailFan(len: number, spread: number, fork: number, color: THREE.Color): THREE.BufferGeometry {
+  const RAYS = 13
+  const ROWS = [0, 0.45, 0.78, 1]
+  const rng = mulberry32(5)
+  const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.45)
+  const rayC = color.clone().multiplyScalar(0.66)
+
+  const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+  for (let k = 0; k < RAYS; k++) {
+    const phi = (k / (RAYS - 1)) * 2 - 1                       // +1 top lobe → -1 bottom
+    let tipLen = len * (1 - fork * Math.pow(1 - Math.abs(phi), 1.6))
+    tipLen *= 1 + (rng() - 0.5) * 0.05                          // organic irregularity
+    const tipY = phi * spread * (1 - fork * 0.12 * (1 - Math.abs(phi)))
+    const tipZ = -tipLen + Math.sin(phi * Math.PI * 2.4) * len * 0.035   // scalloped edge
+    for (let r = 0; r < ROWS.length; r++) {
+      const f = ROWS[r]
+      const y = tipY * f
+      const z = 0.05 + (tipZ - 0.05) * f                     // base → scalloped tip
+      pos.push(0, y, z)
+      const cRow = color.clone().lerp(tipC, f * 0.6)
+      const c = f > 0.7 ? cRow : cRow.clone().lerp(rayC, 0.45)
+      cols.push(c.r, c.g, c.b)
+      uvs.push(WHITE_UV, WHITE_UV)
+    }
+  }
+  for (let k = 0; k < RAYS - 1; k++) {
+    for (let r = 0; r < ROWS.length - 1; r++) {
+      const a0 = k * ROWS.length + r
+      const b0 = a0 + 1
+      const a1 = (k + 1) * ROWS.length + r
+      const b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
   const g = new THREE.BufferGeometry()
-  const v = new Float32Array([
-    0, 0, 0.06,       0, spread, -len,        0, fork * spread * 0.45, -len * 1.04,
-    0, 0, 0.06,       0, fork * spread * 0.45, -len * 1.04,   0, -spread, -len,
-  ])
-  g.setAttribute('position', new THREE.BufferAttribute(v, 3))
-  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(12).fill(WHITE_UV), 2))
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
   g.computeVertexNormals()
-  paintColors(g, color)
   return g
 }
 
 /**
- * dorsal / anal fin strip whose base follows the body surface.
- * dir +1 = along the back, -1 = along the belly. Base vertices are
- * sunk 12% into the hull; tips fade toward translucent white.
+ * Dorsal / anal fin built from a resampled base curve: 9 fin rays
+ * follow the hull surface, membrane sags between rows, trailing
+ * edge is scalloped, ray columns darker, tips fade to membrane.
+ * dir +1 = along the back, -1 = along the belly.
  */
-function makeFinStrip(
+function makeRayFin(
   base: [number, number][],
   color: THREE.Color,
   radiusAt: (z: number) => number,
-  w: number, h: number,
+  h: number,
   dir: 1 | -1,
+  rays = 9,
 ): THREE.BufferGeometry {
-  const verts: number[] = []
-  const cols: number[] = []
-  const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.42)  // membrane tip
-  const edge = color.clone().lerp(tipC, 0.2)
-  for (let i = 0; i < base.length - 1; i++) {
-    const [z0, h0] = base[i]
-    const [z1, h1] = base[i + 1]
-    const b0 = dir * radiusAt(z0) * h * 0.88
-    const b1 = dir * radiusAt(z1) * h * 0.88
-    const t0 = b0 + dir * h0
-    const t1 = b1 + dir * h1
-    // two triangles per segment
-    verts.push(0, b0, z0, 0, t0, z0, 0, t1, z1)
-    verts.push(0, b0, z0, 0, t1, z1, 0, b1, z1)
-    // per-vertex colours: base = skin colour, tip = membrane fade
-    const cs = [color, tipC, edge, color, edge, color]
-    for (const c of cs) cols.push(c.r, c.g, c.b)
+  const st = resampleStations(base, 12)
+  const ROWS = [0, 0.5, 1]
+  const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.42)
+  const rayC = color.clone().multiplyScalar(0.7)
+
+  const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+  for (let k = 0; k < rays; k++) {
+    const s = k / (rays - 1)
+    const si = s * (st.length - 1)
+    const i0 = Math.floor(si)
+    const fr = si - i0
+    const i1 = Math.min(st.length - 1, i0 + 1)
+    const z = st[i0][0] + (st[i1][0] - st[i0][0]) * fr
+    const hgt = st[i0][1] + (st[i1][1] - st[i0][1]) * fr
+    const baseY = dir * radiusAt(z) * h * 0.86
+    const wobble = 1 + Math.sin(k * 2.1 + z * 6) * 0.06          // scalloped edge
+    for (let r = 0; r < ROWS.length; r++) {
+      const f = ROWS[r]
+      const sag = dir * -hgt * 0.05 * Math.sin(f * Math.PI)      // membrane sag
+      const y = baseY + dir * hgt * f * wobble + sag
+      pos.push(0, y, z)
+      const cRow = color.clone().lerp(tipC, f * 0.62)
+      const c = f > 0.55 ? cRow : cRow.clone().lerp(rayC, 0.5)
+      cols.push(c.r, c.g, c.b)
+      uvs.push(WHITE_UV, WHITE_UV)
+    }
+  }
+  for (let k = 0; k < rays - 1; k++) {
+    for (let r = 0; r < ROWS.length - 1; r++) {
+      const a0 = k * ROWS.length + r
+      const b0 = a0 + 1
+      const a1 = (k + 1) * ROWS.length + r
+      const b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
   }
   const g = new THREE.BufferGeometry()
-  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
-  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3))
-  g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((verts.length / 3) * 2).fill(WHITE_UV), 2))
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
+  g.computeVertexNormals()
+  return g
+}
+
+/**
+ * Pectoral / pelvic fin as a petal-shaped ray fan with a gentle
+ * cup (curled backward), darker ray columns, translucent tip.
+ * Grows from the origin along +x, then placed with rotations.
+ */
+function makePectoralFan(size: number, color: THREE.Color, rays = 6): THREE.BufferGeometry {
+  const ROWS = [0, 0.4, 0.75, 1]
+  const L = size * 1.3
+  const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.5)
+  const rayC = color.clone().multiplyScalar(0.72)
+
+  const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+  for (let k = 0; k < rays; k++) {
+    const psi = ((k / (rays - 1)) * 2 - 1) * 0.55              // fan spread
+    const lenK = L * (1 - Math.abs(psi) * 0.4)
+    for (let r = 0; r < ROWS.length; r++) {
+      const f = ROWS[r]
+      const rr = lenK * f
+      const x = Math.cos(psi) * rr
+      const y = Math.sin(psi) * rr * 1.05 - f * f * L * 0.28   // sweeps down/back
+      const z = -f * f * lenK * 0.3 * (1 - Math.abs(psi) * 0.5) // cup backward
+      pos.push(x, y, z)
+      const cRow = color.clone().lerp(tipC, f * 0.62)
+      const c = f > 0.55 ? cRow : cRow.clone().lerp(rayC, 0.5)
+      cols.push(c.r, c.g, c.b)
+      uvs.push(WHITE_UV, WHITE_UV)
+    }
+  }
+  for (let k = 0; k < rays - 1; k++) {
+    for (let r = 0; r < ROWS.length - 1; r++) {
+      const a0 = k * ROWS.length + r
+      const b0 = a0 + 1
+      const a1 = (k + 1) * ROWS.length + r
+      const b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
   g.computeVertexNormals()
   return g
 }
 
 /** pectoral fin rooted inside the flank at the hull surface */
-function makePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
-  const g = new THREE.PlaneGeometry(size, size * 0.5)
-  setUniformUV(g)
+function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
+  const g = makePectoralFan(size, color, 6)
   g.rotateY(side * -0.9)
   g.rotateZ(side * 0.5)
   g.translate(side * rAt * 0.74, y, z)
-  paintColors(g, color)
   return g
 }
 
 /** paired pelvic fins on the belly, rooted at the hull surface */
-function makePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
-  const g = new THREE.PlaneGeometry(size * 0.8, size * 0.5)
-  setUniformUV(g)
-  g.rotateX(-1.05)                 // sweep downward
-  g.rotateY(side * -0.5)           // angle out & back
+function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
+  const g = makePectoralFan(size, color, 5)
+  g.rotateY(side * -0.5)
+  g.rotateX(-0.85)                 // sweep downward
   g.translate(side * rAt * 0.4, y, z)
-  paintColors(g, color)
   return g
 }
 
-/** 3-layer eye: sclera + pupil + specular glint (reads as alive) */
-function makeEyeParts(side: 1 | -1, x: number, y: number, z: number, r: number): THREE.BufferGeometry[] {
+/** 4-layer eye: socket shadow + sclera + iris + pupil + glint */
+function makeEyeParts(side: 1 | -1, x: number, y: number, z: number, r: number, iris: string): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = []
 
-  const sclera = new THREE.SphereGeometry(r, 10, 8)
+  const socket = new THREE.SphereGeometry(r * 1.14, 10, 8)
+  setUniformUV(socket)
+  socket.translate(side * (x - r * 0.16), y, z)
+  paintColors(socket, new THREE.Color('#1a2027'))
+  out.push(socket)
+
+  const sclera = new THREE.SphereGeometry(r * 0.94, 12, 9)
   setUniformUV(sclera)
   sclera.translate(side * x, y, z)
   paintColors(sclera, new THREE.Color('#dfe9ec'))
   out.push(sclera)
 
-  const pupil = new THREE.SphereGeometry(r * 0.56, 8, 6)
+  const irisG = new THREE.SphereGeometry(r * 0.62, 10, 8)
+  setUniformUV(irisG)
+  irisG.translate(side * (x + r * 0.42), y + r * 0.04, z + r * 0.12)
+  paintColors(irisG, new THREE.Color(iris))
+  out.push(irisG)
+
+  const pupil = new THREE.SphereGeometry(r * 0.4, 8, 6)
   setUniformUV(pupil)
-  pupil.translate(side * (x + r * 0.5), y + r * 0.06, z + r * 0.14)
+  pupil.translate(side * (x + r * 0.58), y + r * 0.05, z + r * 0.2)
   paintColors(pupil, new THREE.Color('#05070a'))
   out.push(pupil)
 
-  const glint = new THREE.SphereGeometry(r * 0.2, 6, 4)
+  const glint = new THREE.SphereGeometry(r * 0.16, 6, 4)
   setUniformUV(glint)
-  glint.translate(side * (x + r * 0.74), y + r * 0.46, z + r * 0.52)
+  glint.translate(side * (x + r * 0.66), y + r * 0.42, z + r * 0.44)
   paintColors(glint, new THREE.Color('#ffffff'))
   out.push(glint)
 
@@ -356,76 +686,78 @@ interface SpeciesDef {
   anal?: [number, number][]
   pectoral: number
   eyeR: number
+  eyeIris: string
   finColor: string
   tailColor: string
   tex: TexSpec
   spikes?: boolean
   spikeLen?: number
-  stripes?: boolean
 }
 
 export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   tropical: {
-    body: { profile: [0.02, 0.09, 0.17, 0.21, 0.16, 0.07, 0.012], w: 0.47, h: 1.05, len: 0.55 },
+    body: { profile: [0.02, 0.075, 0.14, 0.19, 0.21, 0.17, 0.105, 0.045, 0.012], w: 0.47, h: 1.05, len: 0.55 },
     tail: [0.2, 0.15, 0.7],
     dorsal: [[0.14, 0.05], [0.0, 0.11], [-0.16, 0.04]],
-    pectoral: 0.15, eyeR: 0.045,
+    pectoral: 0.15, eyeR: 0.045, eyeIris: '#2a2014',
     finColor: '#ffffff', tailColor: '#ffffff',
     tex: { back: '#8f8f8f', belly: '#c8c8c8', grayscale: true, bands: [{ v: 0.5, w: 0.1, color: 'rgba(255,255,255,0.55)', soft: true }] },
   },
   angelfish: {
-    body: { profile: [0.015, 0.1, 0.2, 0.23, 0.18, 0.06, 0.015], w: 0.28, h: 1.75, len: 0.5 },
+    body: { profile: [0.015, 0.07, 0.14, 0.2, 0.23, 0.19, 0.115, 0.05, 0.015], w: 0.28, h: 1.75, len: 0.5 },
     tail: [0.3, 0.2, 0.25],
     dorsal: [[0.18, 0.1], [0.0, 0.4], [-0.3, 0.34], [-0.58, 0.02]],
     anal: [[0.05, 0.1], [-0.1, 0.36], [-0.42, 0.02]],
-    pectoral: 0.13, eyeR: 0.045,
+    pectoral: 0.13, eyeR: 0.045, eyeIris: '#22323c',
     finColor: '#31414f', tailColor: '#3d5566',
     tex: {
       back: '#e9e2c8', belly: '#f4efd9',
       bands: [
-        { v: 0.24, w: 0.09, color: '#242f38' },
-        { v: 0.58, w: 0.08, color: '#242f38' },
-        { v: 0.9, w: 0.1, color: '#1c262e' },
+        { v: 0.24, w: 0.09, color: '#242f38', bow: 0.05 },
+        { v: 0.58, w: 0.08, color: '#242f38', bow: -0.04 },
+        { v: 0.9, w: 0.1, color: '#1c262e', bow: 0.03 },
       ],
     },
   },
   butterflyfish: {
-    body: { profile: [0.012, 0.08, 0.16, 0.19, 0.15, 0.055, 0.035], w: 0.3, h: 1.35, len: 0.48 },
+    body: { profile: [0.012, 0.06, 0.12, 0.165, 0.19, 0.155, 0.095, 0.05, 0.03], w: 0.3, h: 1.35, len: 0.48 },
     tail: [0.18, 0.13, 0.15],
     dorsal: [[0.16, 0.06], [-0.05, 0.16], [-0.3, 0.1]],
     anal: [[0.0, 0.1], [-0.25, 0.08]],
-    pectoral: 0.12, eyeR: 0.042,
+    pectoral: 0.12, eyeR: 0.042, eyeIris: '#6a4a1a',
     finColor: '#e8c860', tailColor: '#e8c860',
     tex: {
       back: '#f0cf4e', belly: '#f7e89a',
+      vermiculation: true,
       bands: [
-        { v: 0.88, w: 0.11, color: '#1c2026' },          // eye-band
+        { v: 0.88, w: 0.11, color: '#1c2026', bow: 0.06 },          // eye-band
         { v: 0.2, w: 0.07, color: 'rgba(20,24,28,0.85)', soft: true },  // false-eye spot zone
       ],
-      spots: { color: '#1c2026', n: 3, r: 5 },
+      spots: { color: '#1c2026', n: 3, r: 4 },
     },
   },
   clownfish: {
-    body: { profile: [0.02, 0.1, 0.18, 0.2, 0.15, 0.07, 0.02], w: 0.5, h: 1.1, len: 0.42 },
+    body: { profile: [0.02, 0.08, 0.145, 0.185, 0.2, 0.16, 0.1, 0.045, 0.02], w: 0.5, h: 1.1, len: 0.42 },
     tail: [0.16, 0.13, 0.1],
     dorsal: [[0.14, 0.05], [-0.02, 0.1], [-0.18, 0.04]],
-    pectoral: 0.13, eyeR: 0.048,
+    pectoral: 0.13, eyeR: 0.048, eyeIris: '#b07a2a',
     finColor: '#ff8c2e', tailColor: '#ff9a44',
     tex: {
       back: '#e8621a', belly: '#ff9440',
+      bandOutline: true,
       bands: [
-        { v: 0.16, w: 0.1, color: '#f4f8ff' },
-        { v: 0.52, w: 0.12, color: '#f4f8ff' },
-        { v: 0.86, w: 0.09, color: '#f4f8ff' },
+        { v: 0.16, w: 0.1, color: '#f4f8ff', bow: 0.035 },
+        { v: 0.52, w: 0.12, color: '#f4f8ff', bow: -0.03 },
+        { v: 0.86, w: 0.09, color: '#f4f8ff', bow: 0.025 },
       ],
     },
   },
   tang: {
-    body: { profile: [0.02, 0.11, 0.2, 0.22, 0.17, 0.07, 0.015], w: 0.32, h: 1.5, len: 0.75 },
+    body: { profile: [0.02, 0.085, 0.16, 0.2, 0.22, 0.18, 0.11, 0.05, 0.015], w: 0.32, h: 1.5, len: 0.75 },
     tail: [0.22, 0.18, 0.35],
     dorsal: [[0.24, 0.07], [0.0, 0.12], [-0.26, 0.08], [-0.4, 0.04]],
     anal: [[0.05, 0.08], [-0.2, 0.1], [-0.38, 0.03]],
-    pectoral: 0.16, eyeR: 0.042,
+    pectoral: 0.16, eyeR: 0.042, eyeIris: '#1a2a38',
     finColor: '#f2d24a', tailColor: '#f2d24a',
     tex: {
       back: '#2438c8', belly: '#3a55dd',
@@ -433,15 +765,15 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   pufferfish: {
-    body: { profile: [0.035, 0.22, 0.3, 0.32, 0.27, 0.13, 0.045], w: 1.0, h: 1.05, len: 0.48 },
+    body: { profile: [0.035, 0.15, 0.24, 0.29, 0.32, 0.28, 0.19, 0.09, 0.045], w: 1.0, h: 1.05, len: 0.48 },
     tail: [0.12, 0.1, 0.05],
     dorsal: [[0.02, 0.08], [-0.14, 0.06]],
     anal: [[0.0, 0.07], [-0.14, 0.05]],
-    pectoral: 0.12, eyeR: 0.065,
+    pectoral: 0.12, eyeR: 0.065, eyeIris: '#4a5a68',
     finColor: '#c8b482', tailColor: '#c8b482',
     tex: {
       back: '#c9b384', belly: '#e8dcc0',
-      spots: { color: '#4a3f2a', n: 14, r: 4 },
+      spots: { color: '#4a3f2a', n: 16, r: 3.4 },
     },
     spikes: true,
     spikeLen: 0.09,
@@ -449,41 +781,42 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   moorish: {
     // Moorish idol — tall compressed body, trailing dorsal filament,
     // bold black bands with a yellow crown
-    body: { profile: [0.012, 0.09, 0.18, 0.2, 0.14, 0.05, 0.018], w: 0.26, h: 1.6, len: 0.52 },
+    body: { profile: [0.012, 0.06, 0.125, 0.17, 0.2, 0.16, 0.1, 0.045, 0.018], w: 0.26, h: 1.6, len: 0.52 },
     tail: [0.24, 0.16, 0.3],
     dorsal: [[0.2, 0.12], [0.05, 0.48], [-0.2, 0.42], [-0.4, 0.3], [-0.58, 0.03]],
     anal: [[0.05, 0.1], [-0.1, 0.3], [-0.32, 0.08]],
-    pectoral: 0.12, eyeR: 0.042,
+    pectoral: 0.12, eyeR: 0.042, eyeIris: '#241a12',
     finColor: '#2a2e34', tailColor: '#2a2e34',
     tex: {
       back: '#f2f0e6', belly: '#ffffff',
       bands: [
-        { v: 0.9, w: 0.13, color: '#e8b83a' },   // yellow crown over the snout
-        { v: 0.62, w: 0.15, color: '#20242a' },  // broad black band
-        { v: 0.3, w: 0.14, color: '#20242a' },   // second black band
+        { v: 0.9, w: 0.13, color: '#e8b83a', bow: 0.04 },   // yellow crown over the snout
+        { v: 0.62, w: 0.15, color: '#20242a', bow: -0.03 }, // broad black band
+        { v: 0.3, w: 0.14, color: '#20242a', bow: 0.03 },   // second black band
       ],
     },
   },
   squirrel: {
-    // squirrelfish — reddish with a silver lateral stripe, huge nocturnal eye
-    body: { profile: [0.02, 0.1, 0.19, 0.21, 0.16, 0.07, 0.02], w: 0.44, h: 1.2, len: 0.52 },
+    // squirrelfish — reddish with silver horizontal stripes, huge nocturnal eye
+    body: { profile: [0.02, 0.08, 0.15, 0.19, 0.21, 0.17, 0.1, 0.045, 0.02], w: 0.44, h: 1.2, len: 0.52 },
     tail: [0.2, 0.14, 0.25],
     dorsal: [[0.16, 0.1], [0.04, 0.14], [-0.12, 0.09], [-0.26, 0.04]],
     anal: [[0.0, 0.07], [-0.2, 0.08]],
-    pectoral: 0.14, eyeR: 0.068,
+    pectoral: 0.14, eyeR: 0.068, eyeIris: '#2a2f36',
     finColor: '#e06850', tailColor: '#e06850',
     tex: {
       back: '#c44242', belly: '#efa090',
-      bands: [{ v: 0.5, w: 0.09, color: 'rgba(245,240,230,0.8)', soft: true }],
+      flankLines: { color: '#f5efe6', n: 4, alpha: 0.4 },
+      bands: [{ v: 0.5, w: 0.06, color: 'rgba(245,240,230,0.55)', soft: true }],
     },
   },
   minnow: {
     // silver baitfish — slim mirror-flanked dart that forms dense bait balls
-    body: { profile: [0.012, 0.06, 0.11, 0.13, 0.1, 0.045, 0.01], w: 0.42, h: 0.95, len: 0.5 },
+    body: { profile: [0.012, 0.05, 0.09, 0.115, 0.13, 0.11, 0.07, 0.03, 0.01], w: 0.42, h: 0.95, len: 0.5 },
     tail: [0.22, 0.15, 0.8],                    // deeply forked
     dorsal: [[0.06, 0.07], [-0.06, 0.09], [-0.18, 0.04]],
     anal: [[-0.02, 0.05], [-0.16, 0.06]],
-    pectoral: 0.1, eyeR: 0.05,
+    pectoral: 0.1, eyeR: 0.05, eyeIris: '#39424c',
     finColor: '#9fb4be', tailColor: '#b8ccd4',
     tex: {
       back: '#46586a', belly: '#e6edf2',
@@ -516,7 +849,7 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const def = SPECIES_DEFS[key]
   const parts: THREE.BufferGeometry[] = []
 
-  const { geo: body, radiusAt } = makeBody(def.body)
+  const { geo: body, radiusAt, widthAt } = makeHull(def.body)
   parts.push(body)
 
   const finC = new THREE.Color(def.finColor)
@@ -524,34 +857,33 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const bbs = def.body
 
   // tail — root pushed into the caudal peduncle so the joint never shows
-  const tail = makeTail(def.tail[0], def.tail[1], def.tail[2], tailC)
+  const tail = makeTailFan(def.tail[0], def.tail[1], def.tail[2], tailC)
   tail.translate(0, 0, -bbs.len * 0.86)
   parts.push(tail)
 
-  // dorsal + anal fins — bases follow the hull surface exactly
-  parts.push(makeFinStrip(def.dorsal, finC, radiusAt, bbs.w, bbs.h, 1))
-  if (def.anal) parts.push(makeFinStrip(def.anal, finC, radiusAt, bbs.w, bbs.h, -1))
+  // dorsal + anal fins — ray grids seated on the hull surface
+  parts.push(makeRayFin(def.dorsal, finC, radiusAt, bbs.h, 1, 9))
+  if (def.anal) parts.push(makeRayFin(def.anal, finC, radiusAt, bbs.h, -1, 7))
 
   // pectorals just behind the gill plate, rooted in the flank
   const pecC = finC.clone().lerp(new THREE.Color('#ffffff'), 0.25)
   const pecZ = bbs.len * 0.3
-  const pecR = radiusAt(pecZ)
-  parts.push(makePectoral(1, def.pectoral, pecC, pecR * bbs.w, -pecR * bbs.h * 0.12, pecZ))
-  parts.push(makePectoral(-1, def.pectoral, pecC, pecR * bbs.w, -pecR * bbs.h * 0.12, pecZ))
+  const pecW = widthAt(pecZ) * bbs.w
+  parts.push(placePectoral(1, def.pectoral, pecC, pecW, -radiusAt(pecZ) * bbs.h * 0.12, pecZ))
+  parts.push(placePectoral(-1, def.pectoral, pecC, pecW, -radiusAt(pecZ) * bbs.h * 0.12, pecZ))
 
   // pelvics on the belly line, slightly behind and below the pectorals
   const pelZ = bbs.len * 0.08
-  const pelR = radiusAt(pelZ)
-  parts.push(makePelvic(1, def.pectoral * 0.9, finC, pelR * bbs.w, -pelR * bbs.h * 0.62, pelZ))
-  parts.push(makePelvic(-1, def.pectoral * 0.9, finC, pelR * bbs.w, -pelR * bbs.h * 0.62, pelZ))
+  parts.push(placePelvic(1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
+  parts.push(placePelvic(-1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
 
-  // 3-layer eyes seated exactly on the head surface
+  // 4-layer eyes seated exactly on the head surface
   const eyeZ = bbs.len * 0.62
-  const eyeR = radiusAt(eyeZ) * bbs.w
-  parts.push(...makeEyeParts(1, eyeR + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR))
-  parts.push(...makeEyeParts(-1, eyeR + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR))
+  const eyeX = widthAt(eyeZ) * bbs.w
+  parts.push(...makeEyeParts(1, eyeX + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR, def.eyeIris))
+  parts.push(...makeEyeParts(-1, eyeX + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR, def.eyeIris))
 
-  // pufferfish spikes
+  // pufferfish spikes seated at the hull surface
   if (def.spikes) {
     const rng = mulberry32(7)
     const spikeLen = def.spikeLen ?? 0.07
@@ -578,13 +910,15 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   return { geometry: merged, texture: fishTexture(def.tex) }
 }
 
-/** shared material factory per species (swim-bend + underwater fresnel rim) */
+/** shared material factory per species (scale bump, swim-bend, fin flutter, fresnel rim) */
 export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     map: texture,
+    bumpMap: fishBumpTexture(),
+    bumpScale: 0.5,
     vertexColors: true,
-    roughness: 0.34,      // wet, slick skin
-    metalness: 0.24,      // faint iridescent sheen under the key light
+    roughness: 0.32,      // wet, slick skin
+    metalness: 0.26,      // faint iridescent sheen under the key light
     side: THREE.DoubleSide,
   })
   mat.onBeforeCompile = (shader) => {
@@ -604,6 +938,9 @@ export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, 
         tTail *= tTail;
         transformed.x += sin(uTime * uSwimFreq + aPhase - position.z * 2.4) * uSwimAmp * tTail;
         transformed.x += sin(uTime * uSwimFreq * 0.5 + aPhase) * uSwimAmp * 0.06;
+        // fin membrane flutter — tall fin tips ripple softly out of phase
+        float finMask = smoothstep(0.55, 1.4, abs(transformed.y)) * (1.0 - tTail);
+        transformed.x += sin(uTime * uSwimFreq * 1.35 + aPhase * 1.7) * uSwimAmp * 0.4 * finMask;
       }
     `)
     shader.fragmentShader = `
@@ -620,7 +957,7 @@ export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, 
       #include <opaque_fragment>
     `)
   }
-  mat.customProgramCacheKey = () => cacheKey + '-v2'
+  mat.customProgramCacheKey = () => cacheKey + '-v4'
   return mat
 }
 

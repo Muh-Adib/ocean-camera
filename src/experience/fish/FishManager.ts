@@ -7,6 +7,7 @@ import * as THREE from 'three'
 import { School, type FieldCtx, type SchoolParams } from './Boids'
 import { buildFish, makeFishMaterial, updateFishMaterialTime, SPECIES_TINTS, type SpeciesKey } from './FishGeometryFactory'
 import type { Obstacle } from '../environment/Rocks'
+import type { Pellet } from './Feeding'
 import { BOUNDS, rand } from '../utils/math'
 import type { QualityConfig } from '../core/PerformanceManager'
 
@@ -129,9 +130,9 @@ export class FishManager {
     scene.add(this.group)
   }
 
-  update(dt: number, time: number, field: FieldCtx) {
+  update(dt: number, time: number, field: FieldCtx, pellets?: Pellet[]) {
     for (const e of this.entries) {
-      e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale)
+      e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale, pellets)
     }
     // write matrices
     const camDir = new THREE.Vector3()

@@ -79,13 +79,23 @@ function makeBranchCoral(rng: Rng): THREE.BufferGeometry {
 
   const grow = (origin: THREE.Vector3, dir: THREE.Vector3, len: number, radius: number, depth: number) => {
     const end = origin.clone().addScaledVector(dir, len)
-    const cyl = new THREE.CylinderGeometry(radius * 0.62, radius, len, 5, 1)
+    const cyl = new THREE.CylinderGeometry(radius * 0.62, radius, len, 7, 3)
+    // gentle organic bend: bow the mid-height vertices along a jitter axis
+    {
+      const p = cyl.attributes.position as THREE.BufferAttribute
+      const bend = new THREE.Vector3(rng() - 0.5, 0, rng() - 0.5).multiplyScalar(len * 0.24)
+      for (let i = 0; i < p.count; i++) {
+        const fy = (p.getY(i) / len + 0.5)
+        const k = fy * fy * 0.8 + fy * 0.2
+        p.setXYZ(i, p.getX(i) + bend.x * k, p.getY(i), p.getZ(i) + bend.z * k)
+      }
+    }
     cyl.translate(0, len / 2, 0)
     cyl.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir))
     cyl.translate(origin.x, origin.y, origin.z)
     geoms.push(paint(cyl, base, 0.25, rng, 0.1))
     if (depth <= 0) {
-      const tip = new THREE.SphereGeometry(radius * 0.95, 6, 5)
+      const tip = new THREE.SphereGeometry(radius * 1.05, 8, 6)
       tip.translate(end.x, end.y, end.z)
       geoms.push(paint(tip, base.clone().lerp(new THREE.Color('#fff2b0'), 0.5), 0.15, rng, 0))
       return
@@ -97,7 +107,7 @@ function makeBranchCoral(rng: Rng): THREE.BufferGeometry {
       nd.applyAxisAngle(axis, 0.35 + rng() * 0.5)
       nd.y = Math.abs(nd.y) * 0.65 + 0.28
       nd.normalize()
-      grow(end, nd, len * (0.58 + rng() * 0.2), radius * 0.68, depth - 1)
+      grow(end, nd, len * (0.6 + rng() * 0.2), radius * 0.7, depth - 1)
     }
   }
   grow(new THREE.Vector3(0, 0, 0), new THREE.Vector3(rng() * 0.3 - 0.15, 1, rng() * 0.3 - 0.15).normalize(), 0.55 + rng() * 0.3, 0.1, 3)
@@ -105,12 +115,15 @@ function makeBranchCoral(rng: Rng): THREE.BufferGeometry {
 }
 
 function makeBrainCoral(rng: Rng): THREE.BufferGeometry {
-  const geo = new THREE.SphereGeometry(0.85, 22, 14)
+  const geo = new THREE.SphereGeometry(0.85, 26, 17)
   const p = geo.attributes.position as THREE.BufferAttribute
   const v = new THREE.Vector3()
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i)
-    const b = Math.sin(v.x * 9) * Math.sin(v.z * 9) * 0.06 + Math.sin(v.x * 4.2 + v.z * 3.4) * 0.04
+    // fine meandering ridges: two maze octaves + micro relief
+    const b = Math.sin(v.x * 12) * Math.sin(v.z * 12) * 0.055
+      + Math.sin(v.x * 5.2 + v.z * 3.8) * 0.045
+      + Math.sin(v.x * 23) * Math.sin(v.z * 21) * 0.018
     v.multiplyScalar(1 + b)
     p.setXYZ(i, v.x, v.y * 0.68, v.z * 0.88)
   }
@@ -122,19 +135,26 @@ function makeBrainCoral(rng: Rng): THREE.BufferGeometry {
 function makeTableCoral(rng: Rng): THREE.BufferGeometry {
   const geoms: THREE.BufferGeometry[] = []
   const h = 0.5 + rng() * 0.5
-  const col = new THREE.CylinderGeometry(0.09, 0.14, h, 6)
+  const col = new THREE.CylinderGeometry(0.09, 0.14, h, 7, 2)
   col.translate(0, h / 2, 0)
   geoms.push(paint(col, new THREE.Color('#b8a888'), 0.15, rng, 0.1))
+  // substructure skirt under the disc
+  const skirt = new THREE.ConeGeometry(0.34, 0.24, 8, 1, true)
+  skirt.rotateX(Math.PI)
+  skirt.translate(0, h - 0.1, 0)
+  geoms.push(paint(skirt, new THREE.Color('#a89878'), 0.18, rng, 0.1))
 
   const r = 0.8 + rng() * 0.7
-  const disc = new THREE.CylinderGeometry(r, r * 0.9, 0.12, 20, 1)
-  // wavy rim
+  const disc = new THREE.CylinderGeometry(r, r * 0.9, 0.13, 28, 1)
+  // wavy rim + radial ridges on top
   const p = disc.attributes.position as THREE.BufferAttribute
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), z = p.getZ(i)
     const a = Math.atan2(z, x)
     const d = Math.hypot(x, z) / r
-    p.setY(i, p.getY(i) + Math.sin(a * 3 + rng() * 6) * 0.05 * d)
+    p.setY(i, p.getY(i)
+      + Math.sin(a * 3 + rng() * 6) * 0.05 * d
+      + Math.sin(a * 9 + 1.7) * 0.024 * d)
   }
   disc.computeVertexNormals()
   disc.translate(0, h, 0)
@@ -144,7 +164,7 @@ function makeTableCoral(rng: Rng): THREE.BufferGeometry {
 }
 
 function makeFanCoral(rng: Rng): THREE.BufferGeometry {
-  const geo = new THREE.PlaneGeometry(1.5, 1.7, 6, 8)
+  const geo = new THREE.PlaneGeometry(1.5, 1.7, 11, 15)
   geo.translate(0, 0.85, 0)
   const p = geo.attributes.position as THREE.BufferAttribute
   for (let i = 0; i < p.count; i++) {
@@ -164,12 +184,25 @@ function makeTubeCoral(rng: Rng): THREE.BufferGeometry {
   for (let i = 0; i < n; i++) {
     const r = 0.09 + rng() * 0.07
     const h = 0.4 + rng() * 0.5
-    const tube = new THREE.CylinderGeometry(r * 0.8, r, h, 7, 2, true)
+    const tube = new THREE.CylinderGeometry(r * 0.8, r, h, 8, 3, true)
     const a = rng() * Math.PI * 2
     const d = rng() * 0.18
     tube.translate(Math.cos(a) * d, h / 2, Math.sin(a) * d)
     tube.rotateY(rng() * Math.PI)
-    geoms.push(paint(tube, base, 0.3, rng, 0.5))
+    paint(tube, base, 0.3, rng, 0.0)   // topLighten 0 → rims stay dark
+    // darkened rim toward the opening — reads as a hollow polyp tube
+    {
+      const p = tube.attributes.position as THREE.BufferAttribute
+      const col = tube.attributes.color as THREE.BufferAttribute
+      for (let j = 0; j < p.count; j++) {
+        const fy = p.getY(j) / h + 0.5                 // 0 bottom → 1 top
+        if (fy > 0.55) {
+          const k = (fy - 0.55) / 0.45
+          col.setXYZ(j, col.getX(j) * (1 - k * 0.62), col.getY(j) * (1 - k * 0.58), col.getZ(j) * (1 - k * 0.5))
+        }
+      }
+    }
+    geoms.push(tube)
   }
   return mergeGeometries(geoms, false)!
 }

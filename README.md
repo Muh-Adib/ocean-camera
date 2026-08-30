@@ -13,10 +13,11 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 ## ✨ Features
 
 - **Hand-gesture control** — swipe, push, pull, open palm and fist gestures, each with its own force field, animation and sound. Velocity-strength coupling means faster movements hit harder.
-- **A living ecosystem** — ~300 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and two silver bait-balls) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces. Every fin, eye and tail is seated on the hull by surface-radius math, so no part ever floats detached.
+- **A living ecosystem** — ~300 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and two silver bait-balls) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces. Bodies are organic swept hulls with a dorsal ridge, compressed flanks and welded smooth normals; fins are true ray fans with membranes and scalloped edges; scales are bump-mapped micro-relief; eyes carry socket, sclera, iris, pupil and glint layers.
+- **Feeding frenzy** — press **G** (or the pellets HUD button) to scatter food. Pellets tumble down with water drag and swirl, rest on the seabed, and every school within range breaks formation and races the nearest crumb — the first fish to reach it gulps it down in a shrinking bite.
 - **Open-world free swimming** — press **F** (or the waves HUD button) to leave the cinematic drift and explore the whole ocean first-person: drag to look around, turn with **A / D** or the arrow keys, glide with **W / S**, strafe with **Q / E**, rise and sink with Space / C — with soft collision against the seabed and the world edge. With the camera on, your **open palm becomes a swim joystick**: hold it left or right of center to turn, up / down to pitch, and close it into a fist for a forward kick. Touch devices get a hold-to-glide paddle.
 - **Four biomes to discover** — the coral gardens of the east, a swaying **kelp forest** in the north-west, a **boulder canyon** with two rock arches in the south-west, shell-bright **sand flats** in the south-east, and towering **monolith spires** on the northern seamount. Each biome has its own sand tint, resident schools and landmarks to navigate by.
-- **Special visitors** — a gliding manta ray, a cruising sea turtle and predatory silhouettes appear on random schedules. Pufferfish are camera-curious and will come say hello.
+- **Special visitors** — a gliding manta ray (thick fuselage core, cambered wings, cephalic fins and whip tail), a cruising sea turtle with a scute-textured shell, plastron and paddle flippers, and predatory silhouettes appear on random schedules. Pufferfish are camera-curious and will come say hello.
 - **Procedural reef** — fbm-dune seabed with a canyon basin and seamount, biome-tinted sand, pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed and kelp, starfish, sea urchins and scallop shells — zero external 3D assets.
 - **Atmosphere** — animated water surface with Snell-window glow, procedural caustics, volumetric god rays, depth-graded fog, particle plankton, bubble clusters and a fully procedural WebAudio soundscape (drone, water noise, whale calls, gesture shimmer).
 - **Cinematic entry** — GSAP-sequenced loading, dive-in descent and staged reveals.
@@ -42,6 +43,7 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 | `W A S D` / arrows | Swim the current around |
 | `Space` | Continuous push |
 | `X` | Scatter pulse |
+| `G` / pellets HUD button | Scatter food — schools race in to eat |
 
 ### Free-swim exploration (`F`)
 
