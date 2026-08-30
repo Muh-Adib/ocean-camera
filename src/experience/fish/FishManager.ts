@@ -48,6 +48,8 @@ const SCHOOL_DEFS: SchoolDef[] = [
   { species: 'moorish', morph: 1, count: 3, anchor: [19, -4, -34], spawnRadius: 4, params: { maxSpeed: 1.8, cohW: 0.55, wanderW: 2.0 }, scale: [1.1, 1.35], response: 0.85 },
   // squirrelfish — big-eyed red shelterers hugging the boulder shadows
   { species: 'squirrel', morph: 0, count: 8, anchor: [-21, -7.5, -20], spawnRadius: 3.5, params: { maxSpeed: 1.5, homeStrength: 1.2, homeRadius: 7, cohW: 0.4, aliW: 0.35, wanderW: 3.0 }, scale: [1.0, 1.25], response: 0.75 },
+  // bait ball — a dense silver swarm flashing through open water
+  { species: 'minnow', morph: 0, count: 90, anchor: [-2, 5.5, -32], spawnRadius: 5, params: { maxSpeed: 4.4, maxForce: 12, sepW: 1.3, aliW: 2.8, cohW: 1.7, wanderW: 1.5, separationR: 0.65, perceptionR: 2.8 }, scale: [0.42, 0.58], response: 1.4 },
   // curious wanderers
   { species: 'pufferfish', morph: 0, count: 4, anchor: [2, -1.5, -12], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, aliW: 0.1, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.25], response: 1.3 },
 ]
@@ -91,8 +93,8 @@ export class FishManager {
       this.schools.push(school)
 
       const { geometry, texture } = buildFish(def.species)
-      const swim = def.species === 'tropical' ? 0.09 : def.species === 'pufferfish' ? 0.05 : 0.075
-      const freq = def.species === 'tropical' ? 9 : def.species === 'pufferfish' ? 6 : 7
+      const swim = def.species === 'tropical' || def.species === 'minnow' ? 0.09 : def.species === 'pufferfish' ? 0.05 : 0.075
+      const freq = def.species === 'minnow' ? 11 : def.species === 'tropical' ? 9 : def.species === 'pufferfish' ? 6 : 7
       const mat = makeFishMaterial(texture, swim, freq, `fish-${def.species}`)
       this.mats.push(mat)
 

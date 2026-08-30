@@ -62,3 +62,39 @@ Stage Summary:
 - Ocean: animated water-surface ceiling with Snell glow + gesture ripples, richer caustics, brighter surface gradient
 - Entry flow race condition fixed; intro camera tween no longer fights the drift controller
 - Note: headless software rendering runs ~1-3fps → GSAP timelines crawl there; on real GPUs (60fps) all timings are normal
+
+---
+Task ID: 4
+Agent: main (Super Z)
+Task: Push project to user's GitHub repo (Muh-Adib/ocean-camera)
+
+Work Log:
+- Untracked local artifacts (.env, db/custom.db); added /db and *.db to .gitignore
+- Squashed 4 auto-generated UUID commits into one clean orphan commit on main (remote was empty, zero risk)
+- Commit author set to Muh-Adib with GitHub noreply email
+- Added remote origin; pushed main via one-off token URL (token not persisted in .git/config)
+- Verified remote HEAD = 319a2f1; fetched and set main → origin/main tracking
+
+Stage Summary:
+- Repo live at github.com/Muh-Adib/ocean-camera, single clean commit, no secrets tracked
+- Future pushes require only `git push` (upstream configured)
+- User advised to revoke the pasted PAT after push
+
+---
+Task ID: 5
+Agent: main (Super Z)
+Task: Repo polish + camera bug hardening + 3D detailing round 3, push to GitHub
+
+Work Log:
+- HandTracker hardening: shared in-flight promise (double-click/intro+HUD races can no longer spawn parallel starts); withTimeout() time-boxes every CDN step (import 12s, wasm 12s, GPU/CPU landmarker 20s) so the button can never spin forever; video-track 'ended' listener → new 'lost' failure (unplug/revoke mid-session); stop() wraps landmarker.close() in try/catch
+- UI: CAM_HELP.lost entry ("CAMERA DISCONNECTED") with reconnect guidance
+- New species 'minnow' (silver baitfish: slim profile, deeply forked tail, mirror flanks, faint lateral band); SPECIES_TINTS.minnow silvery
+- FishManager: bait-ball school (minnow ×90 @ [-2,5.5,-32], fast aliW 2.8 / cohW 1.7 / maxSpeed 4.4, response 1.4, swim freq 11) → ~200 fish total
+- New ReefDecor module (environment/ReefDecor.ts): beveled 5-arm starfish ×8 (irregular arms, coral-orange/rust palette), sea urchins ×12 (fibonacci-distributed needle spikes seated into dark purple test), ribbed scallop shells ×16 — all vertex-coloured and merged into ONE static draw call, scattered r=9..45 on seabed heightAt
+- Docs: README.md (features, gesture + fallback controls, quick start, 7-row camera troubleshooting, stack, structure, perf/a11y, privacy; no platform attribution), LICENSE (MIT © Muh-Adib), package.json renamed the-living-ocean v1.0.0 + repository/author fields
+- Verified: tsc clean (src), headless flow DIVE IN → HUD → camera "NO CAMERA FOUND" → TRY AGAIN re-shows → 20s auto-hide (RAF-lag confirmed, panel removed), zero console/page errors; screenshots show bait-ball swarm + caustics
+
+Stage Summary:
+- Camera start path is now race-free and fully time-boxed; mid-session camera loss surfaces a specific panel
+- Reef gained a 90-fish silver bait-ball and a one-draw-call bottom-dweller layer
+- Repo is portfolio-ready: README/LICENSE/package metadata, single clean history on GitHub

@@ -19,7 +19,7 @@ import { mulberry32 } from '../utils/math'
 
 export type SpeciesKey =
   | 'tropical' | 'angelfish' | 'butterflyfish' | 'clownfish' | 'tang' | 'pufferfish'
-  | 'moorish' | 'squirrel'
+  | 'moorish' | 'squirrel' | 'minnow'
 
 const WHITE_UV = 0.965
 
@@ -443,6 +443,19 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
       bands: [{ v: 0.5, w: 0.09, color: 'rgba(245,240,230,0.8)', soft: true }],
     },
   },
+  minnow: {
+    // silver baitfish — slim mirror-flanked dart that forms dense bait balls
+    body: { profile: [0.012, 0.06, 0.11, 0.13, 0.1, 0.045, 0.01], w: 0.42, h: 0.95, len: 0.5 },
+    tail: [0.22, 0.15, 0.8],                    // deeply forked
+    dorsal: [[0.06, 0.07], [-0.06, 0.09], [-0.18, 0.04]],
+    anal: [[-0.02, 0.05], [-0.16, 0.06]],
+    pectoral: 0.1, eyeR: 0.05,
+    finColor: '#9fb4be', tailColor: '#b8ccd4',
+    tex: {
+      back: '#46586a', belly: '#e6edf2',
+      bands: [{ v: 0.5, w: 0.05, color: 'rgba(70,88,106,0.55)', soft: true }],   // faint lateral band
+    },
+  },
 }
 
 // per-species instance tint palettes (multiplied over the texture)
@@ -461,6 +474,7 @@ export const SPECIES_TINTS: Record<SpeciesKey, string[][]> = {
   pufferfish: [['#ffffff', '#f0e6cc']],
   moorish: [['#ffffff', '#fff0c8']],
   squirrel: [['#ffffff', '#ffc8b8']],
+  minnow: [['#f2f7fa', '#d4e2ea']],
 }
 
 // ------------------------- assembly -------------------------

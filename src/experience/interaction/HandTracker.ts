@@ -33,13 +33,26 @@ export type CameraFailure =
   | 'no-device'   // no camera hardware found
   | 'busy'        // camera held by another app / failed to start
   | 'model'       // hand-tracking model could not be fetched
+  | 'lost'        // camera vanished mid-session (unplugged / revoked / crashed)
   | 'unknown'
+
+/** reject a promise if it neither resolves nor rejects within `ms` */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`timeout: ${label}`)), ms)
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
 
 export class HandTracker {
   video: HTMLVideoElement | null = null
   lastFailure: CameraFailure | null = null
   private landmarker: any = null
   private stream: MediaStream | null = null
+  private inflight: Promise<boolean> | null = null
   private lastVideoTime = -1
   private running = false
   private lastSample: HandSample = { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: 0 }
@@ -64,8 +77,15 @@ export class HandTracker {
 
   async start(): Promise<boolean> {
     if (this.running) return true
+    // a start is already underway (double-click, intro + HUD button) → share it
+    if (this.inflight) return this.inflight
     this.lastFailure = null
     this.onStatus?.('loading')
+    this.inflight = this.startInner().finally(() => { this.inflight = null })
+    return this.inflight
+  }
+
+  private async startInner(): Promise<boolean> {
 
     // 0) capability checks — friendly reasons, never raw errors
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -111,23 +131,30 @@ export class HandTracker {
     }
     this.video = video
 
+    // mid-session loss: camera unplugged / permission revoked / driver crash
+    const track = this.stream.getVideoTracks()[0]
+    track?.addEventListener('ended', () => {
+      if (this.running) this.fail('lost')
+    })
+
     // 3) MediaPipe from CDN (local WASM inference; GPU → CPU fallback)
+    //    every network step is time-boxed so the button can never spin forever
     try {
-      const vision = await cdnImport(VISION_URL)
-      const fileset = await vision.FilesetResolver.forHandTasks(WASM_URL)
+      const vision = await withTimeout(cdnImport(VISION_URL), 12000, 'tasks-vision import')
+      const fileset = await withTimeout(vision.FilesetResolver.forHandTasks(WASM_URL), 12000, 'wasm fileset')
       try {
-        this.landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
           runningMode: 'VIDEO',
           numHands: 1,
-        })
+        }), 20000, 'gpu landmarker')
       } catch {
         // some devices/drivers reject the GPU delegate — CPU still runs fine
-        this.landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
+        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
           runningMode: 'VIDEO',
           numHands: 1,
-        })
+        }), 20000, 'cpu landmarker')
       }
     } catch {
       return this.fail('model')
@@ -140,7 +167,7 @@ export class HandTracker {
 
   stop() {
     this.running = false
-    this.landmarker?.close?.()
+    try { this.landmarker?.close?.() } catch { /* partially-built landmarker may refuse close */ }
     this.landmarker = null
     this.video?.remove()
     this.video = null

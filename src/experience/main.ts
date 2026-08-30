@@ -16,6 +16,7 @@ import { RockSystem } from './environment/Rocks'
 import { CoralSystem } from './environment/CoralSystem'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
+import { ReefDecor } from './environment/ReefDecor'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
 import { GestureBurst } from './particles/GestureBurst'
@@ -77,6 +78,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity)
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
+  const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const obstacles = [...rocks.obstacles, ...coral.obstacles]
 
   // ---------------- particles ----------------
@@ -308,6 +310,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       disposers.forEach((d) => d())
       sceneMgr.dispose()
       container.innerHTML = ''
+      decor.dispose()
       void particles
     },
   }

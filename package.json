@@ -1,7 +1,13 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.2.1",
+  "name": "the-living-ocean",
+  "version": "1.0.0",
   "private": true,
+  "description": "An immersive 3D ocean that responds to your hand gestures — Three.js + GSAP + MediaPipe Hands, all processed locally in the browser.",
+  "author": "Muh-Adib",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Muh-Adib/ocean-camera.git"
+  },
   "scripts": {
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",

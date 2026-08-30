@@ -290,6 +290,10 @@ export class UI {
       title: 'HAND MODEL NOT LOADED',
       body: 'The hand-tracking model couldn\u2019t be fetched (network hiccup). Everything else still responds — try again in a moment.',
     },
+    lost: {
+      title: 'CAMERA DISCONNECTED',
+      body: 'The camera stopped mid-session — it may have been unplugged, turned off, or its permission was revoked. Reconnect it, then try again.',
+    },
     unknown: {
       title: 'CAMERA UNAVAILABLE',
       body: 'Something interrupted the camera. Your mouse & touch still keep the ocean alive — or give it another try.',
