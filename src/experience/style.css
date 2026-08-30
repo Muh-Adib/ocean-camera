@@ -191,6 +191,39 @@
   box-shadow: 0 0 14px rgba(110, 235, 205, 0.25);
 }
 
+/* free-swim forward paddle (touch) — bottom-right, glass pill */
+#swim-paddle {
+  position: absolute;
+  right: max(1.2rem, env(safe-area-inset-right));
+  bottom: max(4.6rem, calc(env(safe-area-inset-bottom) + 3.6rem));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.85rem 1.5rem;
+  border-radius: 999px;
+  border: 1px solid rgba(170, 228, 245, 0.4);
+  background: rgba(10, 42, 62, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: #bfeafc;
+  font: 600 0.68rem/1 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.22em;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: transform 0.15s ease, background 0.2s ease;
+}
+#swim-paddle:active {
+  transform: scale(0.94);
+  background: rgba(18, 64, 92, 0.7);
+  color: #e8f9ff;
+}
+#swim-paddle:focus-visible {
+  outline: 2px solid rgba(126, 240, 210, 0.7);
+  outline-offset: 2px;
+}
+
 .hud-status {
   position: absolute;
   bottom: max(1.1rem, env(safe-area-inset-bottom));

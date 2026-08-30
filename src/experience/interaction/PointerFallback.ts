@@ -23,6 +23,8 @@ export class PointerFallback {
   private dirVec = new THREE.Vector3()
   private keys = new Set<string>()
   private lastMove = 0
+  /** true while SwimController owns the camera — suppresses overlapping keys */
+  swimMode = false
   private velX = 0; private velY = 0
   private lastX = 0; private lastY = 0
   private ray = new THREE.Raycaster()
@@ -97,6 +99,8 @@ export class PointerFallback {
     if (!this.enabled) return
     this.downPos = { x: e.clientX, y: e.clientY }
     this.downTime = performance.now()
+    // in free-swim a press-drag means "look around", not hold-push
+    if (this.swimMode) return
     this.holdTimer = setTimeout(() => {
       if (!this.enabled) return
       this.holding = true
@@ -139,6 +143,8 @@ export class PointerFallback {
     if (e.repeat) return
     const tag = (e.target as HTMLElement)?.tagName
     if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    // in free-swim the movement keys belong to SwimController
+    if (this.swimMode && (e.code === 'Space' || e.code.startsWith('KeyW') || e.code.startsWith('KeyA') || e.code.startsWith('KeyS') || e.code.startsWith('KeyD') || e.code.startsWith('Arrow'))) return
     this.keys.add(e.code)
     if (e.code === 'Space') {
       e.preventDefault()
@@ -166,7 +172,7 @@ export class PointerFallback {
 
   /** held arrow/WASD keys produce a steady current — called each frame */
   updateKeyboard(dt: number) {
-    if (!this.enabled) return
+    if (!this.enabled || this.swimMode) return
     let dx = 0, dy = 0
     if (this.keys.has('ArrowLeft') || this.keys.has('KeyA')) dx -= 1
     if (this.keys.has('ArrowRight') || this.keys.has('KeyD')) dx += 1

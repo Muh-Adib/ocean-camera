@@ -15,7 +15,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { mulberry32 } from '../utils/math'
+import { clamp, mulberry32 } from '../utils/math'
 
 export type SpeciesKey =
   | 'tropical' | 'angelfish' | 'butterflyfish' | 'clownfish' | 'tang' | 'pufferfish'
@@ -56,7 +56,7 @@ function shade(hex: string, f: number): string {
 // ---------------------------------------------------------------
 // smooth body profiles — Catmull-Rom through the control radii
 // ---------------------------------------------------------------
-function resampleProfile(profile: number[], n = 14): number[] {
+function resampleProfile(profile: number[], n = 18): number[] {
   const pts = profile
   const segs = pts.length - 1
   const out: number[] = []
@@ -223,25 +223,38 @@ interface BodySpec {
   w: number; h: number; len: number
 }
 
-function makeBody(spec: BodySpec): THREE.BufferGeometry {
-  const smooth = resampleProfile(spec.profile, 14)
+/** body hull + exact surface-radius lookup so every limb sits ON the skin */
+function makeBody(spec: BodySpec): { geo: THREE.BufferGeometry; radiusAt: (z: number) => number } {
+  const smooth = resampleProfile(spec.profile, 18)
   const pts = smooth.map((r, i) => new THREE.Vector2(Math.max(0.004, r), -0.5 + i / (smooth.length - 1)))
-  const geo = new THREE.LatheGeometry(pts, 20)
+  const geo = new THREE.LatheGeometry(pts, 24)
   geo.rotateX(Math.PI / 2)                      // profile y → world z, nose +z
   geo.scale(spec.w, spec.h, spec.len)
   // white base color so texture shows unmodified
   const count = geo.attributes.position.count
   const arr = new Float32Array(count * 3).fill(1)
   geo.setAttribute('color', new THREE.BufferAttribute(arr, 3))
-  return geo
+
+  // smooth radius (in profile units) at world z — the single source of truth
+  // for placing fins, eyes and the tail flush against the hull
+  const radiusAt = (z: number) => {
+    const t = clamp((z / spec.len) * 0.5 + 0.5, 0, 1)
+    const f = t * (smooth.length - 1)
+    const i = Math.floor(f)
+    const fr = f - i
+    const r0 = smooth[i]
+    const r1 = smooth[Math.min(i + 1, smooth.length - 1)]
+    return r0 + (r1 - r0) * fr
+  }
+  return { geo, radiusAt }
 }
 
-/** tail fan in the YZ plane, attached at z = attachZ */
+/** tail fan in the YZ plane — root is buried inside the hull so no seam shows */
 function makeTail(len: number, spread: number, fork: number, color: THREE.Color): THREE.BufferGeometry {
   const g = new THREE.BufferGeometry()
   const v = new Float32Array([
-    0, 0, 0,          0, spread, -len,        0, fork * spread * 0.45, -len * 1.04,
-    0, 0, 0,          0, fork * spread * 0.45, -len * 1.04,   0, -spread, -len,
+    0, 0, 0.06,       0, spread, -len,        0, fork * spread * 0.45, -len * 1.04,
+    0, 0, 0.06,       0, fork * spread * 0.45, -len * 1.04,   0, -spread, -len,
   ])
   g.setAttribute('position', new THREE.BufferAttribute(v, 3))
   g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(12).fill(WHITE_UV), 2))
@@ -250,41 +263,62 @@ function makeTail(len: number, spread: number, fork: number, color: THREE.Color)
   return g
 }
 
-/** dorsal / anal fin strip: pairs of [zOffset, height] along the back */
-function makeFinStrip(base: [number, number][], color: THREE.Color, yBase: number): THREE.BufferGeometry {
+/**
+ * dorsal / anal fin strip whose base follows the body surface.
+ * dir +1 = along the back, -1 = along the belly. Base vertices are
+ * sunk 12% into the hull; tips fade toward translucent white.
+ */
+function makeFinStrip(
+  base: [number, number][],
+  color: THREE.Color,
+  radiusAt: (z: number) => number,
+  w: number, h: number,
+  dir: 1 | -1,
+): THREE.BufferGeometry {
   const verts: number[] = []
+  const cols: number[] = []
+  const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.42)  // membrane tip
+  const edge = color.clone().lerp(tipC, 0.2)
   for (let i = 0; i < base.length - 1; i++) {
     const [z0, h0] = base[i]
     const [z1, h1] = base[i + 1]
+    const b0 = dir * radiusAt(z0) * h * 0.88
+    const b1 = dir * radiusAt(z1) * h * 0.88
+    const t0 = b0 + dir * h0
+    const t1 = b1 + dir * h1
     // two triangles per segment
-    verts.push(0, yBase, z0, 0, yBase + h0, z0, 0, yBase + h1, z1)
-    verts.push(0, yBase, z0, 0, yBase + h1, z1, 0, yBase, z1)
+    verts.push(0, b0, z0, 0, t0, z0, 0, t1, z1)
+    verts.push(0, b0, z0, 0, t1, z1, 0, b1, z1)
+    // per-vertex colours: base = skin colour, tip = membrane fade
+    const cs = [color, tipC, edge, color, edge, color]
+    for (const c of cs) cols.push(c.r, c.g, c.b)
   }
   const g = new THREE.BufferGeometry()
   g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
+  g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(cols), 3))
   g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array((verts.length / 3) * 2).fill(WHITE_UV), 2))
   g.computeVertexNormals()
-  paintColors(g, color)
   return g
 }
 
-function makePectoral(side: 1 | -1, size: number, color: THREE.Color): THREE.BufferGeometry {
+/** pectoral fin rooted inside the flank at the hull surface */
+function makePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(size, size * 0.5)
   setUniformUV(g)
   g.rotateY(side * -0.9)
   g.rotateZ(side * 0.5)
-  g.translate(side * 0.06, -0.02, 0.05)
+  g.translate(side * rAt * 0.74, y, z)
   paintColors(g, color)
   return g
 }
 
-/** small paired pelvic fins on the belly, slightly behind the pectorals */
-function makePelvic(side: 1 | -1, size: number, color: THREE.Color, y: number): THREE.BufferGeometry {
+/** paired pelvic fins on the belly, rooted at the hull surface */
+function makePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = new THREE.PlaneGeometry(size * 0.8, size * 0.5)
   setUniformUV(g)
   g.rotateX(-1.05)                 // sweep downward
   g.rotateY(side * -0.5)           // angle out & back
-  g.translate(side * 0.05, y, 0.13)
+  g.translate(side * rAt * 0.4, y, z)
   paintColors(g, color)
   return g
 }
@@ -482,35 +516,40 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const def = SPECIES_DEFS[key]
   const parts: THREE.BufferGeometry[] = []
 
-  const body = makeBody(def.body)
+  const { geo: body, radiusAt } = makeBody(def.body)
   parts.push(body)
 
   const finC = new THREE.Color(def.finColor)
   const tailC = new THREE.Color(def.tailColor)
   const bbs = def.body
 
-  // tail
+  // tail — root pushed into the caudal peduncle so the joint never shows
   const tail = makeTail(def.tail[0], def.tail[1], def.tail[2], tailC)
-  tail.translate(0, 0, -bbs.len * 0.98)
+  tail.translate(0, 0, -bbs.len * 0.86)
   parts.push(tail)
 
-  // dorsal (+ anal)
-  parts.push(makeFinStrip(def.dorsal, finC, bbs.h * bbs.profile[3] * 0.82))
-  if (def.anal) parts.push(makeFinStrip(def.anal, finC, -bbs.h * bbs.profile[3] * 0.82))
+  // dorsal + anal fins — bases follow the hull surface exactly
+  parts.push(makeFinStrip(def.dorsal, finC, radiusAt, bbs.w, bbs.h, 1))
+  if (def.anal) parts.push(makeFinStrip(def.anal, finC, radiusAt, bbs.w, bbs.h, -1))
 
-  // pectorals + pelvics
+  // pectorals just behind the gill plate, rooted in the flank
   const pecC = finC.clone().lerp(new THREE.Color('#ffffff'), 0.25)
-  parts.push(makePectoral(1, def.pectoral, pecC))
-  parts.push(makePectoral(-1, def.pectoral, pecC))
-  const pelvY = -bbs.h * bbs.profile[3] * 0.52 - 0.015
-  parts.push(makePelvic(1, def.pectoral * 0.9, finC, pelvY))
-  parts.push(makePelvic(-1, def.pectoral * 0.9, finC, pelvY))
+  const pecZ = bbs.len * 0.3
+  const pecR = radiusAt(pecZ)
+  parts.push(makePectoral(1, def.pectoral, pecC, pecR * bbs.w, -pecR * bbs.h * 0.12, pecZ))
+  parts.push(makePectoral(-1, def.pectoral, pecC, pecR * bbs.w, -pecR * bbs.h * 0.12, pecZ))
 
-  // 3-layer eyes on the head surface
-  const eyeX = bbs.profile[4] * bbs.w + 0.02
+  // pelvics on the belly line, slightly behind and below the pectorals
+  const pelZ = bbs.len * 0.08
+  const pelR = radiusAt(pelZ)
+  parts.push(makePelvic(1, def.pectoral * 0.9, finC, pelR * bbs.w, -pelR * bbs.h * 0.62, pelZ))
+  parts.push(makePelvic(-1, def.pectoral * 0.9, finC, pelR * bbs.w, -pelR * bbs.h * 0.62, pelZ))
+
+  // 3-layer eyes seated exactly on the head surface
   const eyeZ = bbs.len * 0.62
-  parts.push(...makeEyeParts(1, eyeX, bbs.h * 0.06, eyeZ, def.eyeR))
-  parts.push(...makeEyeParts(-1, eyeX, bbs.h * 0.06, eyeZ, def.eyeR))
+  const eyeR = radiusAt(eyeZ) * bbs.w
+  parts.push(...makeEyeParts(1, eyeR + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR))
+  parts.push(...makeEyeParts(-1, eyeR + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR))
 
   // pufferfish spikes
   if (def.spikes) {
@@ -520,13 +559,13 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
       const a = rng() * Math.PI * 2
       const y = (rng() - 0.35) * 0.3
       const t = 0.25 + rng() * 0.45
-      const profR = bbs.profile[2 + Math.floor(t * 4)] ?? 0.25
       const z = (-0.5 + t) * 2 * bbs.len * 0.9
+      const profR = radiusAt(z)
       const spike = new THREE.ConeGeometry(0.014, spikeLen, 4)
       setUniformUV(spike)
       spike.rotateX(Math.PI / 2)
       spike.rotateY(a)
-      spike.translate(Math.cos(a) * profR * bbs.w, y * bbs.h + Math.abs(y) * 0.2, z)
+      spike.translate(Math.cos(a) * profR * bbs.w * 0.96, y * bbs.h + Math.abs(y) * 0.2, z)
       paintColors(spike, new THREE.Color('#b8a478'))
       parts.push(spike)
     }

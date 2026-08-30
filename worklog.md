@@ -98,3 +98,24 @@ Stage Summary:
 - Camera start path is now race-free and fully time-boxed; mid-session camera loss surfaces a specific panel
 - Reef gained a 90-fish silver bait-ball and a one-draw-call bottom-dweller layer
 - Repo is portfolio-ready: README/LICENSE/package metadata, single clean history on GitHub
+
+---
+Task ID: 6
+Agent: main (Super Z)
+Task: Fix detached fish shapes (realism) + open-world free swimming; searched for a 3D-modeling skill first
+
+Work Log:
+- Searched ClawHub per user request: blender-3d-modeling & meshy-3d-agent both require external cloud/API accounts and conflict with the fully-procedural offline design → fixed the actual root cause procedurally instead
+- FishGeometryFactory v3 — root cause of "separated" parts was control-point placement: makeBody now returns radiusAt(z) sampled from the 18-pt resampled profile; dorsal/anal fin bases follow the hull (sunk 12%), tips fade to membrane white; tail root buried into the peduncle (-0.86len); pectoral/pelvic roots seated at hull radius; eyes seated at surface radius (+18% poke); pufferfish spikes use radiusAt too; lathe 20→24 segments
+- New SwimController (interaction/SwimController.ts): drag-look yaw/pitch, WASD/arrows glide, Space ascend, C/Shift descend, F toggle, Esc exit, touch forwardBoost, water drag + soft bounds (floor via heightAt +0.7 pad, ceiling y=11, ±46/-62..14); capturePose hook snapshots live camera on entry
+- CameraRig: swim branch in update (bob + roll + offset, YXZ quaternion), snapshotSwim/enterSwim/exitSwim (GSAP glide home over ~3s), pushSwimPose feed from main loop
+- PointerFallback: swimMode flag suppresses hold-push on press-drag, Space/WASD/arrows current, keyboard currents
+- UI: swim HUD button (fish glyph), ▲ GLIDE touch paddle (pointer hold → forwardBoost), guide + hints updated, setSwimActive
+- main: swim wiring incl. swim.enable() on enter (initially missing — F key dead until added), pointer.swimMode sync, dispose
+- README: free-swim feature + controls table + structure update
+- Verified headless: tsc clean; DIVE IN → F toggles SWIM MODE (chip+paddle+active button), swam ~40u forward/up across the reef (screenshots swim-1..7: starfish, shells, urchins, Moorish idol with attached dorsal filament, pufferfish, tang schools, clownfish at anemone), zero console/page errors
+
+Stage Summary:
+- Fish parts are mathematically seated on the hull → no detached-looking fins/eyes/tails at any distance
+- The ocean is now explorable: first-person free swim with inertial water feel and soft world bounds
+- Skill search outcome: external 3D-modeling services rejected on-architecture grounds; procedural math achieved the goal offline

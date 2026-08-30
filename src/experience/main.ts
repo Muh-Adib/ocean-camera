@@ -26,6 +26,7 @@ import { InteractionField } from './interaction/InteractionField'
 import { HandTracker } from './interaction/HandTracker'
 import { GestureEngine } from './interaction/GestureEngine'
 import { PointerFallback } from './interaction/PointerFallback'
+import { SwimController } from './interaction/SwimController'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { rand, pick } from './utils/math'
@@ -118,6 +119,28 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   })
   const pointer = new PointerFallback(sceneMgr.canvas, sceneMgr.camera, field, bursts)
 
+  // ---------------- free swim (open-world exploration) ----------------
+  const swim = new SwimController(sceneMgr.canvas, seabed.heightAt, {
+    x: 46, minZ: -62, maxZ: 14, maxY: 11, floorPad: 0.7,
+  })
+  swim.capturePose = () => cameraRig.snapshotSwim()
+  swim.onChange = (on) => {
+    pointer.swimMode = on
+    ui.setSwimActive(on)
+    if (on) {
+      cameraRig.enterSwim()
+      ui.setStatus('SWIM MODE', 'hand')
+      ui.hideGuide()
+      ui.toast('Free swim — drag to look, WASD to glide, Space / C to rise and sink.', 4600)
+      audio.gestureSpark(0.4)
+    } else {
+      cameraRig.exitSwim()
+      const hand = handTracker.isRunning
+      ui.setStatus(hand ? 'HAND TRACKING' : 'MOUSE MODE', hand ? 'hand' : 'mouse')
+      ui.toast('Back to the drift.', 2200)
+    }
+  }
+
   // seaweed ambient current bridge (tweened on swipes)
   const seaweedCurrent = { x: 0.4, z: 0.1 }
 
@@ -145,6 +168,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       await startCamera()
     },
     onShowGuide: () => ui.showGuide(),
+    onToggleSwim: () => swim.setActive(!swim.active),
+    onSwimBoost: (on) => { swim.forwardBoost = on ? 1 : 0 },
   })
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
@@ -217,6 +242,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     }
 
     pointer.enable()
+    swim.enable()
     disposers.push(() => pointer.disable())
   }
 
@@ -276,6 +302,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     field.update(dt)
 
     // ---- world ----
+    if (swim.active) {
+      swim.update(dt)
+      cameraRig.pushSwimPose(swim.position, swim.yaw, swim.pitch)
+    }
     cameraRig.update(dt)
     fish.cameraWorld.copy(cameraRig.group.position)
     lighting.update(dt)
@@ -306,6 +336,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', onVis)
       handTracker.stop()
+      swim.disable()
       audio.dispose()
       disposers.forEach((d) => d())
       sceneMgr.dispose()

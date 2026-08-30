@@ -13,7 +13,8 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 ## ✨ Features
 
 - **Hand-gesture control** — swipe, push, pull, open palm and fist gestures, each with its own force field, animation and sound. Velocity-strength coupling means faster movements hit harder.
-- **A living ecosystem** — ~200 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and a 90-strong silver bait-ball) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces.
+- **A living ecosystem** — ~200 fish across 9 procedurally-built species (clownfish, blue tang, angelfish, butterflyfish, Moorish idols, squirrelfish, pufferfish and a 90-strong silver bait-ball) driven by boids flocking simulation with separation, alignment, cohesion, wander, obstacle avoidance and gesture forces. Every fin, eye and tail is seated on the hull by surface-radius math, so no part ever floats detached.
+- **Open-world free swimming** — press **F** (or the waves HUD button) to leave the cinematic drift and explore the whole reef first-person: drag to look around, glide with WASD, rise and sink with Space / C, with soft collision against the seabed and the world edge. Touch devices get a hold-to-glide paddle.
 - **Special visitors** — a gliding manta ray, a cruising sea turtle and predatory silhouettes appear on random schedules. Pufferfish are camera-curious and will come say hello.
 - **Procedural reef** — fbm-dune seabed with pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed, starfish, sea urchins and scallop shells — zero external 3D assets.
 - **Atmosphere** — animated water surface with Snell-window glow, procedural caustics, volumetric god rays, depth-graded fog, particle plankton, bubble clusters and a fully procedural WebAudio soundscape (drone, water noise, whale calls, gesture shimmer).
@@ -40,6 +41,17 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 | `W A S D` / arrows | Swim the current around |
 | `Space` | Continuous push |
 | `X` | Scatter pulse |
+
+### Free-swim exploration (`F`)
+
+| Input | Action |
+|---|---|
+| `F` / waves HUD button | Toggle free swim |
+| Drag (mouse or touch) | Look around |
+| `W A S D` / arrows | Glide through the water |
+| `Space` / `C` or `Shift` | Ascend / descend |
+| `▲ GLIDE` paddle (touch) | Hold to swim forward |
+| `Esc` | Return to the cinematic drift |
 
 ## 🚀 Quick Start
 
@@ -95,7 +107,7 @@ src/experience/
 ├── environment/   Seabed, Rocks, CoralSystem, Seaweed, WaterSurface, ReefDecor
 ├── particles/     ParticleField, Bubbles, GestureBurst
 ├── fish/          FishGeometryFactory (procedural species), Boids, FishManager, SpecialCreatures
-├── interaction/   HandTracker, GestureEngine, InteractionField, PointerFallback
+├── interaction/   HandTracker, GestureEngine, InteractionField, PointerFallback, SwimController
 ├── audio/         AudioManager (procedural WebAudio)
 ├── ui/            UI (intro, HUD, guide, toasts, camera help)
 └── utils/         math helpers
