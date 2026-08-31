@@ -380,6 +380,7 @@ export interface Hull {
   geo: THREE.BufferGeometry
   radiusAt: (z: number) => number     // vertical radius (profile units)
   widthAt: (z: number) => number      // lateral half-width (profile units, pre-w scale)
+  surfaceXAt: (z: number, y: number) => number   // absolute flank surface x at height y
 }
 
 /**
@@ -454,8 +455,10 @@ function makeHull(spec: BodySpec): Hull {
   const count = geo.attributes.position.count
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3))
 
-  // smooth lookups along the body (world z → profile space)
-  const stat = (z: number) => clamp((z / L) * 0.5 + 0.5, 0, 1)
+  // smooth lookups along the body (hull-space z → ring parameter).
+  // hull rings span z ∈ [-L/2, +L/2], so station s = z/L + 0.5 keeps
+  // lookups and placements in ONE coherent coordinate frame.
+  const stat = (z: number) => clamp(z / L + 0.5, 0, 1)
   const radiusAt = (z: number) => {
     const f = stat(z) * (smooth.length - 1)
     const i = Math.floor(f)
@@ -467,7 +470,20 @@ function makeHull(spec: BodySpec): Hull {
     const comp = 0.22 * bell(t, 0.55, 0.27)
     return radiusAt(z) * (1 - comp)
   }
-  return { geo, radiusAt, widthAt }
+  // exact flank x at (y, z) — includes the dorsal pinch so features seated
+  // with this value truly touch the skin (eyes, fins) instead of floating.
+  const surfaceXAt = (z: number, y: number) => {
+    const t = stat(z)
+    const r = radiusAt(z)
+    const comp = 0.22 * bell(t, 0.55, 0.27)
+    const pin = 0.4 * bell(t, 0.52, 0.3)
+    const yHalf = Math.max(1e-5, r * H)
+    const cy = clamp(y / yHalf, -0.96, 0.96)
+    const sx = Math.sqrt(Math.max(0, 1 - cy * cy))
+    const pinch = cy > 0 ? 1 - pin * Math.pow(cy, 1.6) : 1
+    return sx * r * (1 - comp) * W * pinch
+  }
+  return { geo, radiusAt, widthAt, surfaceXAt }
 }
 
 /**
@@ -641,40 +657,33 @@ function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number
   return g
 }
 
-/** 4-layer eye: socket shadow + sclera + iris + pupil + glint */
-function makeEyeParts(side: 1 | -1, x: number, y: number, z: number, r: number, iris: string): THREE.BufferGeometry[] {
+/**
+ * 5-layer eye, properly seated IN the head.
+ * `sx` = exact flank surface x at the eye point. The eyeball is buried
+ * 45% of its radius below the skin so only a low dome + dark socket rim
+ * read above the flesh — no more ping-pong ball stuck on the flank.
+ * Offsets below are in units of r relative to the sclera centre
+ * (outward = ±x, up = +y, forward = +z).
+ */
+function makeEyeParts(side: 1 | -1, sx: number, y: number, z: number, r: number, iris: string): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = []
-
-  const socket = new THREE.SphereGeometry(r * 1.14, 10, 8)
-  setUniformUV(socket)
-  socket.translate(side * (x - r * 0.16), y, z)
-  paintColors(socket, new THREE.Color('#1a2027'))
-  out.push(socket)
-
-  const sclera = new THREE.SphereGeometry(r * 0.94, 12, 9)
-  setUniformUV(sclera)
-  sclera.translate(side * x, y, z)
-  paintColors(sclera, new THREE.Color('#dfe9ec'))
-  out.push(sclera)
-
-  const irisG = new THREE.SphereGeometry(r * 0.62, 10, 8)
-  setUniformUV(irisG)
-  irisG.translate(side * (x + r * 0.42), y + r * 0.04, z + r * 0.12)
-  paintColors(irisG, new THREE.Color(iris))
-  out.push(irisG)
-
-  const pupil = new THREE.SphereGeometry(r * 0.4, 8, 6)
-  setUniformUV(pupil)
-  pupil.translate(side * (x + r * 0.58), y + r * 0.05, z + r * 0.2)
-  paintColors(pupil, new THREE.Color('#05070a'))
-  out.push(pupil)
-
-  const glint = new THREE.SphereGeometry(r * 0.16, 6, 4)
-  setUniformUV(glint)
-  glint.translate(side * (x + r * 0.66), y + r * 0.42, z + r * 0.44)
-  paintColors(glint, new THREE.Color('#ffffff'))
-  out.push(glint)
-
+  const push = (radius: number, dx: number, dy: number, dz: number, col: string, wSeg: number, hSeg: number) => {
+    const g = new THREE.SphereGeometry(radius, wSeg, hSeg)
+    setUniformUV(g)
+    g.translate(side * (sx + dx * r), y + dy * r, z + dz * r)
+    paintColors(g, new THREE.Color(col))
+    out.push(g)
+  }
+  // socket shadow — buried deep, only a dark rim wraps the eyeball base
+  push(r * 1.18, -0.78, 0, 0, '#1a2027', 12, 9)
+  // sclera — eyeball sphere, centre 45% r under the skin
+  push(r * 0.94, 0, 0, 0, '#dfe9ec', 14, 10)
+  // iris dome riding forward on the ball
+  push(r * 0.60, 0.55, 0.03, 0.10, iris, 12, 9)
+  // pupil breaks the iris surface at its centre (was nested/hidden before)
+  push(r * 0.34, 0.88, 0.03, 0.12, '#05070a', 10, 8)
+  // specular glint, upper-front quadrant
+  push(r * 0.16, 0.80, 0.50, 0.50, '#ffffff', 8, 6)
   return out
 }
 
@@ -849,7 +858,7 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const def = SPECIES_DEFS[key]
   const parts: THREE.BufferGeometry[] = []
 
-  const { geo: body, radiusAt, widthAt } = makeHull(def.body)
+  const { geo: body, radiusAt, widthAt, surfaceXAt } = makeHull(def.body)
   parts.push(body)
 
   const finC = new THREE.Color(def.finColor)
@@ -858,7 +867,7 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
 
   // tail — root pushed into the caudal peduncle so the joint never shows
   const tail = makeTailFan(def.tail[0], def.tail[1], def.tail[2], tailC)
-  tail.translate(0, 0, -bbs.len * 0.86)
+  tail.translate(0, 0, -bbs.len * 0.46)
   parts.push(tail)
 
   // dorsal + anal fins — ray grids seated on the hull surface
@@ -866,8 +875,9 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   if (def.anal) parts.push(makeRayFin(def.anal, finC, radiusAt, bbs.h, -1, 7))
 
   // pectorals just behind the gill plate, rooted in the flank
+  // z = 0.1·L ≈ station 0.6 — right where the gill texture ends
   const pecC = finC.clone().lerp(new THREE.Color('#ffffff'), 0.25)
-  const pecZ = bbs.len * 0.3
+  const pecZ = bbs.len * 0.1
   const pecW = widthAt(pecZ) * bbs.w
   parts.push(placePectoral(1, def.pectoral, pecC, pecW, -radiusAt(pecZ) * bbs.h * 0.12, pecZ))
   parts.push(placePectoral(-1, def.pectoral, pecC, pecW, -radiusAt(pecZ) * bbs.h * 0.12, pecZ))
@@ -877,11 +887,14 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   parts.push(placePelvic(1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
   parts.push(placePelvic(-1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
 
-  // 4-layer eyes seated exactly on the head surface
-  const eyeZ = bbs.len * 0.62
-  const eyeX = widthAt(eyeZ) * bbs.w
-  parts.push(...makeEyeParts(1, eyeX + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR, def.eyeIris))
-  parts.push(...makeEyeParts(-1, eyeX + def.eyeR * 0.18, bbs.h * 0.07, eyeZ, def.eyeR, def.eyeIris))
+  // eyes — seated IN the flank at the true skin surface, sized to the head
+  // z = 0.28·L ≈ station 0.78 (on the head, ahead of the gill plate)
+  const eyeZ = bbs.len * 0.28
+  const eyeY = radiusAt(eyeZ) * bbs.h * 0.38            // 38% up the LOCAL head height
+  const skinX = surfaceXAt(eyeZ, eyeY)                  // exact skin x at the eye point
+  const eyeR = Math.min(def.eyeR, skinX * 0.85)         // never wider than the head there
+  parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
+  parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
 
   // pufferfish spikes seated at the hull surface
   if (def.spikes) {
@@ -892,12 +905,18 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
       const y = (rng() - 0.35) * 0.3
       const t = 0.25 + rng() * 0.45
       const z = (-0.5 + t) * 2 * bbs.len * 0.9
+      const yAbs = y * bbs.h + Math.abs(y) * 0.2
+      // keep the orbit clear — no spike stabs the eye
+      if (Math.hypot(z - eyeZ, yAbs - eyeY) < eyeR * 1.7) continue
       const profR = radiusAt(z)
+      // cross-section shrinks toward the ridge/belly — pull the base in with it
+      const yHalf = Math.max(1e-4, profR * bbs.h)
+      const shrink = Math.sqrt(Math.max(0.15, 1 - (yAbs / yHalf) * (yAbs / yHalf)))
       const spike = new THREE.ConeGeometry(0.014, spikeLen, 4)
       setUniformUV(spike)
       spike.rotateX(Math.PI / 2)
       spike.rotateY(a)
-      spike.translate(Math.cos(a) * profR * bbs.w * 0.96, y * bbs.h + Math.abs(y) * 0.2, z)
+      spike.translate(Math.cos(a) * profR * bbs.w * 0.96 * shrink, yAbs, z)
       paintColors(spike, new THREE.Color('#b8a478'))
       parts.push(spike)
     }

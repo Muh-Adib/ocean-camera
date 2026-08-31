@@ -2,7 +2,7 @@
 
 ---
 Task ID: 1
-Agent: main (Super Z)
+Agent: main
 Task: Build "The Living Ocean" — immersive 3D interactive ocean web experience with hand-gesture control (Three.js + GSAP + MediaPipe Hands)
 
 Work Log:
@@ -28,7 +28,7 @@ Stage Summary:
 
 ---
 Task ID: 2
-Agent: main (Super Z)
+Agent: main
 Task: Fix "camera unavailable" error + tune gesture sensitivity + add fish species
 
 Work Log:
@@ -46,7 +46,7 @@ Stage Summary:
 
 ---
 Task ID: 3
-Agent: main (Super Z)
+Agent: main
 Task: Enhance 3D detailing — realistic ocean & fish
 
 Work Log:
@@ -65,7 +65,7 @@ Stage Summary:
 
 ---
 Task ID: 4
-Agent: main (Super Z)
+Agent: main
 Task: Push project to user's GitHub repo (Muh-Adib/ocean-camera)
 
 Work Log:
@@ -82,7 +82,7 @@ Stage Summary:
 
 ---
 Task ID: 5
-Agent: main (Super Z)
+Agent: main
 Task: Repo polish + camera bug hardening + 3D detailing round 3, push to GitHub
 
 Work Log:
@@ -101,7 +101,7 @@ Stage Summary:
 
 ---
 Task ID: 6
-Agent: main (Super Z)
+Agent: main
 Task: Fix detached fish shapes (realism) + open-world free swimming; searched for a 3D-modeling skill first
 
 Work Log:
@@ -122,7 +122,7 @@ Stage Summary:
 
 ---
 Task ID: 7
-Agent: main (Super Z)
+Agent: main
 Task: Camera rotation via hand-swim + keyboard, wider & more varied ocean, push to GitHub
 
 Work Log:
@@ -143,7 +143,7 @@ Stage Summary:
 
 ---
 Task ID: 8
-Agent: main (Super Z)
+Agent: main
 Task: Model realism overhaul (fish v4, turtle, manta, corals) + feeding interaction; push with fresh PAT
 
 Work Log:
@@ -162,3 +162,21 @@ Stage Summary:
 - Turtle & manta no longer blob/flat-plane; corals gained organic bend, maze textures, hollow tubes, ridged tables
 - New interactive highlight: feeding frenzy (G) — pellets sink, schools break formation and race, bites claimed on touch
 - All previous behaviors (swim steering, biomes, camera paths) intact; zero runtime errors
+
+---
+Task ID: 9
+Agent: main
+Task: Fix fish eyes popping out of the body (user report: "mata ikannya seperti keluar dari ikan")
+
+Work Log:
+- Diagnosed 4 stacked defects in FishGeometryFactory eye/fPlacement math: (1) sclera sphere centred OUTSIDE the hull surface (+0.18r) so the whole eyeball floated external; (2) eyeR (0.042-0.068) larger than the local head half-width on thin species — angelfish eye was 2.6x the entire head width (frog-eye bulge); (3) eyeY = 0.07*h scaled with GLOBAL body height, landing the eye near the dorsal ridge on tall species where the flank pinches to ~zero; (4) pupil sphere fully nested inside the iris sphere (reach 0.98r vs 1.06r) so the pupil never rendered
+- NEW root cause found via /dev-fish close-up viewer: hull rings span z ∈ [-L/2, +L/2] but stat() lookup used z/L*0.5+0.5 (half sensitivity) AND the eye was placed at z = +0.62L — 0.12L in FRONT of the nose tip, i.e. the eyeball floated in open water beside the snout; tail root at -0.86L also hovered 0.18L behind the hull
+- Fixes: stat(z) = z/L + 0.5 (one coherent hull-space frame for every lookup); Hull.surfaceXAt(z,y) exact flank x incl. dorsal pinch; eyes re-seated at z=0.28L (station 0.78), y = 38% of LOCAL head height, eyeR clamped to 0.85x local head width, eyeball buried 45%r below the skin — visible part is a low dome wrapped by a dark socket rim; iris/pupil/glint offsets re-tuned so the pupil now breaks the iris surface; tail root moved to -0.46L inside the peduncle; pectorals moved to z=0.1L (station 0.6, just behind the gill plate — old station drifted onto the cheek after the stat fix); puffer spikes now shrink with cross-section height and skip the eye orbit
+- Temporary /dev-fish viewer page used to screenshot all 9 species close-up (deleted before commit); eye metrics probed numerically via scripts/eye-probe.ts (all eyes <= 0.85 head width, ~52% dome exposure)
+- Verified: tsc clean; all 9 species close-ups show seated eyes + connected tails/fins; live scene boots and renders schools with zero page errors (ocean-eyefix-reef.png)
+- Git: reset stray auto-commit 400e616 before it could pollute history; .gitignore now excludes /download/, /tool-results/, /scripts/; commit authored Muh-Adib; pushed with user-provided PAT via one-off URL (not persisted)
+
+Stage Summary:
+- Fish no longer have ping-pong-ball eyes: eyeballs are embedded in the head with socket shadow, iris and (now visible) pupil, sized to each species' head
+- Tail, dorsal/anal/pectoral/pelvic fins all share one coherent hull coordinate frame — nothing floats off the skin anymore
+- Files: FishGeometryFactory.ts (stat/surfaceXAt/eye seating/tail root/pectoral z/spike seat), .gitignore, worklog.md

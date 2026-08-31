@@ -55,3 +55,8 @@ server.log
 # local artifacts
 /db
 *.db
+
+# working artifacts (screenshots, probes) — never commit
+/download/
+/tool-results/
+/scripts/
