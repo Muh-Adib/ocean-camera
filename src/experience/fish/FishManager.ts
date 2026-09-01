@@ -65,13 +65,14 @@ const SCHOOL_DEFS: SchoolDef[] = [
   { species: 'butterflyfish', morph: 0, count: 7, anchor: [-53, -8, -47], spawnRadius: 4, params: { maxSpeed: 1.9, cohW: 0.3, wanderW: 3.0 }, scale: [0.9, 1.2], response: 0.8 },
   // Zone G — the northern spires
   { species: 'angelfish', morph: 0, count: 4, anchor: [12, 2, -72], spawnRadius: 4, params: { maxSpeed: 1.5, cohW: 0.5, wanderW: 1.6 }, scale: [1.1, 1.4], response: 0.7 },
-  { species: 'pufferfish', morph: 0, count: 3, anchor: [-14, -3, -66], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.2], response: 1.3 },
+  { species: 'pufferfish', morph: 0, count: 3, anchor: [-14, -0.5, -58], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.2], response: 1.3 },
 ]
 
 interface Entry {
   school: School
   mesh: THREE.InstancedMesh
   phaseAttr: THREE.InstancedBufferAttribute
+  puffAttr: THREE.InstancedBufferAttribute | null
   dummy: THREE.Object3D
 }
 
@@ -107,14 +108,23 @@ export class FishManager {
       this.schools.push(school)
 
       const { geometry, texture } = buildFish(def.species)
-      const swim = def.species === 'tropical' || def.species === 'minnow' ? 0.09 : def.species === 'pufferfish' ? 0.05 : 0.075
-      const freq = def.species === 'minnow' ? 11 : def.species === 'tropical' ? 9 : def.species === 'pufferfish' ? 6 : 7
-      const mat = makeFishMaterial(texture, swim, freq, `fish-${def.species}`)
+      const isPuffer = def.species === 'pufferfish'
+      const swim = def.species === 'tropical' || def.species === 'minnow' ? 0.09 : isPuffer ? 0.05 : 0.075
+      const freq = def.species === 'minnow' ? 11 : def.species === 'tropical' ? 9 : isPuffer ? 6 : 7
+      const mat = makeFishMaterial(texture, swim, freq, `fish-${def.species}`, { puff: isPuffer })
       this.mats.push(mat)
 
       const phaseAttr = new THREE.InstancedBufferAttribute(new Float32Array(count), 1)
       phaseAttr.setUsage(THREE.DynamicDrawUsage)
       geometry.setAttribute('aPhase', phaseAttr)
+
+      // pufferfish defence display — per-instance inflation 0..1
+      let puffAttr: THREE.InstancedBufferAttribute | null = null
+      if (isPuffer) {
+        puffAttr = new THREE.InstancedBufferAttribute(new Float32Array(count), 1)
+        puffAttr.setUsage(THREE.DynamicDrawUsage)
+        geometry.setAttribute('aPuff', puffAttr)
+      }
 
       const mesh = new THREE.InstancedMesh(geometry, mat, count)
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
@@ -124,20 +134,20 @@ export class FishManager {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
 
       this.group.add(mesh)
-      this.entries.push({ school, mesh, phaseAttr, dummy: new THREE.Object3D() })
+      this.entries.push({ school, mesh, phaseAttr, puffAttr, dummy: new THREE.Object3D() })
     }
 
     scene.add(this.group)
   }
 
-  update(dt: number, time: number, field: FieldCtx, pellets?: Pellet[]) {
+  update(dt: number, time: number, field: FieldCtx, pellets?: Pellet[], threats?: THREE.Vector3[]) {
     for (const e of this.entries) {
-      e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale, pellets)
+      e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale, pellets, threats)
     }
     // write matrices
     const camDir = new THREE.Vector3()
     for (const e of this.entries) {
-      const { school, mesh, phaseAttr, dummy } = e
+      const { school, mesh, phaseAttr, puffAttr, dummy } = e
       for (let i = 0; i < school.fish.length; i++) {
         const f = school.fish[i]
         dummy.position.copy(f.pos)
@@ -147,13 +157,15 @@ export class FishManager {
           dummy.lookAt(camDir)
           dummy.rotateZ(Math.sin(time * 0.7 + f.wanderSeed) * 0.08)
         }
-        dummy.scale.setScalar(f.scale)
+        dummy.scale.setScalar(f.scale * (1 + f.puff * 0.22))   // puffed puffers swell
         dummy.updateMatrix()
         mesh.setMatrixAt(i, dummy.matrix)
         phaseAttr.setX(i, f.phase)
+        if (puffAttr) puffAttr.setX(i, f.puff)
       }
       mesh.instanceMatrix.needsUpdate = true
       phaseAttr.needsUpdate = true
+      if (puffAttr) puffAttr.needsUpdate = true
     }
     // swim shader time
     for (const m of this.mats) updateFishMaterialTime(m, time)

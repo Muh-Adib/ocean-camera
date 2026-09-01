@@ -200,3 +200,26 @@ Work Log:
 Stage Summary:
 - Camera start no longer touches any CDN — works offline/restricted networks; failures still show specific reasons with retry
 - Repo history preserved and extended (no force push); push is a fast-forward on the real lineage
+
+---
+Task ID: 10
+Agent: main agent
+Task: Round pufferfish + spike-up defence display when a shark approaches; fix turtle swimming backwards + more detail; fix manta ("ikan patin") detached body/wings/tail
+
+Work Log:
+- Pufferfish rebuilt as a true globefish: near-spherical profile (blunt snout 0.115, fat belly 0.335, thick peduncle, len 0.4 ≈ height), w 1.04
+- Root-caused the spikes: cones were axis-mismatched (rotateX+rotateY pointed them sideways — half stabbed INTO the body). Now each spike is seated on the hull and oriented along the elliptic surface normal via quaternion; 78 spikes, orbit-clear around the eyes
+- Defence display: every spike vertex carries an aSpike apex weight (0 base → 1 tip); pufferfish material gains instanced aPuff and a shader that inflates the hull radially (0.17·core-falloff) while spine tips extend +0.34 — bases stay glued to the inflating skin. aPuff is written per-instance by FishManager; instances also swell 1.22× and slow to 20% speed while puffed
+- Threat plumbing: SpecialCreatures.getThreatPoints() exposes live shark positions → main → FishManager → Boids. All schools panic-bolt from sharks (weighted 4.5·t); pufferfish puff via pr²·(clamped 1.35× curve) and puff at the diver within 5u
+- Sharks rebuilt: 3 silhouettes (deep patrol z=-55, puffer-anchor crossing z=-12, camera-grazing z=+6, schedules 35-85s), fusiform 6.8:1 body, swept dorsal + second dorsal, long pectorals, two-lobed caudal fin, ×1.3 scale. Fixed the += PI rotation bug — they previously swam tail-first (same bug the turtle had)
+- Turtle: removed the +PI yaw flip (was visibly swimming backwards); added wrinkled mottled skin texture, parrot beak (two lobes), eyes with glints, tapered cambered paddle flippers pivoting at the shoulder with front/rear anti-phase stroke
+- Manta ("ikan patin"): whip tail now roots INSIDE the fuselage (front tip buried at z=+0.3 — was a floating cylinder behind the body); wings rebuilt as true 3D double-skin volumes with dark spotted tops, pale undersides, white shoulder patches; near-straight leading edge, forward-curving trailing edge; fuselage enlarged + counter-shaded dark-top/pale-belly; cephalic horns repositioned
+- Debug/QA hooks: __ocean.forceShark/forceTurtle/forceRay/puffs/threats/pufferPos/tp
+- Verified: tsc clean; fresh boot zero console/page errors; puffs rise 0→0.7 next to the diver; screenshots confirm spherical puffed body with radiating spines; dev-viewer close-ups (temporary /dev-creatures page, deleted) confirmed turtle facing/flipper detail, manta disc + white belly + rooted tail, shark silhouette
+- Noted: headless tab throttles RAF ~30× — visitor fades/paths crawl in CI; everything moves at real speed in a normal browser
+
+Stage Summary:
+- Pufferfish: round ball + spikes that rise when a shark (or the diver) gets close — the requested defence effect
+- Turtle: swims nose-first with richer skin/beak/eye/flipper detail
+- Manta: one continuous organism — body, wings and tail all connected, counter-shaded
+- Sharks: read as sharks, swim forward, and drive a visible panic response through the reef

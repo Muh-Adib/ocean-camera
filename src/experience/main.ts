@@ -347,7 +347,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     swU.uCurrentDir.value.y += (seaweedCurrent.z * 0.35 + field.ambientCurrent.y * 0.3 - swU.uCurrentDir.value.y) * blend
     swU.uCurrent.value += ((0.25 + field.strength * 0.5) - swU.uCurrent.value) * blend
 
-    fish.update(dt, elapsed, field.snapshot(), feeding.pellets)
+    fish.update(dt, elapsed, field.snapshot(), feeding.pellets, creatures.getThreatPoints())
     creatures.update(dt, elapsed)
     feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
@@ -368,6 +368,19 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
     fishCount: () => fish.count(),
     swimMode: () => swim.active,
+    forceShark: () => creatures.triggerPredator(),
+    forceTurtle: () => creatures.triggerTurtle(),
+    forceRay: () => creatures.triggerRay(),
+    puffs: () => fish.schools.filter((s) => s.species === 'pufferfish')
+      .map((s) => s.fish.map((f) => Math.round(f.puff * 100) / 100)),
+    threats: () => creatures.getThreatPoints().map((p) => p.toArray()),
+    pufferPos: () => fish.schools.filter((s) => s.species === 'pufferfish')
+      .map((s) => s.fish.map((f) => f.pos.toArray().map((n) => Math.round(n * 10) / 10))),
+    tp: (...args: unknown[]) => {
+      if (!swim.active) return false
+      swim.position.set(Number(args[0]), Number(args[1]), Number(args[2]))
+      return true
+    },
   }
 
   // ---------------- dispose ----------------

@@ -774,18 +774,20 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   pufferfish: {
-    body: { profile: [0.035, 0.15, 0.24, 0.29, 0.32, 0.28, 0.19, 0.09, 0.045], w: 1.0, h: 1.05, len: 0.48 },
-    tail: [0.12, 0.1, 0.05],
-    dorsal: [[0.02, 0.08], [-0.14, 0.06]],
-    anal: [[0.0, 0.07], [-0.14, 0.05]],
-    pectoral: 0.12, eyeR: 0.065, eyeIris: '#4a5a68',
+    // globefish — nearly spherical: blunt snout, fat belly, thick
+    // peduncle; length ≈ height so the silhouette reads as a ball
+    body: { profile: [0.075, 0.2, 0.275, 0.315, 0.335, 0.325, 0.28, 0.2, 0.115], w: 1.04, h: 1.0, len: 0.4 },
+    tail: [0.11, 0.09, 0.05],
+    dorsal: [[0.02, 0.07], [-0.12, 0.05]],
+    anal: [[0.0, 0.06], [-0.12, 0.04]],
+    pectoral: 0.11, eyeR: 0.062, eyeIris: '#4a5a68',
     finColor: '#c8b482', tailColor: '#c8b482',
     tex: {
       back: '#c9b384', belly: '#e8dcc0',
       spots: { color: '#4a3f2a', n: 16, r: 3.4 },
     },
     spikes: true,
-    spikeLen: 0.09,
+    spikeLen: 0.11,
   },
   moorish: {
     // Moorish idol — tall compressed body, trailing dorsal filament,
@@ -857,6 +859,7 @@ export const SPECIES_TINTS: Record<SpeciesKey, string[][]> = {
 export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; texture: THREE.CanvasTexture } {
   const def = SPECIES_DEFS[key]
   const parts: THREE.BufferGeometry[] = []
+  const spikeSet = new Set<THREE.BufferGeometry>()
 
   const { geo: body, radiusAt, widthAt, surfaceXAt } = makeHull(def.body)
   parts.push(body)
@@ -896,11 +899,14 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
   parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
 
-  // pufferfish spikes seated at the hull surface
+  // pufferfish spikes — seated at the hull surface and RADIATING
+  // outward (axis = local surface normal). Each vertex carries an
+  // `aSpike` apex weight (0 base → 1 tip) so the defence shader can
+  // anchor the base to the inflating skin while the tip extends.
   if (def.spikes) {
     const rng = mulberry32(7)
     const spikeLen = def.spikeLen ?? 0.07
-    for (let i = 0; i < 44; i++) {
+    for (let i = 0; i < 78; i++) {
       const a = rng() * Math.PI * 2
       const y = (rng() - 0.35) * 0.3
       const t = 0.25 + rng() * 0.45
@@ -912,25 +918,47 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
       // cross-section shrinks toward the ridge/belly — pull the base in with it
       const yHalf = Math.max(1e-4, profR * bbs.h)
       const shrink = Math.sqrt(Math.max(0.15, 1 - (yAbs / yHalf) * (yAbs / yHalf)))
-      const spike = new THREE.ConeGeometry(0.014, spikeLen, 4)
+      const px = Math.cos(a) * profR * bbs.w * 0.96 * shrink
+      // outward direction = elliptic surface normal at the base point
+      const dir = new THREE.Vector3(px / (profR * bbs.w + 1e-5), yAbs / yHalf, 0).normalize()
+      const spike = new THREE.ConeGeometry(0.016, spikeLen, 4)
       setUniformUV(spike)
-      spike.rotateX(Math.PI / 2)
-      spike.rotateY(a)
-      spike.translate(Math.cos(a) * profR * bbs.w * 0.96 * shrink, yAbs, z)
+      // apex weight BEFORE any transform: base ring 0 → tip 1
+      const sw = new Float32Array(spike.attributes.position.count)
+      for (let k = 0; k < sw.length; k++) {
+        sw[k] = clamp((spike.attributes.position.getY(k) + spikeLen / 2) / spikeLen, 0, 1)
+      }
+      spike.setAttribute('aSpike', new THREE.BufferAttribute(sw, 1))
+      spike.translate(0, spikeLen * 0.5 - 0.02, 0)      // base buried 0.02 in the skin
+      spike.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir))
+      spike.translate(px, yAbs, z)
       paintColors(spike, new THREE.Color('#b8a478'))
+      spikeSet.add(spike)
       parts.push(spike)
     }
   }
 
   const merged = mergeGeometries(
-    parts.map((p) => (p.index ? p.toNonIndexed() : p)),
+    parts.map((p) => {
+      const g = p.index ? p.toNonIndexed() : p
+      // every part must carry the attribute set — body verts never move
+      if (def.spikes && !g.attributes.aSpike) {
+        g.setAttribute('aSpike', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1))
+      }
+      return g
+    }),
     false,
   )!
   return { geometry: merged, texture: fishTexture(def.tex) }
 }
 
-/** shared material factory per species (scale bump, swim-bend, fin flutter, fresnel rim) */
-export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string): THREE.MeshStandardMaterial {
+/** shared material factory per species (scale bump, swim-bend, fin flutter, fresnel rim).
+ *  opts.puff → pufferfish defence display: `aPuff` (per-instance 0..1) inflates
+ *  the hull radially while spike tips (aSpike weight) extend off the skin. */
+export function makeFishMaterial(
+  texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string,
+  opts: { puff?: boolean } = {},
+): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     map: texture,
     bumpMap: fishBumpTexture(),
@@ -949,6 +977,7 @@ export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, 
     shader.vertexShader = `
       uniform float uTime, uSwimAmp, uSwimFreq;
       attribute float aPhase;
+      ${opts.puff ? 'attribute float aPuff;\n      attribute float aSpike;' : ''}
     ` + shader.vertexShader
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
       #include <begin_vertex>
@@ -960,6 +989,10 @@ export function makeFishMaterial(texture: THREE.CanvasTexture, swimAmp: number, 
         // fin membrane flutter — tall fin tips ripple softly out of phase
         float finMask = smoothstep(0.55, 1.4, abs(transformed.y)) * (1.0 - tTail);
         transformed.x += sin(uTime * uSwimFreq * 1.35 + aPhase * 1.7) * uSwimAmp * 0.4 * finMask;
+        ${opts.puff ? `// defence display: hull inflates radially, spines ride the skin
+        float coreFall = 1.0 - smoothstep(0.14, 0.3, abs(position.z));
+        float hullGrow = aPuff * 0.17 * coreFall;
+        transformed.xyz += normalize(position + vec3(1e-4)) * (hullGrow + aPuff * aSpike * 0.34);` : ''}
       }
     `)
     shader.fragmentShader = `

@@ -46,6 +46,7 @@ export interface FishState {
   wanderSeed: number
   speedNorm: number         // recent speed / maxSpeed (drives tail beat)
   braveTimer: number
+  puff: number              // 0..1 pufferfish defence display (spines out)
 }
 
 // scratch vectors (module-level, no allocation in hot loop)
@@ -92,6 +93,7 @@ export class School {
         wanderSeed: rand(0, 100),
         speedNorm: 0.5,
         braveTimer: 0,
+        puff: 0,
       })
     }
   }
@@ -103,12 +105,14 @@ export class School {
     }
   }
 
-  update(dt: number, time: number, field: FieldCtx, obstacles: Obstacle[], camera: THREE.Vector3, speedScale = 1, pellets?: Pellet[]) {
+  update(dt: number, time: number, field: FieldCtx, obstacles: Obstacle[], camera: THREE.Vector3, speedScale = 1, pellets?: Pellet[], threats?: THREE.Vector3[]) {
     const p = this.params
     const fish = this.fish
     const n = fish.length
     const maxSpeed = p.maxSpeed * speedScale
     const scatterBoost = 1 + field.scatter * 1.1
+    const isPuffer = this.species === 'pufferfish'
+    const threats_ = threats && threats.length ? threats : null
 
     for (let i = 0; i < n; i++) {
       const f = fish[i]
@@ -116,6 +120,40 @@ export class School {
       _sep.set(0, 0, 0); _ali.set(0, 0, 0); _coh.set(0, 0, 0)
       let sepCount = 0, neiCount = 0
       let frenzy = 1
+      let puffTarget = 0
+
+      // ---- predators: schools panic & scatter, pufferfish inflate ----
+      if (threats_) {
+        for (let k = 0; k < threats_.length; k++) {
+          const d = f.pos.distanceTo(threats_[k])
+          if (d < 15) {
+            const t = 1 - d / 15
+            // most fish bolt away; puffers face the threat and puff up
+            _tmp.subVectors(f.pos, threats_[k])
+            if (d > 1e-4) _tmp.multiplyScalar(1 / d)
+            if (isPuffer) {
+              const pr = Math.min(1, (1 - d / 14) * 1.35)
+              puffTarget = Math.max(puffTarget, pr * pr)
+              if (f.puff < 0.55 && d > 1.2) {
+                _tmp.setLength(maxSpeed * 0.9).sub(f.vel)
+                this.limit(_tmp, p.maxForce * 1.4)
+                f.acc.addScaledVector(_tmp, 2.2)      // sluggish escape attempt
+              }
+            } else {
+              _tmp.setLength(maxSpeed * 1.25).sub(f.vel)
+              this.limit(_tmp, p.maxForce * 2.2)
+              f.acc.addScaledVector(_tmp, 4.5 * t)    // panic burst
+            }
+          }
+        }
+      }
+
+      // pufferfish also puff when the diver swims right up to them
+      if (isPuffer) {
+        const dc = f.pos.distanceTo(camera)
+        if (dc < 5) puffTarget = Math.max(puffTarget, Math.min(1, (1 - dc / 5) * 1.15))
+        f.puff += (puffTarget - f.puff) * Math.min(1, dt * 3.2)
+      }
 
       // ---- feeding frenzy: race to the nearest unclaimed pellet ----
       if (pellets && pellets.length) {
@@ -260,9 +298,9 @@ export class School {
 
       // ---- integrate ----
       f.vel.addScaledVector(f.acc, dt)
-      f.vel.multiplyScalar(1 - Math.min(1, dt * (field.mode === 'pull' ? 1.2 : 0.35)))
+      f.vel.multiplyScalar(1 - Math.min(1, dt * ((field.mode === 'pull' ? 1.2 : 0.35) + (isPuffer ? f.puff * 2.2 : 0))))
       const sp = f.vel.length()
-      const maxSp = maxSpeed * scatterBoost * frenzy * (1 + field.strength * 0.35)
+      const maxSp = maxSpeed * scatterBoost * frenzy * (1 + field.strength * 0.35) * (1 - (isPuffer ? f.puff * 0.8 : 0))
       if (sp > maxSp) f.vel.multiplyScalar(maxSp / sp)
       if (sp < maxSpeed * 0.22 && sp > 1e-5) f.vel.multiplyScalar((maxSpeed * 0.22) / sp)
       f.pos.addScaledVector(f.vel, dt)
