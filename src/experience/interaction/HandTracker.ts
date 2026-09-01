@@ -1,11 +1,16 @@
 // ---------------------------------------------------------------
-// HandTracker — MediaPipe Hands (tasks-vision) via CDN, running
-// 100% locally in the browser (WASM). No video ever leaves the
-// device; the feed is never rendered to the page.
+// HandTracker — MediaPipe Hands (tasks-vision), running 100%
+// locally in the browser. The JS is bundled from npm, the WASM
+// backend and the hand model are served from /public/mediapipe.
+// No CDN is involved → tracking also works offline and behind
+// strict networks/firewalls that previously broke camera start.
+//
+// No video ever leaves the device; the feed is never rendered.
 //
 // Emits per-frame hand samples: mirrored palm position (0..1),
 // openness (0 fist → 1 open), scale (distance proxy for push/pull).
 // ---------------------------------------------------------------
+import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import { clamp, damp } from '../utils/math'
 
 export interface HandSample {
@@ -19,12 +24,9 @@ export interface HandSample {
 
 type Landmark = { x: number; y: number; z: number }
 
-const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs'
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task'
-
-/** bundler-bypassing dynamic import so Turbopack leaves the CDN URL alone */
-const cdnImport = new Function('u', 'return import(u)') as (u: string) => Promise<any>
+/** local assets served by Next from /public — zero CDN dependency */
+const WASM_PATH = '/mediapipe/wasm'
+const MODEL_PATH = '/mediapipe/models/hand_landmarker.task'
 
 export type CameraFailure =
   | 'insecure'    // no getUserMedia (http / unsupported browser)
@@ -137,21 +139,21 @@ export class HandTracker {
       if (this.running) this.fail('lost')
     })
 
-    // 3) MediaPipe from CDN (local WASM inference; GPU → CPU fallback)
-    //    every network step is time-boxed so the button can never spin forever
+    // 3) MediaPipe — fully local (bundled JS + /public WASM & model)
+    //    GPU → CPU fallback; every step is time-boxed so the button
+    //    can never spin forever
     try {
-      const vision = await withTimeout(cdnImport(VISION_URL), 12000, 'tasks-vision import')
-      const fileset = await withTimeout(vision.FilesetResolver.forHandTasks(WASM_URL), 12000, 'wasm fileset')
+      const fileset = await withTimeout(FilesetResolver.forVisionTasks(WASM_PATH), 12000, 'wasm fileset')
       try {
-        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'GPU' },
+        this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
           runningMode: 'VIDEO',
           numHands: 1,
         }), 20000, 'gpu landmarker')
       } catch {
         // some devices/drivers reject the GPU delegate — CPU still runs fine
-        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
-          baseOptions: { modelAssetPath: MODEL_URL, delegate: 'CPU' },
+        this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
           runningMode: 'VIDEO',
           numHands: 1,
         }), 20000, 'cpu landmarker')

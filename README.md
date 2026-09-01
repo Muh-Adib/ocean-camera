@@ -102,7 +102,7 @@ Hand tracking also degrades gracefully: **GPU inference falls back to CPU** auto
 |---|---|
 | 3D rendering | [Three.js](https://threejs.org) (WebGL, InstancedMesh, custom shaders) |
 | Animation / sequencing | [GSAP](https://gsap.com) |
-| Hand tracking | [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) via CDN, WASM inference on-device |
+| Hand tracking | [MediaPipe Hand Landmarker](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker) — bundled locally (npm JS + `/public/mediapipe` WASM & model), WASM inference on-device, **zero CDN** |
 | Framework | [Next.js](https://nextjs.org) (App Router) — React only mounts the container; the entire experience is framework-free TypeScript in `src/experience/` |
 | Audio | Procedural WebAudio (no audio files) |
 
@@ -130,6 +130,7 @@ src/experience/
 ## 🔒 Privacy
 
 - Camera frames are processed **entirely on-device** via WASM.
+- The whole tracking engine is served with the app — no CDN requests, so hand tracking keeps working offline and on restricted networks.
 - The video element is never rendered to the page — nothing is recorded, stored or uploaded.
 - Only derived, anonymous hand geometry (palm position, openness, scale) is used, and only to drive forces inside the scene.
 

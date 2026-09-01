@@ -180,3 +180,23 @@ Stage Summary:
 - Fish no longer have ping-pong-ball eyes: eyeballs are embedded in the head with socket shadow, iris and (now visible) pupil, sized to each species' head
 - Tail, dorsal/anal/pectoral/pelvic fins all share one coherent hull coordinate frame — nothing floats off the skin anymore
 - Files: FishGeometryFactory.ts (stat/surfaceXAt/eye seating/tail root/pectoral z/spike seat), .gitignore, worklog.md
+
+---
+Task ID: 7-b
+Agent: main agent
+Task: kamera masih error + env detail; reconcile local work with the real remote lineage and push
+
+Work Log:
+- Discovered remote main (521a0be) holds a RICHER lineage from the prior session (ray-finned fish v4, scute turtle, 3D manta, feeding frenzy, SwimController, Biomes, WaterSurface) — local workspace was a stale orphan branch; force-push would have destroyed that work
+- Adopted remote lineage: git reset --hard remote-main; verified its superset (bait-ball, ReefDecor, biomes already exist there)
+- ROOT-CAUSED "kamera masih error": remote HandTracker still imported tasks-vision from jsdelivr CDN + model from storage.googleapis.com → any CDN/firewall hiccup kills camera start
+- Ported the local-engine fix onto the remote lineage: static npm import (@mediapipe/tasks-vision 0.10.14), WASM → public/mediapipe/wasm, hand_landmarker.task (7.8 MB) → public/mediapipe/models; forVisionTasks local paths; kept remote's CameraFailure taxonomy, inflight dedup, timeouts, GPU→CPU fallback; package.json + bun.lock updated; zero CDN at runtime now
+- Restored public/mediapipe assets from the amended stale commit after reset wiped tracked copies
+- README: tech-stack row + privacy bullet updated for the fully-local engine
+- Added QA hooks in main.ts (__ocean: fast/yaw/pos/fishCount/swimMode) matching remote's CameraRig/SwimController APIs
+- Fixed tsc: FilesetResolver.forHandTasks → forVisionTasks (npm typings)
+- Verified headless (agent-browser 480×320, swiftshader ~3fps): boot→intro→DIVE IN→HUD (226 fish), F free-swim toggle, keyboard D turn (yaw −0.111), camera failure panel "NO CAMERA FOUND" with TRY AGAIN, zero console/page errors
+
+Stage Summary:
+- Camera start no longer touches any CDN — works offline/restricted networks; failures still show specific reasons with retry
+- Repo history preserved and extended (no force push); push is a fast-forward on the real lineage

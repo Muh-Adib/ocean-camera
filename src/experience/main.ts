@@ -361,6 +361,15 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   ui.runLoadingSequence(2600)
   loop()
 
+  // QA/testing hooks (harmless in production, handy in devtools & CI)
+  ;(window as unknown as { __ocean: Record<string, (...args: unknown[]) => unknown> }).__ocean = {
+    fast: () => { gsap.ticker.lagSmoothing(false) },
+    yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
+    pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
+    fishCount: () => fish.count(),
+    swimMode: () => swim.active,
+  }
+
   // ---------------- dispose ----------------
   return {
     dispose: () => {
