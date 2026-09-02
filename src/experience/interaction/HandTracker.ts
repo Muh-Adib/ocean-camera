@@ -22,7 +22,7 @@ export interface HandSample {
   t: number
 }
 
-type Landmark = { x: number; y: number; z: number }
+export type Landmark = { x: number; y: number; z: number }
 
 /** local assets served by Next from /public — zero CDN dependency */
 const WASM_PATH = '/mediapipe/wasm'
@@ -59,6 +59,8 @@ export class HandTracker {
   private running = false
   private lastSample: HandSample = { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: 0 }
   private smoothed: HandSample = { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: 0 }
+  /** latest raw landmarks (mirrored to match sample.x) — feeds the gesture view overlay */
+  lastLandmarks: Landmark[] | null = null
   onStatus?: (status: 'loading' | 'ready' | 'denied' | 'error' | 'stopped') => void
   onFailure?: (reason: CameraFailure) => void
 
@@ -177,6 +179,7 @@ export class HandTracker {
     this.stream = null
     this.lastSample.present = false
     this.smoothed.present = false
+    this.lastLandmarks = null
   }
 
   /** call once per animation frame; returns smoothed sample */
@@ -194,11 +197,14 @@ export class HandTracker {
         if (lm && lm.length >= 21) {
           const s = this.extract(lm, now)
           this.lastSample = s
+          this.lastLandmarks = lm.map((p) => ({ x: 1 - p.x, y: p.y, z: p.z }))
         } else {
           this.lastSample.present = false
+          this.lastLandmarks = null
         }
       } catch {
         this.lastSample.present = false
+        this.lastLandmarks = null
       }
     }
 

@@ -436,3 +436,118 @@
   .load-title { animation: none; }
   .hud-status[data-mode='hand'] .status-dot { animation: none; }
 }
+
+/* ---------------- gesture camera view ---------------- */
+#gesture-view {
+  position: absolute;
+  right: 1.1rem;
+  bottom: 4.6rem;
+  width: 236px;
+  background: linear-gradient(180deg, rgba(10, 42, 60, 0.94), rgba(4, 22, 36, 0.94));
+  border: 1px solid rgba(150, 215, 235, 0.24);
+  border-radius: 16px;
+  padding: 0.8rem 0.85rem 0.75rem;
+  z-index: 18;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 14px 38px rgba(0, 8, 14, 0.45);
+}
+.gv-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6rem;
+}
+.gv-header span:first-child {
+  font-size: 0.58rem;
+  letter-spacing: 0.22em;
+  color: #9fd8e8;
+  font-weight: 600;
+}
+.gv-close {
+  background: none;
+  border: none;
+  color: rgba(170, 220, 240, 0.75);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  border-radius: 6px;
+}
+.gv-close:hover { color: #fff; background: rgba(150, 215, 235, 0.14); }
+.gv-stage {
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(150, 215, 235, 0.18);
+  margin-bottom: 0.65rem;
+  background: #021019;
+}
+.gv-canvas { display: block; width: 100%; height: auto; }
+.gv-rows { display: flex; flex-direction: column; gap: 0.42rem; }
+.gv-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: rgba(160, 205, 225, 0.85);
+}
+.gv-row > span:first-child { width: 74px; flex: none; }
+.gv-dot {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: #5b7c8c;
+  transition: background 0.3s, box-shadow 0.3s;
+}
+.gv-dot.is-on {
+  background: #59e8a8;
+  box-shadow: 0 0 8px rgba(89, 232, 168, 0.8);
+}
+.gv-val { color: #d5eef8; letter-spacing: 0.08em; }
+.gv-chip {
+  flex: 1;
+  text-align: center;
+  padding: 0.22rem 0.3rem;
+  border-radius: 999px;
+  border: 1px solid rgba(150, 215, 235, 0.2);
+  color: rgba(170, 210, 228, 0.8);
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  transition: all 0.25s;
+}
+.gv-chip[data-active='true'] {
+  background: rgba(89, 214, 232, 0.18);
+  border-color: rgba(110, 231, 255, 0.55);
+  color: #bdf1ff;
+  box-shadow: 0 0 12px rgba(110, 231, 255, 0.25);
+}
+.gv-track {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(20, 60, 84, 0.85);
+  border: 1px solid rgba(150, 215, 235, 0.14);
+  overflow: hidden;
+}
+.gv-bar {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #3ec6e8, #7ee9ff);
+  transition: width 0.18s ease-out, left 0.18s ease-out;
+}
+.gv-hint {
+  margin: 0.6rem 0 0;
+  font-size: 0.56rem;
+  line-height: 1.6;
+  color: rgba(140, 185, 205, 0.7);
+}
+
+@media (max-width: 640px) {
+  #gesture-view {
+    right: 0.7rem;
+    left: 0.7rem;
+    width: auto;
+    bottom: 4.2rem;
+  }
+}

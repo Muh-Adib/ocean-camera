@@ -22,6 +22,18 @@ export interface GestureCallbacks {
   onFistStart?: () => void
 }
 
+export type GestureName = 'idle' | 'current' | 'swipe' | 'push' | 'pull' | 'attract' | 'caution'
+
+export interface GestureStatus {
+  name: GestureName
+  strength: number       // 0..1 reaction strength of the active gesture
+  handPresent: boolean
+  openness: number
+  scaleRate: number      // push(+)/pull(-) rate
+  vx: number             // hand velocity, normalized units/s
+  vy: number
+}
+
 const SWIPE_SPEED = 0.82          // normalized units / s (tuned: easier to trigger)
 const PUSH_RATE = 0.42            // scale units / s (tuned: easier push/pull)
 const PALM_ON = 0.54              // open-palm threshold (tuned: easier to hold)
@@ -44,6 +56,10 @@ export class GestureEngine {
   private worldPoint = new THREE.Vector3()
   private dirVec = new THREE.Vector3()
   private ray = new THREE.Raycaster()
+  private scaleRate = 0
+
+  /** live snapshot for HUD / gesture visualization panel */
+  status: GestureStatus = { name: 'idle', strength: 0, handPresent: false, openness: 0, scaleRate: 0, vx: 0, vy: 0 }
 
   constructor(
     private camera: Camera,
@@ -63,8 +79,15 @@ export class GestureEngine {
     if (!sample.present) {
       // hand lost → let the field die out naturally
       this.field.setHandActive(false)
+      this.status.name = 'idle'
+      this.status.strength = 0
+      this.status.handPresent = false
       return
     }
+    this.status.handPresent = true
+    this.status.openness = sample.openness
+    this.status.vx = this.vx
+    this.status.vy = this.vy
     this.field.setHandActive(true)
 
     const t = sample.t
@@ -89,7 +112,9 @@ export class GestureEngine {
 
     // scale rate → push / pull
     const scaleRef = this.hist.find((h) => t - h.t >= 180) ?? this.hist[0]
-    const scaleRate = (sample.scale - scaleRef.scale) / (Math.max(60, t - scaleRef.t) / 1000)
+    this.scaleRate = (sample.scale - scaleRef.scale) / (Math.max(60, t - scaleRef.t) / 1000)
+    this.status.scaleRate = this.scaleRate
+    const scaleRate = this.scaleRate
 
     // openness with hysteresis
     if (!this.palmMode && sample.openness > PALM_ON) this.palmHold += dt
@@ -119,18 +144,26 @@ export class GestureEngine {
 
     if (this.palmMode) {
       // open palm → attraction beam, strength from steadiness
+      this.status.name = 'attract'
+      this.status.strength = 0.55 + sample.openness * 0.3
       this.field.setTarget(this.worldPoint, undefined, 0.55 + sample.openness * 0.3, 'attract')
     } else if (this.fistMode) {
+      this.status.name = 'caution'
+      this.status.strength = 0.6
       this.field.setTarget(this.worldPoint, undefined, 0.6, 'repel')
     } else if (scaleRate > PUSH_RATE && now - this.lastPush > 760 && speed < SWIPE_SPEED * 1.4) {
       // push: hand surges toward the camera
       const strength = clamp((scaleRate - PUSH_RATE) / 0.65, 0.35, 1)
+      this.status.name = 'push'
+      this.status.strength = strength
       this.lastPush = now
       this.cb.onPush?.(strength, this.worldPoint.clone())
       this.field.gestureEvent('push', strength)
       this.field.setTarget(this.worldPoint, new THREE.Vector3(0, 0, 1), strength, 'push')
     } else if (scaleRate < -PUSH_RATE && now - this.lastPull > 900 && speed < SWIPE_SPEED * 1.4) {
       const strength = clamp((-scaleRate - PUSH_RATE) / 0.65, 0.3, 1)
+      this.status.name = 'pull'
+      this.status.strength = strength
       this.lastPull = now
       this.cb.onPull?.(strength)
       this.field.gestureEvent('pull', strength)
@@ -143,6 +176,8 @@ export class GestureEngine {
         if (ax > ay) dirName = this.vx > 0 ? 'right' : 'left'
         else dirName = this.vy > 0 ? 'down' : 'up'
         const strength = clamp((speed - 0.4) / 1.5, 0.3, 1)
+        this.status.name = 'swipe'
+        this.status.strength = strength
         this.lastSwipe = now
         this.dirVec.set(
           ax > ay ? Math.sign(this.vx) : 0,
@@ -156,6 +191,8 @@ export class GestureEngine {
     } else {
       // continuous gentle current from hand motion
       const cur = clamp(speed / 1.25, 0, 0.65)
+      this.status.name = speed > 0.08 ? 'current' : 'idle'
+      this.status.strength = cur
       if (speed > 0.08) {
         this.dirVec.set(this.vx, -this.vy, 0).normalize()
         this.field.setTarget(this.worldPoint, this.dirVec, cur, 'current')

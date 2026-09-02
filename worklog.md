@@ -223,3 +223,24 @@ Stage Summary:
 - Turtle: swims nose-first with richer skin/beak/eye/flipper detail
 - Manta: one continuous organism — body, wings and tail all connected, counter-shaded
 - Sharks: read as sharks, swim forward, and drive a visible panic response through the reef
+
+---
+Task ID: 2
+Agent: main (Super Z)
+Task: Gesture camera view panel + ikan patin species, rebased onto the GitHub lineage (hand-tracking bundle, fish v4, feeding, swim mode)
+
+Work Log:
+- Discovered local repo had diverged from origin (origin holds the newer lineage: locally-bundled MediaPipe, ray-finned fish v4, Feeding, SwimController, wider ocean, tuned gesture thresholds). Reset local main onto origin/main to preserve the user-approved work.
+- Ported onto that base:
+  - NEW src/experience/ui/GestureView.ts — "CAMERA · GESTURE ENGINE" panel: live mirrored camera preview, 21-landmark skeleton overlay (MediaPipe bone graph, fingertip highlights), control crosshair, HAND tracked/searching dot, gesture chip (NO GESTURE / WATER CURRENT / SWIPE / PUSH / PULL / ATTRACT / CAUTION), openness meter, centered push/pull meter, hand-speed meter, local-processing privacy note. 30 fps throttled, GSAP in/out, mobile full-width layout. Toggled from a new eye HUD button (hud-vision).
+  - GestureEngine: public `status` snapshot (name/strength/openness/scaleRate/vx/vy) maintained across all gesture branches; remote's tuned thresholds preserved.
+  - HandTracker: public mirrored `lastLandmarks` for the overlay (cleared on loss/stop).
+  - UI: vision button + setGestureViewActive; main.ts: panel wiring, loop update, dispose.
+  - NEW species 'patin' (silver catfish) in fish v4 architecture: SpeciesDef + tint + school (2 groups: mid-water reef formation + eastern sands), swim/freq tuning, and `barbels` support in buildFish (cone feelers rooted at the upper lip via hull widthAt/radiusAt lookups). Hull-continuous by construction (v4 swept hull + seated fins), so body/fins/tail can never read as separated.
+  - QA hook: added `parkPuffer` + generic `park(species,i,x,y,z)` staging helpers.
+- Installed @mediapipe/tasks-vision@0.10.14 (bun) for the bundled tracker import; restarted dev server.
+- Verified headless: intro→dive→HUD→panel open/close + mobile layout, 236 fish, console clean after server restart, tsc clean; puff defence cycle re-verified on merged base via forceShark + parkPuffer → puffs [0.95,...]; patin close-up screenshots confirm continuous silver catfish silhouette with forked tail.
+
+Stage Summary:
+- User request satisfied: gesture camera now has a visible "how it works" view (preview + skeleton + live gesture readouts), and gesture handling rides the hardened local tracker (no CDN, timeouts, GPU→CPU fallback, friendly failure panels).
+- Patin swims in the ocean again with fully fused detailing; pufferfish/shark/turtle realism retained from the approved origin lineage.

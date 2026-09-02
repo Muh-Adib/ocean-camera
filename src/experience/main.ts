@@ -31,6 +31,7 @@ import { PointerFallback } from './interaction/PointerFallback'
 import { SwimController } from './interaction/SwimController'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
+import { GestureView } from './ui/GestureView'
 import { rand, pick } from './utils/math'
 
 export interface ExperienceHandle {
@@ -152,6 +153,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
 
   // ---------------- UI ----------------
   let entered = false
+  const gestureView = new GestureView(container)
   const ui = new UI(container, {
     onDive: () => enterExperience(false),
     onEnableCamera: () => enterExperience(true),
@@ -175,6 +177,13 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     },
     onShowGuide: () => ui.showGuide(),
     onToggleSwim: () => swim.setActive(!swim.active),
+    onToggleGestureView: () => {
+      const active = gestureView.toggle()
+      ui.setGestureViewActive(active)
+      if (active && !handTracker.isRunning) {
+        ui.toast('Enable the camera to see live hand detection.', 3400)
+      }
+    },
     onSwimBoost: (on) => { swim.forwardBoost = on ? 1 : 0 },
     onFeed: () => doFeed(),
   })
@@ -324,10 +333,13 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     if (handTracker.isRunning) {
       const sample = handTracker.detect(dt)
       gestureEngine.update(sample, dt)
+      gestureView.update(dt, sample, handTracker.lastLandmarks, gestureEngine.status, true, handTracker.video)
       // in swim mode the palm doubles as a steering joystick
       if (swim.active) {
         swim.setHandSteer(sample.x, sample.y, sample.present, sample.present && sample.openness < 0.28)
       }
+    } else {
+      gestureView.update(dt, null, null, gestureEngine.status, false, null)
     }
     field.update(dt)
 
@@ -373,6 +385,23 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     forceRay: () => creatures.triggerRay(),
     puffs: () => fish.schools.filter((s) => s.species === 'pufferfish')
       .map((s) => s.fish.map((f) => Math.round(f.puff * 100) / 100)),
+    parkPuffer: (...args: unknown[]) => {
+      const pf = fish.schools.find((s) => s.species === 'pufferfish')
+      const f = pf?.fish[Number(args[0] ?? 0)]
+      if (!f) return false
+      f.pos.set(Number(args[1]), Number(args[2]), Number(args[3]))
+      f.vel.set(0, 0, 0)
+      return true
+    },
+    park: (...args: unknown[]) => {
+      // park(species, index, x, y, z) — QA staging helper
+      const s = fish.schools.find((sc) => sc.species === String(args[0]))
+      const f = s?.fish[Number(args[1] ?? 0)]
+      if (!f) return false
+      f.pos.set(Number(args[2]), Number(args[3]), Number(args[4]))
+      f.vel.set(0, 0, 0)
+      return true
+    },
     threats: () => creatures.getThreatPoints().map((p) => p.toArray()),
     pufferPos: () => fish.schools.filter((s) => s.species === 'pufferfish')
       .map((s) => s.fish.map((f) => f.pos.toArray().map((n) => Math.round(n * 10) / 10))),
@@ -391,6 +420,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       handTracker.stop()
       swim.disable()
       audio.dispose()
+      gestureView.dispose()
       disposers.forEach((d) => d())
       sceneMgr.dispose()
       container.innerHTML = ''

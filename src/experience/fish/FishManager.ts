@@ -53,6 +53,9 @@ const SCHOOL_DEFS: SchoolDef[] = [
   { species: 'minnow', morph: 0, count: 90, anchor: [-2, 5.5, -32], spawnRadius: 5, params: { maxSpeed: 4.4, maxForce: 12, sepW: 1.3, aliW: 2.8, cohW: 1.7, wanderW: 1.5, separationR: 0.65, perceptionR: 2.8 }, scale: [0.42, 0.58], response: 1.4 },
   // curious wanderers
   { species: 'pufferfish', morph: 0, count: 4, anchor: [2, -1.5, -12], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, aliW: 0.1, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.25], response: 1.3 },
+  // ikan patin — silver catfish gliding in mid-water formation
+  { species: 'patin', morph: 0, count: 9, anchor: [-9, 2.5, -27], spawnRadius: 5.5, params: { maxSpeed: 2.1, cohW: 1.1, aliW: 1.0, wanderW: 2.0 }, scale: [1.3, 1.7], response: 0.95 },
+  { species: 'patin', morph: 0, count: 6, anchor: [30, 3.5, -52], spawnRadius: 5, params: { maxSpeed: 2.0, cohW: 1.1, aliW: 1.0, wanderW: 2.1 }, scale: [1.2, 1.55], response: 0.95 },
   // Zone D — kelp forest (north-west): tang weaving through the fronds
   { species: 'tang', morph: 0, count: 10, anchor: [-42, -1, -48], spawnRadius: 6, params: { maxSpeed: 2.1, cohW: 0.9 }, scale: [1.15, 1.5], response: 0.85 },
   // second bait ball — silver flashes inside the kelp shadows
@@ -109,8 +112,8 @@ export class FishManager {
 
       const { geometry, texture } = buildFish(def.species)
       const isPuffer = def.species === 'pufferfish'
-      const swim = def.species === 'tropical' || def.species === 'minnow' ? 0.09 : isPuffer ? 0.05 : 0.075
-      const freq = def.species === 'minnow' ? 11 : def.species === 'tropical' ? 9 : isPuffer ? 6 : 7
+      const swim = def.species === 'tropical' || def.species === 'minnow' ? 0.09 : isPuffer ? 0.05 : def.species === 'patin' ? 0.08 : 0.075
+      const freq = def.species === 'minnow' ? 11 : def.species === 'tropical' ? 9 : isPuffer ? 6 : def.species === 'patin' ? 6.5 : 7
       const mat = makeFishMaterial(texture, swim, freq, `fish-${def.species}`, { puff: isPuffer })
       this.mats.push(mat)
 

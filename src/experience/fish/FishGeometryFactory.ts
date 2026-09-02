@@ -27,7 +27,7 @@ import { clamp, mulberry32 } from '../utils/math'
 
 export type SpeciesKey =
   | 'tropical' | 'angelfish' | 'butterflyfish' | 'clownfish' | 'tang' | 'pufferfish'
-  | 'moorish' | 'squirrel' | 'minnow'
+  | 'moorish' | 'squirrel' | 'minnow' | 'patin'
 
 const WHITE_UV = 0.965
 
@@ -701,6 +701,7 @@ interface SpeciesDef {
   tex: TexSpec
   spikes?: boolean
   spikeLen?: number
+  barbels?: boolean                // catfish whiskers draping from the upper lip
 }
 
 export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
@@ -834,6 +835,23 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
       bands: [{ v: 0.5, w: 0.05, color: 'rgba(70,88,106,0.55)', soft: true }],   // faint lateral band
     },
   },
+  patin: {
+    // ikan patin — silver catfish: broad blunt head, deep mirror flanks,
+    // long low dorsal/anal paddles, big pectoral wings, forked tail,
+    // twin barbels draping from the upper lip
+    body: { profile: [0.02, 0.09, 0.155, 0.19, 0.2, 0.18, 0.145, 0.09, 0.04], w: 0.6, h: 1.18, len: 0.85 },
+    tail: [0.26, 0.22, 0.8],
+    dorsal: [[0.12, 0.05], [-0.04, 0.075], [-0.2, 0.055], [-0.36, 0.02]],
+    anal: [[-0.02, 0.05], [-0.22, 0.055], [-0.42, 0.015]],
+    pectoral: 0.26, eyeR: 0.034, eyeIris: '#243038',
+    finColor: '#96a6b0', tailColor: '#a7b6c0',
+    tex: {
+      back: '#8fa6b4', belly: '#eef4f7',
+      flankLines: { color: '#f5f8fa', n: 3, alpha: 0.3 },
+      bands: [{ v: 0.4, w: 0.45, color: 'rgba(110,140,160,0.16)', soft: true }],
+    },
+    barbels: true,
+  },
 }
 
 // per-species instance tint palettes (multiplied over the texture)
@@ -853,6 +871,7 @@ export const SPECIES_TINTS: Record<SpeciesKey, string[][]> = {
   moorish: [['#ffffff', '#fff0c8']],
   squirrel: [['#ffffff', '#ffc8b8']],
   minnow: [['#f2f7fa', '#d4e2ea']],
+  patin: [['#e6eef3', '#c3d2da']],
 }
 
 // ------------------------- assembly -------------------------
@@ -889,6 +908,25 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const pelZ = bbs.len * 0.08
   parts.push(placePelvic(1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
   parts.push(placePelvic(-1, def.pectoral * 0.9, finC, widthAt(pelZ) * bbs.w, -radiusAt(pelZ) * bbs.h * 0.62, pelZ))
+
+  // catfish barbels — slim feelers rooted in the upper lip, draped forward
+  if (def.barbels) {
+    const barbelZ = bbs.len * 0.42
+    const barbelY = -radiusAt(barbelZ) * bbs.h * 0.22
+    const barbelC = finC.clone().multiplyScalar(0.72)
+    for (const s of [1, -1] as const) {
+      const g = new THREE.ConeGeometry(0.011, 0.17, 5)
+      g.translate(0, 0.085, 0)                     // pivot at the base
+      g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0),
+        new THREE.Vector3(s * 0.3, -0.8, 0.52).normalize(),
+      ))
+      g.translate(s * widthAt(barbelZ) * bbs.w * 0.6, barbelY, barbelZ)
+      setUniformUV(g)
+      paintColors(g, barbelC)
+      parts.push(g)
+    }
+  }
 
   // eyes — seated IN the flank at the true skin surface, sized to the head
   // z = 0.28·L ≈ station 0.78 (on the head, ahead of the gill plate)

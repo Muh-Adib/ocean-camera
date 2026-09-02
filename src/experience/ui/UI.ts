@@ -14,6 +14,7 @@ export interface UICallbacks {
   onToggleCamera: () => void
   onShowGuide: () => void
   onToggleSwim: () => void
+  onToggleGestureView: () => void
   onSwimBoost: (on: boolean) => void
   onFeed: () => void
 }
@@ -34,6 +35,7 @@ export class UI {
   private camHelpTimer = 0
   private soundBtn!: HTMLButtonElement
   private camBtn!: HTMLButtonElement
+  private visionBtn!: HTMLButtonElement
   private swimBtn!: HTMLButtonElement
   private feedBtn!: HTMLButtonElement
   private paddleEl: HTMLElement | null = null
@@ -208,9 +210,10 @@ export class UI {
     this.camBtn = this.iconButton('cam', 'Camera hand tracking', this.cb.onToggleCamera, 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z M9 3l-1.5 2h-3A2.5 2.5 0 0 0 2 7.5v9A2.5 2.5 0 0 0 4.5 19h15a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 19.5 5h-3L15 3H9z')
     this.swimBtn = this.iconButton('swim', 'Free swim — explore the open ocean', this.cb.onToggleSwim, 'M2 12c4-5.2 10.5-5.2 14.5-.6L22 7.4v9.2l-5.5-4C12.5 17.2 6 17.2 2 12z')
     this.feedBtn = this.iconButton('feed', 'Scatter food — feed the fish (G)', this.cb.onFeed, 'M12 3.2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M6.2 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M17.8 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M9 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M15 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z')
+    this.visionBtn = this.iconButton('vision', 'Gesture camera view — see how the detection works', this.cb.onToggleGestureView, 'M12 5c-5 0-9.3 3.1-11 7.5C2.7 16.9 7 20 12 20s9.3-3.1 11-7.5C21.3 8.1 17 5 12 5z M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z')
     const helpBtn = this.iconButton('help', 'Gesture guide', this.cb.onShowGuide, 'M11 18h2v-2h-2v2z M12 6a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 .9-.4 1.4-1.2 2-.9.7-1.8 1.4-1.8 3h2c0-.7.4-1.1 1.1-1.7.9-.7 1.9-1.5 1.9-3.3A4 4 0 0 0 12 6z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z')
 
-    controls.append(this.soundBtn, this.camBtn, this.swimBtn, this.feedBtn, helpBtn)
+    controls.append(this.soundBtn, this.camBtn, this.swimBtn, this.feedBtn, this.visionBtn, helpBtn)
     this.hudEl.appendChild(controls)
 
     // touch forward paddle — hold to glide ahead while free-swimming
@@ -291,6 +294,10 @@ export class UI {
     this.swimBtn.classList.toggle('is-active', active)
     this.swimBtn.setAttribute('aria-label', active ? 'Stop free swimming' : 'Free swim — explore the open ocean')
     if (this.paddleEl) this.paddleEl.style.display = active ? 'flex' : 'none'
+  }
+
+  setGestureViewActive(active: boolean) {
+    this.visionBtn.classList.toggle('is-active', active)
   }
 
   // ------------------------------------------------------ camera help
