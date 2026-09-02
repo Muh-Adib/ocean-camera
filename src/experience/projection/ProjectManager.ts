@@ -18,6 +18,9 @@ export interface ProjectHost {
 }
 
 export class ProjectManager {
+  /** fired after every successful localStorage persist (studio → /output live sync) */
+  onSave: ((project: ProjectionProject) => void) | null = null
+
   constructor(private host: ProjectHost) {}
 
   serialize(): ProjectionProject {
@@ -56,7 +59,9 @@ export class ProjectManager {
   // ------------------------------------------------------------ autosave
   saveLocal() {
     try {
-      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(this.serialize()))
+      const project = this.serialize()
+      localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(project))
+      this.onSave?.(project)
     } catch { /* storage full / disabled — non-fatal */ }
   }
 
@@ -144,6 +149,11 @@ function sanitizeSurface(raw: unknown): ProjectionSurface | null {
       fov: clampNum(cam.fov, 60, 8, 150),
       near: clampNum(cam.near, 0.1, 0.01, 100),
       far: clampNum(cam.far, 300, 10, 2000),
+      span: {
+        h: clampNum((cam.span as { h?: unknown } | undefined)?.h, 60, 4, 359),
+        v: clampNum((cam.span as { v?: unknown } | undefined)?.v, 60, 4, 179),
+        lock: (cam.span as { lock?: unknown } | undefined)?.lock === true,
+      },
     },
     warp: {
       corners: { tl: { x: 0, y: 0 }, tr: { x: 0, y: 0 }, br: { x: 0, y: 0 }, bl: { x: 0, y: 0 } },

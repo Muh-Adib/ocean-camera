@@ -35,9 +35,16 @@ export interface ProjectionSurface {
     position: [number, number, number]
     yaw: number      // degrees, 0 = facing -Z
     pitch: number    // degrees, positive looks up
-    fov: number      // vertical FOV
+    fov: number      // vertical FOV (used when span.lock is false)
     near: number
     far: number
+    /**
+     * Angular span lock — for room walls. When locked, the frustum is
+     * derived from the world angles this surface covers (yaw span h,
+     * pitch span v) instead of the output rect aspect, so adjacent
+     * walls' frustum edges meet EXACTLY and the frame is never cut.
+     */
+    span: { h: number; v: number; lock: boolean }
   }
 
   warp: {
@@ -123,6 +130,7 @@ export function createSurface(init: {
       fov: init.camera.fov,
       near: init.camera.near,
       far: init.camera.far,
+      span: init.camera.span ?? { h: init.camera.fov, v: init.camera.fov, lock: false },
     },
     warp: {
       corners: cornersFromRect(rect),

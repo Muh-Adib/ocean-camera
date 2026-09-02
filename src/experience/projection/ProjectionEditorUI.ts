@@ -523,15 +523,51 @@ export class ProjectionEditorUI {
     const cg = document.createElement('div')
     cg.className = 'pm-grid3'
     const c = s.camera
+    const spanLocked = c.span?.lock === true
     cg.appendChild(this.numField('POS X', c.position[0], 0.1, (v) => { c.position[0] = v; this.lightCam(s) }, -200, 200))
     cg.appendChild(this.numField('POS Y', c.position[1], 0.1, (v) => { c.position[1] = v; this.lightCam(s) }, -100, 100))
     cg.appendChild(this.numField('POS Z', c.position[2], 0.1, (v) => { c.position[2] = v; this.lightCam(s) }, -200, 200))
     cg.appendChild(this.numField('YAW °', c.yaw, 1, (v) => { c.yaw = v; this.lightCam(s) }, -720, 720))
     cg.appendChild(this.numField('PITCH °', c.pitch, 1, (v) => { c.pitch = v; this.lightCam(s) }, -95, 95))
-    cg.appendChild(this.numField('FOV °', c.fov, 1, (v) => { c.fov = Math.max(8, Math.min(150, v)); this.lightCam(s) }, 8, 150))
+    if (spanLocked) {
+      cg.appendChild(this.numField('SPAN H °', c.span.h, 1, (v) => { c.span.h = Math.max(4, Math.min(359, v)); this.lightCam(s) }, 4, 359))
+    } else {
+      cg.appendChild(this.numField('FOV °', c.fov, 1, (v) => { c.fov = Math.max(8, Math.min(150, v)); this.lightCam(s) }, 8, 150))
+    }
     this.propsEl.appendChild(cg)
 
-    this.propsEl.appendChild(this.sliderRow('FOV', c.fov, 10, 130, 1, (v) => { c.fov = v; this.lightCam(s) }))
+    if (spanLocked) {
+      // edge-matched room projection: fov derives from the angular spans
+      const spanRow = document.createElement('div')
+      spanRow.className = 'pm-row'
+      spanRow.appendChild(this.check('Match wall edges (span lock)', true, (on) => {
+        this.pm.surfaces.snapshot()
+        c.span.lock = on
+        this.pm.surfaces.emit()
+      }))
+      this.propsEl.appendChild(spanRow)
+      this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => { c.span.h = v; this.lightCam(s) }))
+      this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => { c.span.v = v; this.lightCam(s) }))
+      this.propsEl.appendChild(this.hint('Frustum edges derive from these world angles — adjacent walls tile with no gaps or duplicated content.'))
+    } else {
+      this.propsEl.appendChild(this.sliderRow('FOV', c.fov, 10, 130, 1, (v) => { c.fov = v; this.lightCam(s) }))
+      const lockRow = document.createElement('div')
+      lockRow.className = 'pm-row'
+      lockRow.appendChild(this.check('Match wall edges (span lock)', false, (on) => {
+        this.pm.surfaces.snapshot()
+        if (!c.span) c.span = { h: c.fov, v: c.fov, lock: false }
+        if (on) {
+          // seed spans from the current frustum so nothing jumps
+          const hFov = 2 * Math.atan(Math.tan((c.fov * Math.PI) / 360) * Math.max(0.05, s.output.width / Math.max(1, s.output.height)))
+          c.span = { h: Math.round((hFov * 180) / Math.PI), v: Math.round(c.fov), lock: true }
+        } else {
+          c.span.lock = false
+        }
+        this.pm.surfaces.emit()
+      }))
+      this.propsEl.appendChild(lockRow)
+      this.propsEl.appendChild(this.hint('Span lock derives the frustum from world angles — use it on room walls so corners meet exactly.'))
+    }
 
     const snapRow = document.createElement('div')
     snapRow.className = 'pm-btn-row pm-btn-row-wrap'

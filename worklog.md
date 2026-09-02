@@ -273,3 +273,23 @@ Stage Summary:
 - The ocean is now a projection-mapping source: one shared Three.js scene → N virtual cameras → N warpable output slices, with blending, calibration, presets, undo and project files — the minimum viable pipeline (spec's 10 critical requirements) fully working plus mesh warp, edge feather, presets and multi-camera views
 - Existing interactive experience untouched when the studio is closed (render path unchanged; verified end-to-end)
 - Screenshots: download/screenshots/pm-studio-270.png, pm-output-editor.png, pm-calibration.png, pm-output-live.png, pm-cube-room.png, pm-cornerpin.png, interactive-restored.png
+
+---
+Task ID: 12
+Agent: main (Super Z)
+Task: Dedicated /output projection page (clean feed + in-place calibration settings) + seamless camera edge matching (span lock)
+
+Work Log:
+- NEW src/app/output/page.tsx — clean /output route: boots the full ocean in output-only mode (position:fixed black stage, no React chrome), dynamic-imports bootExperience with { outputOnly: true }
+- main.ts: BootOptions { outputOnly } threaded through bootInner — UI root hidden, loading sequence + intro skipped, GestureView skipped (nullable, loop guarded), interaction never enabled; ProjectionManager gets outputOnly dep and calls enterOutputOnly(); audio/tracker stay inert (never started)
+- ProjectionManager: enterOutputOnly() — loads autosaved project (fallback flat-screen), syncs, forces OUTPUT composite; wireSyncChannel() BroadcastChannel('ocean-projection-sync-v1'): studio answers 'request' + pushes full project on every saveLocal (new ProjectManager.onSave hook); /output listens + applies live and requests once on boot; /output never autosaves (scheduleAutosave gated) so it can't clobber studio config
+- Output overlay (#pm-out-overlay): auto-hiding settings panel on mousemove/touch — PATTERN select (off/grid/crosshair/bars/checker/white/black/corners → setCalibrationAll), FULLSCREEN, IMPORT .JSON, live "N surfaces · W×H" readout, warn line when no saved project; body.pm-out-interacting restores cursor while visible; ?pattern=<name> query pre-calibrates; overlay syncs after programmatic calibration changes
+- Seamless edges: ProjectionSurface.camera now carries span {h, v, lock}; CameraManager.sync derives fov=span.v and aspect=tan(h/2)/tan(v/2) when locked (shared-eye cubemap-style exact tiling) instead of rect aspect; presets updated — 270°/Immersive Room/Cube walls+floor+ceiling lock 90×90 (edges meet exactly at ±45°), 180° panorama spans 62×38 on 60° centres (2° overlap for blending), Floor+Front floor wedge re-derived to continue the wall bottom edge (pitch -47, span 59); flat/cinema stay unlocked
+- Editor UI: properties panel shows SPAN H/V inputs + sliders + "Match wall edges (span lock)" checkbox (locking seeds spans from the current frustum so nothing jumps)
+- Fixed: ProjectManager host captured a stale output object — setOutput now mutates in place (Object.assign) and setOutputSize/setRenderScale mutate fields
+- Verified headless: /output boots clean (0 console errors), 3 surfaces restored from studio autosave, overlay pattern select → all surfaces grid → off, overlay fades in on mousemove; two-tab BroadcastChannel sync — studio cube-room preset propagated to /output live (6 faces); ?pattern=grid works; studio regression — 270 preset span lock 90×90 on non-square rects (538×994 etc.), properties shows span controls; /output screenshot with span lock shows the seabed/horizon/rocks/seaweed continuous across all three walls — no visible seams or cut frames (vs. the previous aspect-derived seams); tsc clean
+- Screenshots: download/screenshots/output-page-seams.png (continuous 3-wall feed), output-page-grid.png (calibration grid + overlay)
+
+Stage Summary:
+- /output is now the projector feed: picture only, operator grid/settings auto-hide, live-linked to the studio tab, importable anywhere
+- Span lock guarantees wall-to-wall frame continuity for room layouts — frustum edges meet exactly by construction

@@ -25,15 +25,20 @@ export interface ProjectionDeps {
   sceneMgr: SceneManager
   container: HTMLElement
   toast: (message: string, duration?: number) => void
+  /** dedicated /output page: no editor chrome, composite only */
+  outputOnly?: boolean
 }
 
 const AUTOSAVE_DELAY = 900
+const SYNC_CHANNEL = 'ocean-projection-sync-v1'
 
 export class ProjectionManager {
   /** studio open — the render pipeline is ours */
   active = false
   /** live OUTPUT — fullscreen composite for the projector */
   outputLive = false
+  /** dedicated /output page mode (no editor UI, config arrives via sync) */
+  outputOnly = false
   /** "view from camera" — editor viewport shows this surface's camera */
   viewThrough: string | null = null
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
@@ -53,6 +58,9 @@ export class ProjectionManager {
   private unsubs: (() => void)[] = []
   private autosaveTimer = 0
   private editingSession = false
+  private channel: BroadcastChannel | null = null
+  private overlay: HTMLElement | null = null
+  private overlayTimer = 0
 
   constructor(private deps: ProjectionDeps) {
     this.cameras = new CameraManager(deps.sceneMgr.scene)
@@ -61,8 +69,15 @@ export class ProjectionManager {
     this.project = new ProjectManager({
       surfaces: this.surfaces,
       output: this.output,
-      setOutput: (o) => { this.output = o; this.ui?.refreshAll() },
+      setOutput: (o) => { Object.assign(this.output, o); this.ui?.refreshAll() },
     })
+    // studio side: every persisted save is also pushed to /output tabs live
+    if (deps.outputOnly) this.outputOnly = true
+    else {
+      this.project.onSave = (project) => {
+        try { this.channel?.postMessage({ type: 'project', project }) } catch { /* channel closed */ }
+      }
+    }
 
     // full data change → rebuild everything visual
     this.unsubs.push(this.surfaces.onChange(() => this.syncAll()))
@@ -78,6 +93,7 @@ export class ProjectionManager {
     if (this.active) return
     this.active = true
     this.mainCamera.layers.enable(1)   // editor viewport sees camera frustums
+    this.wireSyncChannel()
 
     let restored = false
     if (this.surfaces.surfaces.length === 0) {
@@ -102,6 +118,8 @@ export class ProjectionManager {
     this.viewThrough = null
     this.mainCamera.layers.disable(1)
     this.cameras.setHelpersVisibleAll(false)
+    this.channel?.close()
+    this.channel = null
     this.project.saveLocal()
     if (this.ui) {
       const el = this.ui
@@ -116,6 +134,118 @@ export class ProjectionManager {
   toggle() {
     if (this.active) this.exit()
     else this.enter()
+  }
+
+  // ------------------------------------------------------------ dedicated /output page
+  /**
+   * Boot straight into the clean projection composite: no editor, no HUD —
+   * just the picture. Config arrives from localStorage (studio autosave) or
+   * live over BroadcastChannel from an open studio tab. A small auto-hiding
+   * overlay lets the operator show/hide calibration patterns in place.
+   */
+  enterOutputOnly() {
+    if (this.active) return
+    this.active = true
+    this.outputOnly = true
+
+    const restored = this.project.loadLocal()
+    if (!restored) this.applyPreset('flat-screen', { history: false, toast: false })
+
+    this.wireSyncChannel()
+    this.syncAll()
+    this.setOutputLive(true)
+    this.buildOutputOverlay(restored)
+
+    // ?pattern=grid — start with a calibration pattern already up
+    const pattern = new URLSearchParams(window.location.search).get('pattern')
+    if (pattern && CalibrationManager.patternList.includes(pattern as never)) {
+      this.setCalibrationAll(pattern as ProjectionSurface['calibration'])
+      this.syncOutputOverlay()
+    }
+  }
+
+  /** live link between the studio tab and /output tabs (same browser) */
+  private wireSyncChannel() {
+    try { this.channel = new BroadcastChannel(SYNC_CHANNEL) } catch { return }
+    this.channel.onmessage = (e) => {
+      const msg = e.data as { type?: string; project?: unknown } | null
+      if (!msg) return
+      if (this.outputOnly && msg.type === 'project' && msg.project) {
+        this.project.load(msg.project)
+        this.syncOutputOverlay()
+      } else if (!this.outputOnly && msg.type === 'request') {
+        try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* noop */ }
+      }
+    }
+    if (this.outputOnly) {
+      // ask any open studio for its current config immediately
+      try { this.channel.postMessage({ type: 'request' }) } catch { /* noop */ }
+    }
+  }
+
+  /** auto-hiding settings overlay for the output page */
+  private buildOutputOverlay(restored: boolean) {
+    const el = document.createElement('div')
+    el.id = 'pm-out-overlay'
+    el.innerHTML = `
+      <div class="pm-out-panel">
+        <span class="pm-out-title">PROJECTION OUTPUT</span>
+        <span class="pm-out-info" id="pm-out-info"></span>
+        <label class="pm-out-field">PATTERN
+          <select id="pm-out-pattern" class="pm-select pm-select-sm">
+            ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
+          </select>
+        </label>
+        <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
+        ${restored ? '' : '<span class="pm-out-warn">no saved project — open the studio or import a .json</span>'}
+      </div>`
+    this.deps.container.appendChild(el)
+    this.overlay = el
+
+    el.querySelector('#pm-out-pattern')?.addEventListener('change', (e) => {
+      this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
+    })
+    el.querySelector('#pm-out-fullscreen')?.addEventListener('click', () => this.requestFullscreen())
+    el.querySelector('#pm-out-import')?.addEventListener('click', async () => {
+      const ok = await this.project.importFile()
+      this.syncOutputOverlay()
+      if (ok) this.deps.toast('Project imported', 2200)
+    })
+
+    const poke = () => this.pokeOverlay()
+    window.addEventListener('mousemove', poke)
+    window.addEventListener('touchstart', poke, { passive: true })
+    this.unsubs.push(() => {
+      window.removeEventListener('mousemove', poke)
+      window.removeEventListener('touchstart', poke)
+    })
+    this.syncOutputOverlay()
+    this.pokeOverlay()
+  }
+
+  private syncOutputOverlay() {
+    if (!this.overlay) return
+    const info = this.overlay.querySelector('#pm-out-info')
+    const sel = this.overlay.querySelector('#pm-out-pattern') as HTMLSelectElement | null
+    if (info) {
+      const n = this.surfaces.surfaces.filter((s) => s.enabled).length
+      info.textContent = `${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height}`
+    }
+    if (sel && this.surfaces.surfaces.length) {
+      sel.value = this.surfaces.surfaces[0].calibration
+    }
+  }
+
+  private pokeOverlay() {
+    if (!this.outputOnly || !this.overlay) return
+    this.overlay.classList.add('pm-out-visible')
+    document.body.classList.add('pm-out-interacting')
+    window.clearTimeout(this.overlayTimer)
+    this.overlayTimer = window.setTimeout(() => {
+      this.overlay?.classList.remove('pm-out-visible')
+      document.body.classList.remove('pm-out-interacting')
+    }, 2600)
   }
 
   // ------------------------------------------------------------ data sync
@@ -149,6 +279,8 @@ export class ProjectionManager {
   qaFrozen = false
 
   private scheduleAutosave() {
+    // the /output page never persists — it must not clobber the studio's config
+    if (this.outputOnly) return
     window.clearTimeout(this.autosaveTimer)
     this.autosaveTimer = window.setTimeout(() => this.project.saveLocal(), AUTOSAVE_DELAY)
   }
@@ -173,7 +305,7 @@ export class ProjectionManager {
       enabled: true,
       locked: false,
       output: { ...rect },
-      camera: { position: [0, 2.2, 2], yaw: 0, pitch: 0, fov: 55, near: 0.1, far: 300 },
+      camera: { position: [0, 2.2, 2], yaw: 0, pitch: 0, fov: 55, near: 0.1, far: 300, span: { h: 55, v: 55, lock: false } },
       warp: {
         corners: { tl: { x: rect.x, y: rect.y }, tr: { x: rect.x + rect.width, y: rect.y }, br: { x: rect.x + rect.width, y: rect.y + rect.height }, bl: { x: rect.x, y: rect.y + rect.height } },
         gridResolution: 8,
@@ -213,8 +345,10 @@ export class ProjectionManager {
     this.outputLive = on
     document.body.classList.toggle('projection-live', on)
     if (on) {
-      this.requestFullscreen()
-      this.deps.toast('Projection output — ESC returns to the studio', 2400)
+      // on the dedicated /output page the browser blocks silent auto-fullscreen;
+      // the overlay's FULLSCREEN button (a real gesture) does it instead
+      if (!this.outputOnly) this.requestFullscreen()
+      if (!this.outputOnly) this.deps.toast('Projection output — ESC returns to the studio', 2400)
     } else if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => { /* ignore */ })
     }
@@ -247,16 +381,18 @@ export class ProjectionManager {
     this.surfaces.snapshot()
     this.surfaces.surfaces.forEach((s) => { s.calibration = pattern })
     this.surfaces.emit()
+    this.syncOutputOverlay()
   }
 
   setOutputSize(width: number, height: number) {
-    this.output = { ...this.output, width, height }
+    this.output.width = width
+    this.output.height = height
     this.scheduleAutosave()
     this.ui?.refreshAll()
   }
 
   setRenderScale(scale: number) {
-    this.output = { ...this.output, renderScale: scale }
+    this.output.renderScale = scale
     this.scheduleAutosave()
     this.ui?.refreshAll()
   }
@@ -395,10 +531,15 @@ export class ProjectionManager {
   dispose() {
     this.exit()
     window.clearTimeout(this.autosaveTimer)
+    window.clearTimeout(this.overlayTimer)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)
     this.unsubs.forEach((u) => u())
     this.unsubs = []
+    this.channel?.close()
+    this.channel = null
+    this.overlay?.remove()
+    this.overlay = null
     this.cameras.dispose()
     this.outputMgr.dispose()
     this.calib.dispose()

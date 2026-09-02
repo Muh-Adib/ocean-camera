@@ -41,11 +41,16 @@ export interface ExperienceHandle {
   dispose: () => void
 }
 
-export function bootExperience(container: HTMLElement): ExperienceHandle {
+export interface BootOptions {
+  /** dedicated projection-output boot (/output page): no UI, composite only */
+  outputOnly?: boolean
+}
+
+export function bootExperience(container: HTMLElement, opts: BootOptions = {}): ExperienceHandle {
   const disposers: (() => void)[] = []
 
   try {
-    return bootInner(container, disposers)
+    return bootInner(container, disposers, opts.outputOnly === true)
   } catch (err) {
     console.error('[ocean] boot failed:', err)
     container.innerHTML = ''
@@ -54,7 +59,7 @@ export function bootExperience(container: HTMLElement): ExperienceHandle {
   }
 }
 
-function bootInner(container: HTMLElement, disposers: (() => void)[]): ExperienceHandle {
+function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly = false): ExperienceHandle {
   // ---------------- core ----------------
   const perf = new PerformanceManager()
   let sceneMgr: SceneManager
@@ -156,7 +161,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
 
   // ---------------- UI ----------------
   let entered = false
-  const gestureView = new GestureView(container)
+  const gestureView = outputOnly ? null : new GestureView(container)
   const ui = new UI(container, {
     onDive: () => enterExperience(false),
     onEnableCamera: () => enterExperience(true),
@@ -181,6 +186,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     onShowGuide: () => ui.showGuide(),
     onToggleSwim: () => swim.setActive(!swim.active),
     onToggleGestureView: () => {
+      if (!gestureView) return
       const active = gestureView.toggle()
       ui.setGestureViewActive(active)
       if (active && !handTracker.isRunning) {
@@ -194,12 +200,18 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       ui.setProjectionActive(projection.active)
     },
   })
+  if (outputOnly) {
+    // pure output: nothing but the picture — the projection pipeline takes over
+    ui.root.style.display = 'none'
+  }
   // ---------------- projection mapping ----------------
   const projection = new ProjectionManager({
     sceneMgr,
     container,
     toast: (m, d) => ui.toast(m, d),
+    outputOnly,
   })
+  if (outputOnly) projection.enterOutputOnly()
 
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
@@ -348,13 +360,13 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     if (handTracker.isRunning) {
       const sample = handTracker.detect(dt)
       gestureEngine.update(sample, dt)
-      gestureView.update(dt, sample, handTracker.lastLandmarks, gestureEngine.status, true, handTracker.video)
+      gestureView?.update(dt, sample, handTracker.lastLandmarks, gestureEngine.status, true, handTracker.video)
       // in swim mode the palm doubles as a steering joystick
       if (swim.active) {
         swim.setHandSteer(sample.x, sample.y, sample.present, sample.present && sample.openness < 0.28)
       }
     } else {
-      gestureView.update(dt, null, null, gestureEngine.status, false, null)
+      gestureView?.update(dt, null, null, gestureEngine.status, false, null)
     }
     field.update(dt)
 
@@ -400,7 +412,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   }
 
   // kick everything off
-  ui.runLoadingSequence(2600)
+  if (outputOnly) {
+    // no loading theatre on the projector feed — dive straight to the composite
+    entered = true
+  } else {
+    ui.runLoadingSequence(2600)
+  }
   loop()
 
   // QA/testing hooks (harmless in production, handy in devtools & CI)
@@ -481,7 +498,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       handTracker.stop()
       swim.disable()
       audio.dispose()
-      gestureView.dispose()
+      gestureView?.dispose()
       projection.dispose()
       disposers.forEach((d) => d())
       sceneMgr.dispose()

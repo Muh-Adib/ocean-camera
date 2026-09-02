@@ -38,8 +38,19 @@ export class CameraManager {
     const c = s.camera
     const posChanged = !cam.position.equals(new THREE.Vector3(...c.position))
     const rotChanged = cam.rotation.x !== c.pitch * DEG || cam.rotation.y !== c.yaw * DEG
-    const projChanged = cam.fov !== c.fov || cam.near !== c.near || cam.far !== c.far ||
-      Math.abs(cam.aspect - s.output.width / Math.max(1, s.output.height)) > 1e-4
+
+    // frustum: span-lock derives BOTH fov and aspect from the world angles
+    // this surface covers, so neighbouring walls' edges meet exactly.
+    // unlocked keeps the classic behaviour: vertical fov + output-rect aspect.
+    const locked = c.span?.lock === true
+    const spanH = Math.max(4, c.span?.h ?? c.fov)
+    const spanV = Math.max(4, c.span?.v ?? c.fov)
+    const wantFov = locked ? spanV : c.fov
+    const wantAspect = locked
+      ? Math.tan((spanH * DEG) / 2) / Math.tan((spanV * DEG) / 2)
+      : s.output.width / Math.max(1, s.output.height)
+    const projChanged = cam.fov !== wantFov || cam.near !== c.near || cam.far !== c.far ||
+      Math.abs(cam.aspect - wantAspect) > 1e-4
 
     if (posChanged) cam.position.set(c.position[0], c.position[1], c.position[2])
     if (rotChanged) {
@@ -47,10 +58,10 @@ export class CameraManager {
       cam.rotation.set(c.pitch * DEG, c.yaw * DEG, 0)
     }
     if (projChanged) {
-      cam.fov = c.fov
+      cam.fov = wantFov
       cam.near = c.near
       cam.far = c.far
-      cam.aspect = Math.max(0.05, s.output.width / Math.max(1, s.output.height))
+      cam.aspect = Math.max(0.05, wantAspect)
       cam.updateProjectionMatrix()
     }
     const helper = this.helpers.get(s.id)

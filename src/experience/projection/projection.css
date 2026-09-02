@@ -435,6 +435,66 @@
 }
 #pm-output-chrome .pm-btn { pointer-events: auto; }
 
+/* ---------------- dedicated /output page overlay ---------------- */
+#pm-out-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.45s;
+}
+#pm-out-overlay.pm-out-visible { opacity: 1; }
+#pm-out-overlay .pm-out-panel {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 0.9rem;
+  background: rgba(4, 18, 28, 0.88);
+  border: 1px solid rgba(130, 205, 230, 0.22);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100vw - 24px);
+}
+#pm-out-overlay .pm-out-title {
+  font-size: 0.58rem;
+  letter-spacing: 0.26em;
+  font-weight: 700;
+  color: #9ff0e0;
+}
+#pm-out-overlay .pm-out-info {
+  font-size: 0.56rem;
+  letter-spacing: 0.12em;
+  color: rgba(170, 215, 235, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+#pm-out-overlay .pm-out-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.54rem;
+  letter-spacing: 0.16em;
+  color: rgba(160, 210, 230, 0.72);
+  font-weight: 600;
+}
+#pm-out-overlay .pm-out-warn {
+  font-size: 0.54rem;
+  letter-spacing: 0.08em;
+  color: #ffcf9e;
+  width: 100%;
+  text-align: center;
+}
+/* let the operator reach the overlay while it is visible */
+body.pm-out-interacting { cursor: default !important; }
+body.pm-out-interacting #pm-out-overlay .pm-out-panel { pointer-events: auto; }
+
 body.projection-live { cursor: none; }
 body.projection-live #pm-output-chrome .pm-btn { cursor: pointer; }
 body.projection-live #projection-studio { display: none !important; }

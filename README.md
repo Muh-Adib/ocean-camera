@@ -85,6 +85,14 @@ Open the projector HUD button (or press the studio button top-right of the HUD) 
 - **Performance** — output resolution presets (up to 7680×2160) plus a 25–100% render scale keep N camera renders smooth; GPUs render 1:1.
 - **Projects** — autosaved to the browser; **EXPORT / IMPORT** writes `ocean-projection.project.json` (version, output config, every surface with camera, warp grid, blend and calibration state).
 
+### Dedicated output page — `/output`
+
+For real installs, open **`/output`** on the projector machine (or a second window/display): it boots a **clean, UI-free feed** — nothing but the picture, rendered from the saved projection config.
+
+- **Live sync** — with the studio open in another tab of the same browser, every edit (corner drags, presets, blend, resolution) appears on `/output` instantly (BroadcastChannel); without the studio it reads the autosaved config, and `IMPORT .JSON` loads a project file on any machine.
+- **Operator settings in place** — move the mouse and a small overlay fades in: **PATTERN** (show/hide grid · crosshair · color bars · checkerboard · white · black · corners for alignment — set back to OFF for the show), **FULLSCREEN**, **IMPORT .JSON** and a live surface/resolution readout. It hides itself (and the cursor) after a moment, so the projection stays clean. `?pattern=grid` starts pre-calibrated.
+- **Seamless edges (span lock)** — room presets derive every camera's frustum from the world angles its wall covers (shared eye point + 90°×90° spans for right-angle rooms). Adjacent frustum edges meet **exactly**, so the frame is never cut or duplicated between walls; floor wedges continue walls at the matching pitch. Toggle it per surface via **“Match wall edges (span lock)”** in the properties panel (SPAN H / SPAN V sliders).
+
 ## 🚀 Quick Start
 
 ```bash
