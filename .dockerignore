@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.gitignore
+*.log
+tests
+examples
+.zscripts
+.DS_Store
