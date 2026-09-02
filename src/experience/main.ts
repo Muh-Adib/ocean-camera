@@ -471,6 +471,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       output: (on: boolean) => projection.setOutputLive(on),
       calibrate: (pattern: string) => projection.setCalibrationAll(pattern as never),
       scale: (n: number) => projection.setRenderScale(n),
+      quality: (q: string) => { projection.setQuality(q as never); return projection.qualityLabel() },
+      autoSample: (cost: number) => { projection.qaAutoTick(cost); return projection.qualityLabel() },
       freeze: (on: boolean) => { projection.qaFrozen = on },
       save: () => projection.project.saveLocal(),
       loadLocal: () => projection.project.loadLocal(),

@@ -4,8 +4,8 @@
 // autosave so the studio reopens exactly as the operator left it.
 // ---------------------------------------------------------------
 import {
-  AUTOSAVE_KEY, PROJECT_VERSION, clampNum,
-  type ProjectionOutput, type ProjectionProject, type ProjectionSurface,
+  AUTOSAVE_KEY, PROJECT_VERSION, QUALITY_LEVELS, clampNum,
+  type ProjectionOutput, type ProjectionProject, type ProjectionSurface, type QualityLevel,
 } from './ProjectionTypes'
 import { gridFromCorners, cornersFromGrid } from './ProjectionMath'
 import { CalibrationManager } from './CalibrationManager'
@@ -47,10 +47,12 @@ export class ProjectManager {
     if (!surfaces.length) return false
 
     const out = p.output ?? ({} as Partial<ProjectionOutput>)
+    const quality = QUALITY_LEVELS.includes(out.quality as never) ? (out.quality as QualityLevel) : 'balanced'
     this.host.setOutput({
       width: clampNum(out.width, 1920, 320, 16384),
       height: clampNum(out.height, 1080, 240, 8640),
-      renderScale: clampNum(out.renderScale, 0.5, 0.1, 1),
+      renderScale: clampNum(out.renderScale, 0.6, 0.1, 1),
+      quality,
     })
     this.host.surfaces.replaceAll(surfaces)
     return true

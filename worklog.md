@@ -293,3 +293,29 @@ Work Log:
 Stage Summary:
 - /output is now the projector feed: picture only, operator grid/settings auto-hide, live-linked to the studio tab, importable anywhere
 - Span lock guarantees wall-to-wall frame continuity for room layouts — frustum edges meet exactly by construction
+
+---
+Task ID: 13
+Agent: main (Super Z)
+Task: Output quality system — sharper projection picture with hardware-adjustable quality options
+
+Work Log:
+- ProjectionTypes: new QualityLevel ('auto' | 'performance' | 'balanced' | 'high' | 'ultra' | 'custom') + QUALITY_PROFILES (performance 0.4×/1536 cap, balanced 0.6×/2048, high 0.8×/3072 + 2× MSAA, ultra 1:1/4096 + 4× MSAA) + resolveQuality() → concrete {renderScale, rtCap, msaa}; ProjectionOutput gains quality field; PROJECT_VERSION → 2 (v1 projects load as 'balanced')
+- OutputManager: RT ceiling lifted 2048 → per-profile cap up to 4096, always clamped by the GPU's real maxTextureSize (read from renderer capabilities); ensureRT now takes cap+msaa, recreates the target when MSAA changes (samples are fixed at allocation) and rebinds the material's uMap; expectedRTSize() for readouts; removed the legacy aspect-tracking ensureRT call in syncSurface that could fight the render-frame sizing
+- ProjectionManager: setQuality() (named profiles pin the scale, AUTO seeds from hardware cores/memory/mobile + surface count, CUSTOM keeps manual), adaptive AUTO tuner — sliding window over real frameCost, steps the render scale ±0.1 (max one notch / 2.5 s) between 0.30 and 0.95, up when avg < 13 ms, down when avg > 30 ms; renderFrameInner resolves quality once per frame and passes cap/msaa (MSAA gated on EXT_color_buffer_float); /output overlay gains QUALITY select + live readout "1 surface · 1920×1080 · ULTRA · RT 1459×864 4×AA"; setRenderScale marks 'custom' when not auto; qaState + quality/frameCostMs/rtPerSurface
+- Editor UI: PROJECT pane RENDER SCALE replaced by OUTPUT QUALITY select (6 levels) — named levels show a live readout (per-surface source px, MSAA, GPU frame ms, camera count), CUSTOM shows a 10–100% slider; pane rebuilds on switch; new .pm-readout/.pm-slider styles
+- ProjectManager: sanitizes + persists output.quality (backward compatible with v1 autosaves); main.ts QA hooks: projection.quality(q), projection.autoSample(cost) (drives the real tuner deterministically)
+- README: quality system documented in the studio + /output sections
+
+Verified headless (agent-browser):
+- Profiles: BALANCED 875×518 → HIGH 1167×691 2×AA → ULTRA 1459×864 4×AA → PERFORMANCE 584×346 — RTs resize live, zero GL errors (MSAA HalfFloat works on swiftshader too)
+- AUTO: seeds 45% on the CI VM; autoSample(3ms ×60) stepped UP to 60%; autoSample(45ms ×120) stepped DOWN to 50% then held (2.5 s anti-oscillation guard works)
+- CUSTOM: slider 85% → output {renderScale:0.85, quality:'custom'}
+- Persistence: save → page reload → quality 'auto' + scale restored; /output overlay select mirrors + can switch quality in place (PERFORMANCE/RT 584×346); studio→/output BroadcastChannel sync carries quality live
+- tsc clean; console shows only the three pre-existing three.js warnings
+- Screenshots: download/screenshots/quality-project-pane.png (ULTRA select + live readout), quality-output-page.png
+
+Stage Summary:
+- The projection is sharper by default (0.5 → 0.6 render scale) and can now be pushed to true 1:1 + 4× AA on show machines, or throttled to PERFORMANCE on weak rigs
+- AUTO genuinely measures the machine: seeds from hardware, then keeps tuning from live frame cost — no user action required
+- Quality choice travels with the project file (v2) and stays backward compatible with v1 autosaves

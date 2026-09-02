@@ -19,7 +19,8 @@ import { ProjectManager } from './ProjectManager'
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
-import type { ProjectionOutput, ProjectionSurface } from './ProjectionTypes'
+import type { ProjectionOutput, ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
 export interface ProjectionDeps {
   sceneMgr: SceneManager
@@ -44,7 +45,7 @@ export class ProjectionManager {
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
   showFrustums = true
 
-  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.5 }
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced' }
 
   readonly surfaces = new SurfaceManager()
   private cameras: CameraManager
@@ -61,10 +62,14 @@ export class ProjectionManager {
   private channel: BroadcastChannel | null = null
   private overlay: HTMLElement | null = null
   private overlayTimer = 0
+  /** MSAA render targets need float-buffer rendering support (already required by the HalfFloat RTs) */
+  private msaaOK = true
 
   constructor(private deps: ProjectionDeps) {
     this.cameras = new CameraManager(deps.sceneMgr.scene)
     this.outputMgr = new OutputManager(this.blend, this.calib)
+    this.outputMgr.maxTexSize = Math.min(deps.sceneMgr.renderer.capabilities.maxTextureSize || 4096, 8192)
+    try { this.msaaOK = deps.sceneMgr.renderer.extensions.has('EXT_color_buffer_float') } catch { this.msaaOK = false }
     this.mainCamera = deps.sceneMgr.camera
     this.project = new ProjectManager({
       surfaces: this.surfaces,
@@ -191,6 +196,15 @@ export class ProjectionManager {
       <div class="pm-out-panel">
         <span class="pm-out-title">PROJECTION OUTPUT</span>
         <span class="pm-out-info" id="pm-out-info"></span>
+        <label class="pm-out-field">QUALITY
+          <select id="pm-out-quality" class="pm-select pm-select-sm">
+            <option value="auto">AUTO (ADAPTIVE)</option>
+            <option value="performance">PERFORMANCE</option>
+            <option value="balanced">BALANCED</option>
+            <option value="high">HIGH</option>
+            <option value="ultra">ULTRA</option>
+          </select>
+        </label>
         <label class="pm-out-field">PATTERN
           <select id="pm-out-pattern" class="pm-select pm-select-sm">
             ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
@@ -203,6 +217,9 @@ export class ProjectionManager {
     this.deps.container.appendChild(el)
     this.overlay = el
 
+    el.querySelector('#pm-out-quality')?.addEventListener('change', (e) => {
+      this.setQuality((e.target as HTMLSelectElement).value as QualityLevel)
+    })
     el.querySelector('#pm-out-pattern')?.addEventListener('change', (e) => {
       this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
     })
@@ -228,9 +245,22 @@ export class ProjectionManager {
     if (!this.overlay) return
     const info = this.overlay.querySelector('#pm-out-info')
     const sel = this.overlay.querySelector('#pm-out-pattern') as HTMLSelectElement | null
+    const qsel = this.overlay.querySelector('#pm-out-quality') as HTMLSelectElement | null
     if (info) {
       const n = this.surfaces.surfaces.filter((s) => s.enabled).length
-      info.textContent = `${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height}`
+      const rt = this.effectiveRT()
+      const rtTxt = rt ? ` · RT ${rt.w}×${rt.h}${rt.msaa ? ` ${rt.msaa}×AA` : ''}` : ''
+      info.textContent = `${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+    }
+    if (qsel) {
+      const cur = this.output.quality
+      if (cur === 'custom' && !qsel.querySelector('option[value="custom"]')) {
+        const o = document.createElement('option')
+        o.value = 'custom'
+        o.textContent = 'CUSTOM'
+        qsel.appendChild(o)
+      }
+      qsel.value = cur === 'custom' ? 'custom' : cur
     }
     if (sel && this.surfaces.surfaces.length) {
       sel.value = this.surfaces.surfaces[0].calibration
@@ -392,9 +422,101 @@ export class ProjectionManager {
   }
 
   setRenderScale(scale: number) {
-    this.output.renderScale = scale
+    this.output.renderScale = Math.min(1, Math.max(0.1, scale))
+    // a manual scale leaves the named profiles (AUTO keeps tuning on its own)
+    if (this.output.quality !== 'auto') this.output.quality = 'custom'
     this.scheduleAutosave()
     this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  // ------------------------------------------------------------ output quality
+  /**
+   * Switch the output quality profile. Named profiles pin a render scale;
+   * AUTO seeds one from the hardware and keeps tuning from live frame cost;
+   * CUSTOM keeps whatever manual scale is currently set.
+   */
+  setQuality(level: QualityLevel) {
+    if (!QUALITY_LEVELS.includes(level)) return
+    const prev = this.output.quality
+    this.output.quality = level
+    if (level === 'auto') {
+      this.autoInitScale()
+      this.resetAutoTuner()
+    } else if (level !== 'custom') {
+      this.output.renderScale = QUALITY_PROFILES[level].renderScale
+    }
+    this.scheduleAutosave()
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+    if (prev !== level) {
+      const label = level === 'auto' ? 'AUTO (ADAPTIVE)' : level === 'custom' ? `CUSTOM ${Math.round(this.output.renderScale * 100)}%` : QUALITY_PROFILES[level].label
+      this.deps.toast(`Output quality — ${label}`, 2200)
+    }
+  }
+
+  /** hardware-based starting point for AUTO (refined live by the tuner) */
+  private autoInitScale() {
+    const cores = navigator.hardwareConcurrency ?? 4
+    const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4
+    const mobile = /android|iphone|ipod|mobile|silk/.test(navigator.userAgent.toLowerCase())
+    const n = Math.max(1, this.surfaces.surfaces.filter((s) => s.enabled).length)
+    let base = cores >= 8 && mem >= 8 ? 0.8 : cores >= 4 ? 0.6 : 0.45
+    if (mobile) base -= 0.15
+    base -= Math.max(0, n - 3) * 0.05        // every extra camera costs fill-rate
+    this.output.renderScale = Math.round(Math.min(0.95, Math.max(0.3, base)) * 20) / 20
+  }
+
+  private autoFrames = 0
+  private autoCostSum = 0
+  private lastAutoStep = 0
+
+  private resetAutoTuner() {
+    this.autoFrames = 0
+    this.autoCostSum = 0
+  }
+
+  /** sliding-window frame-cost watch — nudges the AUTO render scale a notch at a time */
+  private tickAutoQuality(cost: number) {
+    this.autoFrames++
+    this.autoCostSum += cost
+    if (this.autoFrames < 60) return
+    const avg = this.autoCostSum / this.autoFrames
+    this.resetAutoTuner()
+    const now = performance.now()
+    if (now - this.lastAutoStep < 2500) return
+    const s = this.output.renderScale
+    if (avg > 30 && s > 0.3) {
+      this.output.renderScale = Math.max(0.3, Math.round((s - 0.1) * 10) / 10)
+      this.lastAutoStep = now
+      this.syncOutputOverlay()
+    } else if (avg < 13 && s < 0.95) {
+      this.output.renderScale = Math.min(0.95, Math.round((s + 0.1) * 10) / 10)
+      this.lastAutoStep = now
+      this.syncOutputOverlay()
+    }
+  }
+
+  /** QA: feed a synthetic frame cost through the real AUTO tuner (deterministic tests) */
+  qaAutoTick(cost: number) { this.tickAutoQuality(cost) }
+
+  /** human label of the active quality for readouts */
+  qualityLabel(): string {
+    const q = this.output.quality
+    if (q === 'auto') return `AUTO ${Math.round(this.output.renderScale * 100)}%`
+    if (q === 'custom') return `CUSTOM ${Math.round(this.output.renderScale * 100)}%`
+    return QUALITY_PROFILES[q].label
+  }
+
+  /** effective per-surface source resolution right now (largest enabled slice) */
+  effectiveRT(): { w: number; h: number; msaa: number } | null {
+    const q = resolveQuality(this.output)
+    const enabled = this.surfaces.surfaces.filter((s) => s.enabled)
+    const biggest = enabled.reduce<ProjectionSurface | null>(
+      (acc, s) => (!acc || s.output.width * s.output.height > acc.output.width * acc.output.height ? s : acc), null)
+    if (!biggest) return null
+    const rt = this.outputMgr.expectedRTSize(biggest.output.width, biggest.output.height, q.renderScale, q.rtCap)
+    return { w: rt.w, h: rt.h, msaa: q.msaa }
   }
 
   // ------------------------------------------------------------ render pipeline
@@ -403,11 +525,14 @@ export class ProjectionManager {
     const t0 = performance.now()
     this.renderFrameInner()
     this.frameCost = performance.now() - t0
+    if (this.output.quality === 'auto' && !this.qaFrozen) this.tickAutoQuality(this.frameCost)
   }
 
   private renderFrameInner() {
     const r = this.deps.sceneMgr.renderer
     const scene = this.deps.sceneMgr.scene
+    const q = resolveQuality(this.output)
+    const msaa = this.msaaOK ? q.msaa : 0
 
     // 1) shared world → every enabled surface camera → its own RT
     if (!this.qaFrozen) {
@@ -416,7 +541,7 @@ export class ProjectionManager {
         const entry = this.outputMgr.getEntry(s.id)
         if (!entry) continue
         const cam = this.cameras.sync(s)
-        const rt = this.outputMgr.ensureRT(entry, s.output.width, s.output.height, this.output.renderScale)
+        const rt = this.outputMgr.ensureRT(entry, s.output.width, s.output.height, q.renderScale, q.rtCap, msaa)
         r.setRenderTarget(rt)
         r.render(scene, cam)
       }
@@ -525,6 +650,14 @@ export class ProjectionManager {
       })),
       selected: this.surfaces.selected?.name ?? null,
       output: { ...this.output },
+      quality: this.qualityLabel(),
+      frameCostMs: Math.round(this.frameCost * 10) / 10,
+      rtPerSurface: this.surfaces.surfaces
+        .filter((s) => s.enabled)
+        .map((s) => {
+          const e = this.outputMgr.getEntry(s.id)
+          return { name: s.name, w: e?.rtW ?? 0, h: e?.rtH ?? 0, msaa: e?.samples ?? 0 }
+        }),
     }
   }
 

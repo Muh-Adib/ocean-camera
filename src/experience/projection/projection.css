@@ -265,6 +265,27 @@
   accent-color: var(--pm-accent);
   height: 3px;
 }
+.pm-row input[type='range'].pm-slider {
+  flex: 1;
+  min-width: 90px;
+  accent-color: var(--pm-accent);
+  height: 3px;
+}
+.pm-readout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.45rem 0.55rem;
+  background: rgba(6, 24, 38, 0.55);
+  border: 1px solid rgba(90, 180, 210, 0.16);
+  border-radius: 4px;
+}
+.pm-readout span {
+  font-size: 0.55rem;
+  letter-spacing: 0.04em;
+  color: rgba(170, 215, 235, 0.85);
+  font-variant-numeric: tabular-nums;
+}
 .pm-hint {
   margin: 0;
   font-size: 0.56rem;

@@ -6,7 +6,8 @@
 // ---------------------------------------------------------------
 import gsap from 'gsap'
 import type { ProjectionManager } from './ProjectionManager'
-import type { ProjectionSurface } from './ProjectionTypes'
+import type { ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import { QUALITY_PROFILES } from './ProjectionTypes'
 import { OutputNodeEditor } from './OutputNodeEditor'
 import { CameraManager } from './CameraManager'
 import { PRESETS } from './ProjectionPresets'
@@ -347,22 +348,66 @@ export class ProjectionEditorUI {
     resRow.appendChild(rsel)
     body.appendChild(resRow)
 
-    const scaleRow = document.createElement('div')
-    scaleRow.className = 'pm-row'
-    scaleRow.appendChild(this.labelEl('RENDER SCALE'))
-    const ssel = document.createElement('select')
-    ssel.className = 'pm-select pm-select-sm'
-    for (const sc of [0.25, 0.5, 0.75, 1]) {
+    // ---- output quality — sized to the machine driving the show ----
+    const qRow = document.createElement('div')
+    qRow.className = 'pm-row'
+    qRow.appendChild(this.labelEl('OUTPUT QUALITY'))
+    const qsel = document.createElement('select')
+    qsel.className = 'pm-select pm-select-sm'
+    const qOpts: [QualityLevel, string][] = [
+      ['auto', 'AUTO — TUNES ITSELF'],
+      ['performance', 'PERFORMANCE — WEAK GPU'],
+      ['balanced', 'BALANCED — LAPTOP'],
+      ['high', 'HIGH — DESKTOP GPU'],
+      ['ultra', 'ULTRA — 1:1 PIXELS + 4× AA'],
+      ['custom', 'CUSTOM SCALE'],
+    ]
+    for (const [lv, label] of qOpts) {
       const o = document.createElement('option')
-      o.value = String(sc)
-      o.textContent = `${Math.round(sc * 100)}%`
-      if (Math.abs(this.pm.output.renderScale - sc) < 0.01) o.selected = true
-      ssel.appendChild(o)
+      o.value = lv
+      o.textContent = label
+      if (this.pm.output.quality === lv) o.selected = true
+      qsel.appendChild(o)
     }
-    ssel.addEventListener('change', () => this.pm.setRenderScale(Number(ssel.value)))
-    scaleRow.appendChild(ssel)
-    body.appendChild(scaleRow)
-    body.appendChild(this.hint(`Lower render scale keeps N cameras smooth on modest GPUs. Currently ${this.pm.surfaces.surfaces.length} surface(s) render the shared scene every frame.`))
+    qsel.addEventListener('change', () => {
+      this.pm.setQuality(qsel.value as QualityLevel)
+      this.showTab('project')   // rebuild so slider/readout match the new profile
+    })
+    qRow.appendChild(qsel)
+    body.appendChild(qRow)
+
+    if (this.pm.output.quality === 'custom') {
+      const sRow = document.createElement('div')
+      sRow.className = 'pm-row'
+      sRow.appendChild(this.labelEl('RENDER SCALE'))
+      const slider = document.createElement('input')
+      slider.type = 'range'
+      slider.className = 'pm-slider'
+      slider.min = '10'
+      slider.max = '100'
+      slider.step = '5'
+      slider.value = String(Math.round(this.pm.output.renderScale * 100))
+      const sVal = document.createElement('span')
+      sVal.className = 'pm-slider-val'
+      sVal.textContent = `${slider.value}%`
+      slider.addEventListener('input', () => {
+        sVal.textContent = `${slider.value}%`
+        this.pm.setRenderScale(Number(slider.value) / 100)
+      })
+      sRow.append(slider, sVal)
+      body.appendChild(sRow)
+    } else {
+      const rt = this.pm.effectiveRT()
+      const read = document.createElement('div')
+      read.className = 'pm-readout'
+      const lines: string[] = []
+      if (rt) lines.push(`per-surface source: ${rt.w}×${rt.h} px${rt.msaa ? ` · MSAA ${rt.msaa}×` : ''}`)
+      lines.push(`GPU frame: ${this.pm.frameCost.toFixed(1)} ms · ${this.pm.surfaces.surfaces.filter((s) => s.enabled).length} camera(s) render the shared scene`)
+      if (this.pm.output.quality === 'auto') lines.push('AUTO keeps adjusting the scale from live frame cost — no action needed')
+      read.innerHTML = lines.map((l) => `<span>${l}</span>`).join('')
+      body.appendChild(read)
+    }
+    body.appendChild(this.hint(`Quality profiles set how many real pixels each surface renders before warping. ${QUALITY_PROFILES.balanced.hint}. AUTO measures frame cost and moves between ~30% and 95% on its own — pick PERFORMANCE on weak machines or ULTRA when the projector wall deserves every pixel.`))
 
     body.appendChild(this.sepEl())
     const fileRow = document.createElement('div')

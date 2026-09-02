@@ -19,10 +19,9 @@ interface SurfaceEntry {
   rt: THREE.WebGLRenderTarget
   rtW: number
   rtH: number
+  samples: number
   order: number
 }
-
-const RT_CAP = 2048
 
 export class OutputManager {
   /** composite scene — surfaces only, black letterbox background */
@@ -34,6 +33,9 @@ export class OutputManager {
   private entries = new Map<string, SurfaceEntry>()
   private readBuf: ImageData | null = null
   private readCanvas: HTMLCanvasElement | null = null
+
+  /** GPU texture ceiling — set from the renderer right after construction */
+  maxTexSize = 4096
 
   constructor(private blend: BlendManager, private calib: CalibrationManager) {
     this.scene.background = new THREE.Color('#000000')
@@ -54,15 +56,39 @@ export class OutputManager {
   }
 
   // ------------------------------------------------------------ render targets
-  ensureRT(entry: SurfaceEntry, wantW: number, wantH: number, scale: number): THREE.WebGLRenderTarget {
-    const w = Math.max(64, Math.min(RT_CAP, Math.round(wantW * scale)))
-    const h = Math.max(64, Math.min(RT_CAP, Math.round(wantH * scale)))
+  /**
+   * Size (and optionally rebuild) a surface's render target.
+   * Resolution = output rect × renderScale, clamped by the quality cap and
+   * the GPU's max texture size. MSAA sample changes rebuild the target
+   * (samples are fixed at allocation) and rebind the material's texture.
+   */
+  ensureRT(entry: SurfaceEntry, wantW: number, wantH: number, scale: number, cap = 2048, msaa = 0): THREE.WebGLRenderTarget {
+    const limit = Math.max(256, Math.min(cap, this.maxTexSize))
+    const w = Math.max(64, Math.min(limit, Math.round(wantW * scale)))
+    const h = Math.max(64, Math.min(limit, Math.round(wantH * scale)))
+    if (entry.samples !== msaa) {
+      entry.rt.dispose()
+      entry.rt = new THREE.WebGLRenderTarget(Math.max(w, 64), Math.max(h, 64), {
+        type: THREE.HalfFloatType,
+        samples: msaa,
+      })
+      entry.samples = msaa
+      entry.rtW = entry.rt.width
+      entry.rtH = entry.rt.height
+      entry.material.uniforms.uMap.value = entry.rt.texture
+    }
     if (entry.rtW !== w || entry.rtH !== h) {
       entry.rt.setSize(w, h)
       entry.rtW = w
       entry.rtH = h
     }
     return entry.rt
+  }
+
+  /** expected RT pixel size for a surface at the given settings — for readouts */
+  expectedRTSize(wantW: number, wantH: number, scale: number, cap: number): { w: number; h: number } {
+    const limit = Math.max(256, Math.min(cap, this.maxTexSize))
+    return { w: Math.max(64, Math.min(limit, Math.round(wantW * scale))), h: Math.max(64, Math.min(limit, Math.round(wantH * scale))) }
   }
 
   // ------------------------------------------------------------ surface sync
@@ -76,7 +102,7 @@ export class OutputManager {
       mesh.frustumCulled = false
       mesh.matrixAutoUpdate = false
       this.scene.add(mesh)
-      entry = { mesh, material, geometry, res: -1, rt, rtW: 0, rtH: 0, order: index }
+      entry = { mesh, material, geometry, res: -1, rt, rtW: 0, rtH: 0, samples: 0, order: index }
       this.entries.set(s.id, entry)
     }
     entry.order = index
@@ -86,7 +112,6 @@ export class OutputManager {
     if (entry.res !== s.warp.gridResolution) {
       this.rebuildGeometry(entry, s)
     }
-    this.ensureRT(entry, s.output.width, s.output.height, 1)  // track size for material aspect only
     this.blend.update(entry.material, s, this.calib.getTexture(s.calibration))
   }
 
