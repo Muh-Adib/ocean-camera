@@ -21,6 +21,7 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 - **Pufferfish defence display** — when a shark crosses the reef (or you swim right up to one), pufferfish inflate into a ball and their spines extend off the skin in real time — a per-instance shader morph — while the rest of the school panics and scatters around the predator.
 - **Procedural reef** — fbm-dune seabed with a canyon basin and seamount, biome-tinted sand, pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed and kelp, starfish, sea urchins and scallop shells — zero external 3D assets.
 - **Atmosphere** — animated water surface with Snell-window glow, procedural caustics, volumetric god rays, depth-graded fog, particle plankton, bubble clusters and a fully procedural WebAudio soundscape (drone, water noise, whale calls, gesture shimmer).
+- **Projection mapping studio** — turn the ocean into a multi-surface projection system (Resolume-style): spawn 1 → N surfaces (Front / Left / Right walls, floor, ceiling), each with its own virtual camera rendering the **same shared world**, drag 4-corner perspective pins and mesh-warp grids to match real walls, blend and feather overlapping edges, align projectors with calibration patterns (grid, crosshair, color bars, checkerboard, corners), and push a fullscreen, UI-free **OUTPUT** to the projector (Enter / F11-style toggle). Presets: Flat Screen, Cinema Screen, 180° Panorama, 270° Immersive, Immersive Room, Cube Room, Floor + Front. Projects autosave to the browser and export/import as `ocean-projection.project.json`.
 - **Cinematic entry** — GSAP-sequenced loading, dive-in descent and staged reveals.
 - **Graceful everywhere** — three quality tiers with adaptive degradation, mobile/touch layout, reduced-motion support, and a mouse/keyboard fallback that keeps the ocean alive without a camera.
 
@@ -60,6 +61,29 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 | **Fist** (camera on) | Forward fin-kick burst |
 | `▲ GLIDE` paddle (touch) | Hold to swim forward |
 | `Esc` | Return to the cinematic drift |
+
+## 🎛️ Projection Mapping Studio
+
+Open the projector HUD button (or press the studio button top-right of the HUD) to turn the ocean into a **multi-surface projection system**. Every surface is a slice of the projector canvas driven by its own virtual camera — and all cameras render the **one shared 3D world**, so fish swim continuously from wall to wall to floor without a cut.
+
+**Operator workflow:**
+
+```text
+1. Pick a preset        Flat Screen · Cinema · 180° · 270° Immersive · Immersive Room · Cube Room · Floor+Front
+2. Match your room      drag corner nodes in the OUTPUT tab (true perspective corner pin)
+3. Refine               raise WARP grid resolution and push interior nodes (mesh warp)
+4. Camera               set position / yaw / pitch / FOV per surface, or snap FRONT·LEFT·RIGHT·FLOOR·CEILING
+5. Blend                feather left/right/top/bottom edges where projectors overlap
+6. Calibrate            grid / crosshair / color bars / checkerboard / white / black / corner labels
+7. Preview              multi-camera view (SINGLE · 2×2 · ALL) + live per-camera previews
+8. Project              OUTPUT (or Enter) → fullscreen UI-free composite; Esc returns to the studio
+```
+
+- **Surfaces rack** — add, duplicate, rename, reorder, lock, enable/disable; selection drives the properties panel and the node editor.
+- **Node editor** — drag corners or mesh nodes with snap-to-grid and numeric X/Y readout; undo/redo (`Ctrl+Z` / `Ctrl+Shift+Z`); `Delete` removes the selected surface.
+- **Blend** — per-surface opacity, brightness, gamma, feather and normal/add/screen blend modes. These grade the projection only — the source world is never altered.
+- **Performance** — output resolution presets (up to 7680×2160) plus a 25–100% render scale keep N camera renders smooth; GPUs render 1:1.
+- **Projects** — autosaved to the browser; **EXPORT / IMPORT** writes `ocean-projection.project.json` (version, output config, every surface with camera, warp grid, blend and calibration state).
 
 ## 🚀 Quick Start
 
@@ -116,8 +140,9 @@ src/experience/
 ├── particles/     ParticleField, Bubbles, GestureBurst
 ├── fish/          FishGeometryFactory (procedural species), Boids, FishManager, SpecialCreatures
 ├── interaction/   HandTracker, GestureEngine, InteractionField, PointerFallback, SwimController
+├── projection/    ProjectionManager, SurfaceManager, CameraManager, WarpMath, OutputManager (RT compositing), BlendManager, CalibrationManager, ProjectManager, Editor UI + node editor
 ├── audio/         AudioManager (procedural WebAudio)
-├── ui/            UI (intro, HUD, guide, toasts, camera help)
+├── ui/            UI (intro, HUD, guide, toasts, camera help), GestureView
 └── utils/         math helpers
 ```
 

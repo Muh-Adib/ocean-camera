@@ -1,0 +1,445 @@
+// ---------------------------------------------------------------
+// ProjectionManager — orchestrator of the projection mapping mode.
+//
+// One shared ocean world → N virtual cameras → N render targets →
+// one composite pass in output space. Owns the mode lifecycle
+// (studio / preview / live output), the editor viewport layouts,
+// autosave, and the keyboard shortcuts (Enter = projection output,
+// Esc = back to preview).
+// ---------------------------------------------------------------
+import * as THREE from 'three'
+import gsap from 'gsap'
+import type { SceneManager } from '../core/SceneManager'
+import { SurfaceManager } from './SurfaceManager'
+import { CameraManager } from './CameraManager'
+import { BlendManager } from './BlendManager'
+import { CalibrationManager } from './CalibrationManager'
+import { OutputManager } from './OutputManager'
+import { ProjectManager } from './ProjectManager'
+import { ProjectionEditorUI } from './ProjectionEditorUI'
+import { PRESETS, getPreset } from './ProjectionPresets'
+import { gridFromCorners } from './ProjectionMath'
+import type { ProjectionOutput, ProjectionSurface } from './ProjectionTypes'
+
+export interface ProjectionDeps {
+  sceneMgr: SceneManager
+  container: HTMLElement
+  toast: (message: string, duration?: number) => void
+}
+
+const AUTOSAVE_DELAY = 900
+
+export class ProjectionManager {
+  /** studio open — the render pipeline is ours */
+  active = false
+  /** live OUTPUT — fullscreen composite for the projector */
+  outputLive = false
+  /** "view from camera" — editor viewport shows this surface's camera */
+  viewThrough: string | null = null
+  viewportLayout: 'single' | 'quad' | 'all' = 'single'
+  showFrustums = true
+
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.5 }
+
+  readonly surfaces = new SurfaceManager()
+  private cameras: CameraManager
+  private blend = new BlendManager()
+  private calib = new CalibrationManager()
+  private outputMgr: OutputManager
+  project: ProjectManager
+  private ui: ProjectionEditorUI | null = null
+  private mainCamera: THREE.PerspectiveCamera
+
+  private unsubs: (() => void)[] = []
+  private autosaveTimer = 0
+  private editingSession = false
+
+  constructor(private deps: ProjectionDeps) {
+    this.cameras = new CameraManager(deps.sceneMgr.scene)
+    this.outputMgr = new OutputManager(this.blend, this.calib)
+    this.mainCamera = deps.sceneMgr.camera
+    this.project = new ProjectManager({
+      surfaces: this.surfaces,
+      output: this.output,
+      setOutput: (o) => { this.output = o; this.ui?.refreshAll() },
+    })
+
+    // full data change → rebuild everything visual
+    this.unsubs.push(this.surfaces.onChange(() => this.syncAll()))
+    // light change (node drag) → just geometry + camera + uniforms
+    this.unsubs.push(this.surfaces.onLightChange((s) => this.syncVisuals(s)))
+
+    window.addEventListener('resize', this.onResize)
+    window.addEventListener('keydown', this.onKeyDown)
+  }
+
+  // ------------------------------------------------------------ lifecycle
+  enter() {
+    if (this.active) return
+    this.active = true
+    this.mainCamera.layers.enable(1)   // editor viewport sees camera frustums
+
+    let restored = false
+    if (this.surfaces.surfaces.length === 0) {
+      restored = this.project.loadLocal()
+      if (restored) this.deps.toast('Projection setup restored from autosave', 2600)
+      else this.applyPreset('flat-screen', { history: false, toast: false })
+    }
+    this.syncAll()
+
+    this.ui = new ProjectionEditorUI(this.deps.container, this)
+    this.deps.toast(
+      restored ? 'Projection studio ready' : 'Projection studio — pick a preset, drag the corners to match your room',
+      4200,
+    )
+    gsap.fromTo(this.ui.root, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: 'power2.out' })
+  }
+
+  exit() {
+    if (!this.active) return
+    if (this.outputLive) this.setOutputLive(false)
+    this.active = false
+    this.viewThrough = null
+    this.mainCamera.layers.disable(1)
+    this.cameras.setHelpersVisibleAll(false)
+    this.project.saveLocal()
+    if (this.ui) {
+      const el = this.ui
+      this.ui = null
+      gsap.to(el.root, {
+        opacity: 0, duration: 0.35, ease: 'power2.in',
+        onComplete: () => el.dispose(),
+      })
+    }
+  }
+
+  toggle() {
+    if (this.active) this.exit()
+    else this.enter()
+  }
+
+  // ------------------------------------------------------------ data sync
+  private syncAll() {
+    const ids = new Set<string>()
+    this.surfaces.surfaces.forEach((s, i) => {
+      ids.add(s.id)
+      this.cameras.sync(s)
+      this.outputMgr.syncSurface(s, i)
+    })
+    for (const id of this.outputMgr.getSurfaceIds()) {
+      if (!ids.has(id)) {
+        this.cameras.remove(id)
+        this.outputMgr.removeSurface(id)
+      }
+    }
+    this.cameras.updateVisibility(this.surfaces.selectedId, this.active && this.showFrustums)
+    this.scheduleAutosave()
+  }
+
+  private syncVisuals(s: ProjectionSurface) {
+    this.cameras.sync(s)
+    this.outputMgr.invalidateGeometry(s.id)
+    this.outputMgr.syncSurface(s, this.surfaces.surfaces.indexOf(s))
+  }
+
+  /** last renderFrame cost in ms — the UI backs its GPU readbacks off when high */
+  frameCost = 0
+  /** QA/testing: freeze the expensive per-surface re-renders, keep compositing
+   *  the already-rendered targets (lets automated tests run logic at speed) */
+  qaFrozen = false
+
+  private scheduleAutosave() {
+    window.clearTimeout(this.autosaveTimer)
+    this.autosaveTimer = window.setTimeout(() => this.project.saveLocal(), AUTOSAVE_DELAY)
+  }
+
+  // ------------------------------------------------------------ editing API (used by the editor UI)
+  applyPreset(id: string, opts: { history?: boolean; toast?: boolean } = {}) {
+    const preset = getPreset(id)
+    if (!preset) return
+    if (opts.history !== false) this.surfaces.snapshot()
+    const built = preset.build(this.output.width, this.output.height)
+    this.surfaces.replaceAll(built)
+    if (opts.toast !== false) this.deps.toast(`Preset: ${preset.label} — ${preset.hint}`, 3600)
+  }
+
+  addSurface() {
+    this.surfaces.snapshot()
+    const W = this.output.width, H = this.output.height
+    const rect = { x: Math.round(W * 0.3), y: Math.round(H * 0.3), width: Math.round(W * 0.4), height: Math.round(H * 0.4) }
+    const s: ProjectionSurface = {
+      id: `surf-add-${Date.now().toString(36)}`,
+      name: `Surface ${this.surfaces.surfaces.length + 1}`,
+      enabled: true,
+      locked: false,
+      output: { ...rect },
+      camera: { position: [0, 2.2, 2], yaw: 0, pitch: 0, fov: 55, near: 0.1, far: 300 },
+      warp: {
+        corners: { tl: { x: rect.x, y: rect.y }, tr: { x: rect.x + rect.width, y: rect.y }, br: { x: rect.x + rect.width, y: rect.y + rect.height }, bl: { x: rect.x, y: rect.y + rect.height } },
+        gridResolution: 8,
+        grid: [],
+        gridCustom: false,
+      },
+      blend: { opacity: 1, brightness: 1, gamma: 1, feather: { left: 0, right: 0, top: 0, bottom: 0 }, mode: 'normal' },
+      calibration: 'off',
+    }
+    s.warp.grid = gridFromCorners(s.warp.corners, 8)
+    this.surfaces.add(s)
+  }
+
+  /** history session for slider/number drags: snapshot once per interaction */
+  beginEdit() {
+    if (this.editingSession) return
+    this.editingSession = true
+    this.surfaces.snapshot()
+  }
+
+  endEdit() {
+    this.editingSession = false
+    this.scheduleAutosave()
+  }
+
+  undo() {
+    if (this.surfaces.undo()) this.deps.toast('Undo', 1200)
+  }
+
+  redo() {
+    if (this.surfaces.redo()) this.deps.toast('Redo', 1200)
+  }
+
+  setOutputLive(on: boolean) {
+    if (!this.active) on = false
+    if (this.outputLive === on) return
+    this.outputLive = on
+    document.body.classList.toggle('projection-live', on)
+    if (on) {
+      this.requestFullscreen()
+      this.deps.toast('Projection output — ESC returns to the studio', 2400)
+    } else if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => { /* ignore */ })
+    }
+    this.ui?.setOutputLiveState(on)
+  }
+
+  requestFullscreen() {
+    const el = document.documentElement
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.().catch(() => { /* user/agent refusal — window mode still works */ })
+    }
+  }
+
+  setViewThrough(id: string | null) {
+    this.viewThrough = id
+    this.ui?.refreshAll()
+  }
+
+  setViewportLayout(layout: 'single' | 'quad' | 'all') {
+    this.viewportLayout = layout
+    this.ui?.refreshAll()
+  }
+
+  setShowFrustums(on: boolean) {
+    this.showFrustums = on
+    this.cameras.updateVisibility(this.surfaces.selectedId, this.active && on)
+  }
+
+  setCalibrationAll(pattern: ProjectionSurface['calibration']) {
+    this.surfaces.snapshot()
+    this.surfaces.surfaces.forEach((s) => { s.calibration = pattern })
+    this.surfaces.emit()
+  }
+
+  setOutputSize(width: number, height: number) {
+    this.output = { ...this.output, width, height }
+    this.scheduleAutosave()
+    this.ui?.refreshAll()
+  }
+
+  setRenderScale(scale: number) {
+    this.output = { ...this.output, renderScale: scale }
+    this.scheduleAutosave()
+    this.ui?.refreshAll()
+  }
+
+  // ------------------------------------------------------------ render pipeline
+  /** called from the main loop instead of sceneMgr.render() while active */
+  renderFrame() {
+    const t0 = performance.now()
+    this.renderFrameInner()
+    this.frameCost = performance.now() - t0
+  }
+
+  private renderFrameInner() {
+    const r = this.deps.sceneMgr.renderer
+    const scene = this.deps.sceneMgr.scene
+
+    // 1) shared world → every enabled surface camera → its own RT
+    if (!this.qaFrozen) {
+      for (const s of this.surfaces.surfaces) {
+        if (!s.enabled) continue
+        const entry = this.outputMgr.getEntry(s.id)
+        if (!entry) continue
+        const cam = this.cameras.sync(s)
+        const rt = this.outputMgr.ensureRT(entry, s.output.width, s.output.height, this.output.renderScale)
+        r.setRenderTarget(rt)
+        r.render(scene, cam)
+      }
+      r.setRenderTarget(null)
+    }
+
+    // 2) screen pass
+    if (this.outputLive) {
+      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight)
+      this.outputMgr.renderComposite(r)
+      return
+    }
+
+    if (this.viewThrough) {
+      const cam = this.cameras.get(this.viewThrough)
+      if (cam) { r.render(scene, cam); return }
+    }
+
+    if (this.viewportLayout !== 'single') {
+      this.renderViewportGrid(r, scene)
+      return
+    }
+
+    // standard editor viewport — main camera + helper layer
+    r.render(scene, this.mainCamera)
+  }
+
+  /** multi-camera editor view: 2×2 quad or a grid of every enabled surface */
+  private renderViewportGrid(r: THREE.WebGLRenderer, scene: THREE.Scene) {
+    const list = this.surfaces.surfaces.filter((s) => s.enabled && this.cameras.get(s.id))
+      .slice(0, this.viewportLayout === 'quad' ? 4 : 9)
+      .map((s) => this.cameras.get(s.id)!)
+    if (!list.length) { r.render(scene, this.mainCamera); return }
+
+    const cols = this.viewportLayout === 'quad' ? 2 : Math.ceil(Math.sqrt(list.length))
+    const rows = Math.ceil(list.length / cols)
+    const w = window.innerWidth, h = window.innerHeight
+    const vw = Math.floor(w / cols), vh = Math.floor(h / rows)
+
+    r.setScissorTest(true)
+    list.forEach((cam, i) => {
+      const col = i % cols, row = Math.floor(i / cols)
+      const x = col * vw
+      const y = (rows - 1 - row) * vh   // three viewport origin = bottom-left
+      r.setViewport(x, y, vw, vh)
+      r.setScissor(x, y, vw, vh)
+      r.render(scene, cam)
+    })
+    r.setScissorTest(false)
+    r.setViewport(0, 0, w, h)
+  }
+
+  // ------------------------------------------------------------ input
+  private onResize = () => {
+    if (!this.active) return
+    this.ui?.handleResize()
+  }
+
+  private onKeyDown = (e: KeyboardEvent) => {
+    if (!this.active) return
+    const target = e.target as HTMLElement | null
+    const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable)
+
+    if (e.key === 'Escape') {
+      if (this.outputLive) {
+        e.preventDefault()
+        this.setOutputLive(false)
+      }
+      return
+    }
+    if (typing) return
+    if (e.key === 'Enter') {
+      // let a focused button keep its native activation
+      if ((target as HTMLElement | null)?.tagName === 'BUTTON') return
+      e.preventDefault()
+      this.setOutputLive(!this.outputLive)
+      return
+    }
+    const meta = e.ctrlKey || e.metaKey
+    if (meta && e.key.toLowerCase() === 'z') {
+      e.preventDefault()
+      if (e.shiftKey) this.redo()
+      else this.undo()
+    } else if (meta && e.key.toLowerCase() === 'y') {
+      e.preventDefault()
+      this.redo()
+    } else if ((e.key === 'Delete' || e.key === 'Backspace') && this.surfaces.selected) {
+      const s = this.surfaces.selected
+      if (!s.locked) {
+        e.preventDefault()
+        this.surfaces.snapshot()
+        this.surfaces.remove(s.id)
+      }
+    }
+  }
+
+  // ------------------------------------------------------------ QA / dispose
+  qaState() {
+    return {
+      active: this.active,
+      outputLive: this.outputLive,
+      surfaces: this.surfaces.surfaces.map((s) => ({
+        id: s.id, name: s.name, enabled: s.enabled, locked: s.locked,
+        output: { ...s.output }, calibration: s.calibration,
+        camera: { ...s.camera }, corners: s.warp.corners,
+      })),
+      selected: this.surfaces.selected?.name ?? null,
+      output: { ...this.output },
+    }
+  }
+
+  dispose() {
+    this.exit()
+    window.clearTimeout(this.autosaveTimer)
+    window.removeEventListener('resize', this.onResize)
+    window.removeEventListener('keydown', this.onKeyDown)
+    this.unsubs.forEach((u) => u())
+    this.unsubs = []
+    this.cameras.dispose()
+    this.outputMgr.dispose()
+    this.calib.dispose()
+    this.surfaces.surfaces = []
+  }
+
+  // ------------------------------------------------------------ preview helpers (used by the editor UI)
+  /** pass a toast through to the ocean HUD */
+  depsToast(message: string, duration?: number) {
+    this.deps.toast(message, duration)
+  }
+
+  getRenderer(): THREE.WebGLRenderer {
+    return this.deps.sceneMgr.renderer
+  }
+
+  /** render a surface camera into the small shared preview RT → 2D canvas */
+  renderCameraPreview(s: ProjectionSurface, canvas: HTMLCanvasElement) {
+    const r = this.deps.sceneMgr.renderer
+    const scene = this.deps.sceneMgr.scene
+    const cam = this.cameras.sync(s)
+    const rt = this.outputMgr.cameraPreviewRT
+    this.outputMgr.readToCanvas(r, rt, canvas, () => {
+      r.setRenderTarget(rt)
+      r.render(scene, cam)
+    })
+  }
+
+  /** composite (letterboxed) preview of the full output canvas */
+  renderOutputPreview(canvas: HTMLCanvasElement) {
+    const r = this.deps.sceneMgr.renderer
+    const rt = this.outputMgr.previewRT
+    this.outputMgr.updateCamera(this.output.width, this.output.height, rt.width, rt.height)
+    this.outputMgr.readToCanvas(r, rt, canvas, () => {
+      r.setRenderTarget(rt)
+      this.outputMgr.renderComposite(r)
+    })
+  }
+
+  // ------------------------------------------------------------ static info
+  static get presets() {
+    return PRESETS
+  }
+}

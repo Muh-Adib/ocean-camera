@@ -244,3 +244,32 @@ Work Log:
 Stage Summary:
 - User request satisfied: gesture camera now has a visible "how it works" view (preview + skeleton + live gesture readouts), and gesture handling rides the hardened local tracker (no CDN, timeouts, GPU→CPU fallback, friendly failure panels).
 - Patin swims in the ocean again with fully fused detailing; pufferfish/shark/turtle realism retained from the approved origin lineage.
+
+---
+Task ID: 11
+Agent: main (Super Z)
+Task: Projection Mapping Output Mode — Resolume-style multi-surface projection system over the shared ocean world
+
+Work Log:
+- New src/experience/projection/ module (11 files + projection.css):
+  - ProjectionTypes: scalable data model — surface = output rect + virtual camera + warp (corners/grid) + blend + calibration; project = {version, output{w,h,renderScale}, surfaces[]}
+  - ProjectionMath: 4-point homography solver (DLT + Gaussian elimination w/ partial pivoting) mapping the unit square to any output quad; grid rebuild from corners (true perspective corner pin, not bilinear); grid<->corner round-trips; point-in-quad hit testing
+  - ProjectionPresets: 7 room layouts (Flat Screen, Cinema, 180° Panorama, 270° Immersive, Immersive Room, Cube Room, Floor+Front) — room presets share ONE eye point [0,2.2,0] with cubemap-style 90° frustums so adjacent walls meet seamlessly
+  - SurfaceManager: CRUD/duplicate/rename/reorder/lock/enable + selection + undo/redo (60-deep JSON snapshots) + two-channel notifications (full emit / light touch for drags)
+  - CameraManager: per-surface PerspectiveCamera synced from data (pos/yaw/pitch/fov/near/far, aspect from output rect), YXZ euler, cameras pinned to layer 0; CameraHelper frustums on layer 1 (editor-only, never leak into projections); aimAt + snapView helpers
+  - BlendManager: composite ShaderMaterial — samples the surface RT, brightness/gamma grading, 4-edge feather (smoothstep), opacity, normal/add/screen blending; calibration texture swap; tone mapping + sRGB applied by the renderer only on the final screen pass (verified three r185 skips it for RTs) so all surfaces grade identically
+  - CalibrationManager: procedural 960×540 CanvasTexture patterns (grid, crosshair, SMPTE-style color bars + gray ramp, checkerboard, white, black, corner labels TL/TR/BR/BL) + blank fallback
+  - OutputManager: composite scene of warped grid meshes (y-down ortho camera letterboxing the output canvas onto any screen), HalfFloat RTs per surface (renderScale-scaled, 2048 cap), UV flip for RT sampling, GPU→2D readbacks (byte RT + gamma LUT) feeding the editor previews
+  - ProjectManager: JSON project format (ocean-projection.project.json) with full sanitization, localStorage autosave/restore, file export/import
+  - ProjectionManager: orchestrator — studio lifecycle, N-camera RT render pass + composite/editor viewport screen pass, quad/all multi-camera viewport layouts (scissored), view-through-camera, fullscreen OUTPUT mode (body class + requestFullscreen + Esc), Enter toggles output, autosave debounce, frameCost metering, qaFrozen QA lever, QA API on window.__ocean.projection
+  - ProjectionEditorUI + OutputNodeEditor: pro studio chrome — surfaces rack (add/dup/rename/lock/delete/enable), live properties (output rect, camera numerics + FOV slider + view snaps + aim), tabbed dock (OUTPUT node editor / WARP / CAMERA / BLEND / CALIBRATION / PROJECT); 2D node editor with draggable corner + mesh nodes, snap-to-grid (5/10/25/50), edge snapping, numeric coords overlay, whole-surface dragging, live composite underlay, feather band visualization, camera thumbnail grid; GSAP transitions; adaptive preview ticker that backs off when frameCost > 34ms
+- main.ts integration: projection owns the frame when active (renderFrame replaces sceneMgr.render), HUD projector button, dispose chain, QA hooks (enter/exit/state/preset/select/output/calibrate/scale/freeze/save/loadLocal/exportFile/undo/redo/snapshot/hist/warpCorner)
+- UI.ts: new HUD icon button (projector glyph) + setProjectionActive; UICallbacks extended
+- Headless-verify fixes: navigator.webdriver frame throttle (renders 1 of 8 frames in automation only — real GPUs unaffected; CDP evals stay responsive on software WebGL), qaFrozen RT-pass skip for fast logic tests, adaptive preview back-off
+- Bugs found & fixed during verification: editor tabs had no click handlers (wired); output-live mode never hid the studio chrome (CSS rule added); checkerboard pattern arithmetic cleaned; drag-state snap refs corrected for non-TL corners
+- Verified headless (agent-browser): real HUD button opens studio; flat-screen default; 270° preset → 3 surfaces with correct cameras (yaw 0/±90, fov 90, shared eye); real-mouse corner drag (1689,108 → 2190,610 with 10px snap); dramatic corner-pin renders a true perspective mesh; calibration grid/textures swap on output; output mode → fullscreen UI-free 3-wall continuous composite + cube-room 6-face composite (screenshots); save→localStorage→reload→autosave restore; undo/redo round-trip (22,22 → 11,11 → 22,22); tabs/panels/slider panes all live; exit restores interactive ocean + intro; tsc clean; 0 console errors (pre-existing three.js 'map undefined' warnings also present on clean baseline)
+
+Stage Summary:
+- The ocean is now a projection-mapping source: one shared Three.js scene → N virtual cameras → N warpable output slices, with blending, calibration, presets, undo and project files — the minimum viable pipeline (spec's 10 critical requirements) fully working plus mesh warp, edge feather, presets and multi-camera views
+- Existing interactive experience untouched when the studio is closed (render path unchanged; verified end-to-end)
+- Screenshots: download/screenshots/pm-studio-270.png, pm-output-editor.png, pm-calibration.png, pm-output-live.png, pm-cube-room.png, pm-cornerpin.png, interactive-restored.png

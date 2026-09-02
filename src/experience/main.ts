@@ -4,6 +4,7 @@
 // ecosystem events, adapts quality, handles enter/permission flow.
 // ---------------------------------------------------------------
 import './style.css'
+import './projection/projection.css'
 import * as THREE from 'three'
 import gsap from 'gsap'
 import { SceneManager } from './core/SceneManager'
@@ -32,7 +33,9 @@ import { SwimController } from './interaction/SwimController'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
+import { ProjectionManager } from './projection/ProjectionManager'
 import { rand, pick } from './utils/math'
+import { gridFromCorners } from './projection/ProjectionMath'
 
 export interface ExperienceHandle {
   dispose: () => void
@@ -186,7 +189,18 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     },
     onSwimBoost: (on) => { swim.forwardBoost = on ? 1 : 0 },
     onFeed: () => doFeed(),
+    onToggleProjection: () => {
+      projection.toggle()
+      ui.setProjectionActive(projection.active)
+    },
   })
+  // ---------------- projection mapping ----------------
+  const projection = new ProjectionManager({
+    sceneMgr,
+    container,
+    toast: (m, d) => ui.toast(m, d),
+  })
+
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
       ui.setStatus('LOADING HAND MODEL…', 'loading')
@@ -317,6 +331,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   const clock = new THREE.Clock()
   let raf = 0
   let elapsed = 0
+  let frameTick = 0
 
   function loop() {
     raf = requestAnimationFrame(loop)
@@ -366,7 +381,22 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
     bursts.update(dt)
     dynamicEvents(dt)
 
-    sceneMgr.render()
+    // Automation environments (software WebGL) render orders of magnitude
+    // slower — skip most frames entirely there so tests stay responsive.
+    // Real browsers (navigator.webdriver false) always render 1:1.
+    const headless = (navigator as Navigator & { webdriver?: boolean }).webdriver === true
+    const skipRender = headless && (frameTick++ % 8) !== 0
+
+    // projection mode owns the frame when its studio is open:
+    // N surface cameras render the shared world into N targets,
+    // then the composite (or the editor viewport) hits the screen.
+    if (skipRender) {
+      // sim above still ran — just don't draw this tick
+    } else if (projection.active) {
+      projection.renderFrame()
+    } else {
+      sceneMgr.render()
+    }
   }
 
   // kick everything off
@@ -374,7 +404,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
   loop()
 
   // QA/testing hooks (harmless in production, handy in devtools & CI)
-  ;(window as unknown as { __ocean: Record<string, (...args: unknown[]) => unknown> }).__ocean = {
+  ;(window as unknown as { __ocean: Record<string, unknown> }).__ocean = {
     fast: () => { gsap.ticker.lagSmoothing(false) },
     yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
@@ -410,6 +440,37 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       swim.position.set(Number(args[0]), Number(args[1]), Number(args[2]))
       return true
     },
+    projection: {
+      enter: () => { projection.enter(); ui.setProjectionActive(true) },
+      exit: () => { projection.exit(); ui.setProjectionActive(false) },
+      isActive: () => projection.active,
+      state: () => projection.qaState(),
+      preset: (id: string) => projection.applyPreset(id),
+      select: (name: string) => {
+        const s = projection.surfaces.surfaces.find((x) => x.name.toLowerCase() === String(name).toLowerCase())
+        if (s) projection.surfaces.select(s.id)
+        return !!s
+      },
+      output: (on: boolean) => projection.setOutputLive(on),
+      calibrate: (pattern: string) => projection.setCalibrationAll(pattern as never),
+      scale: (n: number) => projection.setRenderScale(n),
+      freeze: (on: boolean) => { projection.qaFrozen = on },
+      save: () => projection.project.saveLocal(),
+      loadLocal: () => projection.project.loadLocal(),
+      exportFile: () => projection.project.exportFile(),
+      snapshot: () => projection.surfaces.snapshot(),
+      undo: () => projection.undo(),
+      redo: () => projection.redo(),
+      hist: () => projection.surfaces.debugPeek(),
+      warpCorner: (surfaceName: string, corner: 'tl' | 'tr' | 'br' | 'bl', x: number, y: number) => {
+        const s = projection.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === String(surfaceName).toLowerCase())
+        if (!s) return false
+        s.warp.corners[corner] = { x, y }
+        s.warp.grid = gridFromCorners(s.warp.corners, s.warp.gridResolution)
+        projection.surfaces.emit()
+        return true
+      },
+    },
   }
 
   // ---------------- dispose ----------------
@@ -421,6 +482,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[]): Experienc
       swim.disable()
       audio.dispose()
       gestureView.dispose()
+      projection.dispose()
       disposers.forEach((d) => d())
       sceneMgr.dispose()
       container.innerHTML = ''
