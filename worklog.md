@@ -406,3 +406,31 @@ Stage Summary:
 - Output links are now truly portable: the whole show rides inside the URL, so ANY browser or machine opens the exact shaped multi-surface output with no control open and no shared storage — same-browser live sync (≤300 ms) still layers on top when available
 - The control screen now always shows the projected result inside the screen preview (PiP), and the CALIBRATION tab can blow the same surface editor up fullscreen with guides and patterns for pixel-accurate alignment
 - Surfaces magnetically snap edge-exact to their neighbours (with live seam-glue feedback), so multi-wall layouts connect without breaks
+
+---
+Task ID: 16
+Agent: main (Super Z)
+Task: User feedback — the PiP can't be repositioned, so drop it and make /output itself the live preview that mirrors every control change
+
+Work Log:
+- Removed the OUTPUT PREVIEW PiP entirely per the user's preference (it was fixed-position and they no longer want it): deleted the topbar toggle, the .pm-out-pip panel + CSS, the 480×270 composite draw branch in the preview ticker and its size label; the composite readback now feeds only the OUTPUT-tab editor and the fullscreen calibration editor
+- Added "OPEN OUTPUT ↗" to the studio topbar — opens /output in a new tab (the output page is now the preview surface, and with the relay it follows every edit)
+- Root cause of the remaining "output doesn't follow control" reports: BroadcastChannel only crosses tabs of ONE browser — an /output window in another browser (second display browser, projector machine) had no live path at all
+- New server relay (src/app/api/projection/relay/): store.ts (in-memory state bus on globalThis, rev-bumped pushes + studio heartbeats, fanned out to subscribers), route.ts (POST push {project} / POST {hb:1} heartbeat / GET JSON snapshot), stream/route.ts (SSE: initial snapshot on connect, live 'relay' + 'hb' events, 15 s keep-alive comments, abort/cancel cleanup)
+- ProjectionManager studio side: broadcastNow() now also POSTs the serialized project to the relay (~300 ms trailing throttle, same envelope as the channel); a 4 s heartbeat runs while the studio is open so outputs can show an honest contact status
+- ProjectionManager /output side: wireRelay() subscribes via EventSource; pushes go through applyStudioPush() — the same load/session-refresh/portable-URL/overlay path as BroadcastChannel — with an identical-payload guard so the two transports can race without double work; relayInfo() + qaPush() + relay()/pushNow() QA hooks added
+- Output overlay status now shows LIVE LINK while the studio is in contact and HOLDING after the contact stops (LIVE_FRESH_MS = 70 s — wide on purpose: a hidden control tab gets its 4 s heartbeat throttled by Chromium to ~1/min; state pushes themselves never throttle)
+- Leak fixed while testing: exit() called saveLocal() unconditionally, so disposing an /output page (e.g. dev HMR unmount) wrote the projector's localStorage autosave — now guarded to studio pages only
+- README live-sync section rewritten around the two-transport model
+
+Verified headless (agent-browser, main session + isolated "proj2" browser as the projector machine):
+- PiP gone (.pm-out-pip / #pm-pip absent), OPEN OUTPUT present; tsc clean
+- Cross-browser: proj2 with localStorage.clear() and NO link params boots the studio's exact state via the relay snapshot (870,468 · LIVE LINK · rev 10) — pure server, no storage, no portable URL
+- Live follow: studio moveSurface(+300,+180) → proj2 lands exactly (790,428); warpCorner br(1750,1000) → proj2 corners match; quality ULTRA → proj2 RT 1459×864 4×AA, readout ULTRA
+- Same-browser: fresh /output tab boots newest autosave and follows edits via channel+relay (liveLinked true, mirrored 870,468)
+- Studio exit → both outputs keep rendering (outputLive true, state intact, rev frozen at 10, screenshots saved); zero page errors on both browsers
+- Timing notes: EventSource connects in ~5–10 s in headless; ES readyState/hb verified via relay diagnostics (msSinceSync fresh while control foreground; frozen only under background-tab throttling, covered by the 70 s window)
+
+Stage Summary:
+- The control no longer needs an embedded preview at all: /output is the preview — pixel-identical, live in ≤300 ms, and it now follows the control across browsers and machines via the server relay, not just across tabs
+- The show-must-not-die contract is untouched: close the control and every output keeps rendering its last state; reopen and edit and they snap back to LIVE LINK

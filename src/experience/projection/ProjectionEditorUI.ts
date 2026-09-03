@@ -30,10 +30,6 @@ export class ProjectionEditorUI {
   private previewTimer = 0
   private chromeTimer = 0
   private disposers: (() => void)[] = []
-  // output preview PiP — the projected picture, visible while you edit the world
-  private pipEl: HTMLElement | null = null
-  private pipCanvas: HTMLCanvasElement | null = null
-  private pipVisible = true
   // fullscreen calibration editor (the OUTPUT-tab editor, whole screen + guides)
   private fsOpen = false
   private fsRoot: HTMLElement | null = null
@@ -54,7 +50,7 @@ export class ProjectionEditorUI {
         <div class="pm-top-actions">
           <button id="pm-mode-preview" class="pm-btn pm-btn-active">PREVIEW</button>
           <button id="pm-mode-output" class="pm-btn">OUTPUT</button>
-          <button id="pm-pip" class="pm-btn pm-btn-active" title="Show the final output picture inside the screen preview">OUTPUT PREVIEW</button>
+          <button id="pm-open-output" class="pm-btn" title="Open the live /output page — it mirrors every edit in real time (works across browsers & machines)">OPEN OUTPUT ↗</button>
           <button id="pm-fullscreen" class="pm-btn">⛶ FULLSCREEN</button>
           <button id="pm-exit" class="pm-btn pm-btn-danger">EXIT STUDIO</button>
         </div>
@@ -106,7 +102,8 @@ export class ProjectionEditorUI {
     this.buildTopbar()
     this.nodeEditor = new OutputNodeEditor(this.tabBody, pm)
     this.nodeEditor.onFullscreen = () => this.toggleFullscreenEditor()
-    this.buildOutputPip()
+    this.compositeCanvas.width = 480
+    this.compositeCanvas.height = 270
     // tab switching
     this.root.querySelectorAll('.pm-tab').forEach((t) => {
       t.addEventListener('click', () => this.showTab((t as HTMLElement).dataset.tab!))
@@ -149,37 +146,13 @@ export class ProjectionEditorUI {
     this.root.querySelector('#pm-add')?.addEventListener('click', () => this.pm.addSurface())
     this.root.querySelector('#pm-mode-preview')?.addEventListener('click', () => this.pm.setOutputLive(false))
     this.root.querySelector('#pm-mode-output')?.addEventListener('click', () => this.pm.setOutputLive(true))
+    // the /output page IS the live preview now — it mirrors every edit
+    this.root.querySelector('#pm-open-output')?.addEventListener('click', () => {
+      window.open('/output', '_blank', 'noopener')
+      this.pm.depsToast('Output opened in a new tab — it follows every edit live', 3000)
+    })
     this.root.querySelector('#pm-fullscreen')?.addEventListener('click', () => this.pm.requestFullscreen())
     this.root.querySelector('#pm-exit')?.addEventListener('click', () => this.pm.exit())
-  }
-
-  // ------------------------------------------------------------ output PiP
-  /**
-   * The final composite, always visible inside the screen preview — the
-   * operator sees exactly what the projector will show while shaping the
-   * world, without leaving the editor view.
-   */
-  private buildOutputPip() {
-    const center = this.root.querySelector('.pm-center')
-    if (!center) return
-    const pip = document.createElement('div')
-    pip.className = 'pm-out-pip'
-    pip.innerHTML = `
-      <div class="pm-out-pip-head">
-        <span>OUTPUT PREVIEW</span>
-        <span class="pm-out-pip-size"></span>
-      </div>
-      <canvas width="480" height="270"></canvas>`
-    center.appendChild(pip)
-    this.pipEl = pip
-    this.pipCanvas = pip.querySelector('canvas')
-    this.compositeCanvas.width = 480
-    this.compositeCanvas.height = 270
-    this.root.querySelector('#pm-pip')?.addEventListener('click', () => {
-      this.pipVisible = !this.pipVisible
-      this.pipEl?.classList.toggle('pm-out-pip-hidden', !this.pipVisible)
-      this.root.querySelector('#pm-pip')?.classList.toggle('pm-btn-active', this.pipVisible)
-    })
   }
 
   // ------------------------------------------------------------ fullscreen calibration editor
@@ -1025,8 +998,6 @@ export class ProjectionEditorUI {
     this.refreshProps()
     if (this.activeTab === 'camera') this.buildCamGrid()
     this.nodeEditor.draw()
-    const sizeLbl = this.pipEl?.querySelector('.pm-out-pip-size')
-    if (sizeLbl) sizeLbl.textContent = `${this.pm.output.width}×${this.pm.output.height}`
   }
 
   setOutputLiveState(on: boolean) {
@@ -1057,18 +1028,12 @@ export class ProjectionEditorUI {
     // selected camera preview (right panel)
     const sel = this.pm.surfaces.selected
     if (sel?.enabled) this.pm.renderCameraPreview(sel, this.previewCanvas)
-    // one composite readback feeds all three views of the final picture
-    const wantComposite = this.activeTab === 'output' || this.fsOpen || (this.pipVisible && this.pipCanvas)
+    // one composite readback feeds the OUTPUT-tab editor + fullscreen editor
+    const wantComposite = this.activeTab === 'output' || this.fsOpen
     if (wantComposite) {
       this.pm.renderOutputPreview(this.compositeCanvas)
-      if (this.activeTab === 'output' || this.fsOpen) {
-        this.nodeEditor.setPreview(this.compositeCanvas)
-        this.nodeEditor.draw()
-      }
-      if (this.pipVisible && this.pipCanvas) {
-        const ctx = this.pipCanvas.getContext('2d')
-        if (ctx) ctx.drawImage(this.compositeCanvas, 0, 0, this.pipCanvas.width, this.pipCanvas.height)
-      }
+      this.nodeEditor.setPreview(this.compositeCanvas)
+      this.nodeEditor.draw()
     }
     // camera grid thumbnails in the CAMERA tab
     if (this.activeTab === 'camera' && this.camGrid) {

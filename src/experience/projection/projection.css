@@ -547,46 +547,6 @@ body.projection-live #gesture-view { opacity: 0 !important; pointer-events: none
 body.projection-studio-open #ocean-hud { opacity: 0 !important; pointer-events: none !important; }
 body.projection-studio-open #gesture-view { display: none !important; }
 
-/* ---------------- output preview PiP (inside the screen preview) ---------------- */
-.pm-out-pip {
-  position: absolute;
-  top: 14px;
-  right: 14px;
-  width: min(300px, 26vw);
-  background: rgba(3, 14, 22, 0.82);
-  border: 1px solid rgba(130, 205, 230, 0.30);
-  border-radius: 10px;
-  overflow: hidden;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
-  pointer-events: none;
-  z-index: 5;
-}
-.pm-out-pip.pm-out-pip-hidden { display: none; }
-.pm-out-pip-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.32rem 0.6rem;
-  font-size: 0.54rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  color: #8ff0dd;
-  border-bottom: 1px solid rgba(130, 205, 230, 0.16);
-}
-.pm-out-pip-size {
-  font-weight: 500;
-  letter-spacing: 0.06em;
-  color: rgba(190, 228, 240, 0.7);
-  font-variant-numeric: tabular-nums;
-}
-.pm-out-pip canvas {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  background: #000;
-}
-
 /* ---------------- fullscreen calibration editor ---------------- */
 #pm-fs-edit {
   position: fixed;
@@ -641,5 +601,4 @@ body.projection-studio-open #gesture-view { display: none !important; }
   .pm-panel.pm-right { width: 224px; }
   .pm-dock { height: 200px; }
   .pm-editor-tip { display: none; }
-  .pm-out-pip { width: 180px; }
 }

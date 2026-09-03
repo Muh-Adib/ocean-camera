@@ -19,7 +19,7 @@ import { ProjectManager, encodeProjectPayload, decodeProjectPayload, PORTABLE_LI
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
-import type { ProjectionOutput, ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
 export interface ProjectionDeps {
@@ -34,6 +34,16 @@ const AUTOSAVE_DELAY = 900
 /** studio → /output live pushes stream at least this often while editing */
 const BROADCAST_INTERVAL = 300
 const SYNC_CHANNEL = 'ocean-projection-sync-v1'
+/** studio heartbeat through the server relay — receivers keep their LIVE status */
+const RELAY_HEARTBEAT = 4000
+/**
+ * without studio contact for this long, /output shows it is HOLDING the last
+ * state. Wide on purpose: a HIDDEN control tab gets its 4 s heartbeat interval
+ * throttled by Chromium down to ~1/minute (intensive wake-up throttling after
+ * 5 min hidden). State pushes are event-driven and never throttle — only this
+ * cosmetic marker needs the slack.
+ */
+const LIVE_FRESH_MS = 70000
 
 export class ProjectionManager {
   /** studio open — the render pipeline is ours */
@@ -71,6 +81,16 @@ export class ProjectionManager {
   /** /output booted from a portable link (?d=…) — settings live in the URL itself */
   portableBoot = false
   private portableUrlTimer = 0
+  /** studio → server relay: true when the last POST succeeded */
+  private relayLastOk: boolean | null = null
+  private relayLastPostAt = 0
+  /** /output ← server relay stream (crosses browsers & machines, unlike BroadcastChannel) */
+  private relayES: EventSource | null = null
+  private relayRev = 0
+  private lastAppliedJson: string | null = null
+  /** performance.now() of the last adopted push / studio heartbeat */
+  private lastSyncAt = 0
+  private hbTimer = 0
   /** MSAA render targets need float-buffer rendering support (already required by the HalfFloat RTs) */
   private msaaOK = true
 
@@ -114,6 +134,7 @@ export class ProjectionManager {
     this.active = true
     this.mainCamera.layers.enable(1)   // editor viewport sees camera frustums
     this.wireSyncChannel()
+    this.startRelayHeartbeat()
 
     let restored = false
     if (this.surfaces.surfaces.length === 0) {
@@ -140,7 +161,11 @@ export class ProjectionManager {
     this.cameras.setHelpersVisibleAll(false)
     this.channel?.close()
     this.channel = null
-    this.project.saveLocal()
+    window.clearInterval(this.hbTimer)
+    this.hbTimer = 0
+    // the /output page must never write the studio's autosave — it only
+    // borrows state (disposal of an output page would otherwise clobber it)
+    if (!this.outputOnly) this.project.saveLocal()
     if (this.ui) {
       const el = this.ui
       this.ui = null
@@ -214,6 +239,7 @@ export class ProjectionManager {
     }
 
     this.wireSyncChannel()
+    this.wireRelay()
     this.syncAll()
     this.setOutputLive(true)
     this.buildOutputOverlay(restored, missingSession)
@@ -258,19 +284,7 @@ export class ProjectionManager {
         // the operator's full settings. With the control closed nothing
         // arrives and the boot state (published session / autosave) keeps
         // running untouched — the show never dies when the studio leaves.
-        this.liveLinked = this.project.load(msg.project)
-        if (this.liveLinked) {
-          // keep the published session's stored settings current — reloading
-          // the link boots the newest state the operator pushed, even if the
-          // studio closed without republishing
-          if (this.currentSession) {
-            try { this.project.updateSessionProject(this.currentSession.id, msg.project as never) } catch { /* noop */ }
-          }
-          // portable boots keep their URL fresh too — the bookmarked link
-          // always reopens the newest show, even on a machine with no registry
-          if (this.portableBoot) this.schedulePortableUrlRefresh()
-          this.syncOutputOverlay()
-        }
+        this.applyStudioPush(msg.project)
       } else if (!this.outputOnly && msg.type === 'request') {
         try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* noop */ }
       }
@@ -279,6 +293,55 @@ export class ProjectionManager {
       // adopt the live studio state immediately when one is open
       try { this.channel.postMessage({ type: 'request' }) } catch { /* noop */ }
     }
+  }
+
+  /**
+   * Server relay subscriber — the bridge that keeps /output in sync across
+   * DIFFERENT browsers and machines: the studio POSTs every state change
+   * (plus a 4 s heartbeat) and this EventSource delivers it here. Same
+   * apply path as the BroadcastChannel, so both transports can coexist —
+   * duplicate deliveries collapse on the identical-payload guard.
+   */
+  private wireRelay() {
+    if (typeof EventSource === 'undefined') return
+    try { this.relayES = new EventSource('/api/projection/relay/stream') } catch { return }
+    this.relayES.addEventListener('relay', (e) => {
+      try {
+        const msg = JSON.parse((e as MessageEvent).data as string) as { rev?: number; project?: unknown }
+        if (!msg?.project) return
+        this.relayRev = msg.rev ?? this.relayRev
+        this.applyStudioPush(msg.project)
+      } catch { /* malformed event — skip */ }
+    })
+    this.relayES.addEventListener('hb', () => {
+      this.lastSyncAt = performance.now()
+      this.syncOutputOverlay()
+    })
+  }
+
+  /** adopt a push from any live transport (BroadcastChannel or server relay) */
+  private applyStudioPush(project: unknown): boolean {
+    // identical payload twice (channel + relay racing) — nothing to do
+    let json: string
+    try { json = JSON.stringify(project) } catch { return false }
+    if (json === this.lastAppliedJson) { this.lastSyncAt = performance.now(); return this.liveLinked }
+
+    this.liveLinked = this.project.load(project)
+    if (this.liveLinked) {
+      this.lastAppliedJson = json
+      this.lastSyncAt = performance.now()
+      // keep the published session's stored settings current — reloading
+      // the link boots the newest state the operator pushed, even if the
+      // studio closed without republishing
+      if (this.currentSession) {
+        try { this.project.updateSessionProject(this.currentSession.id, project as never) } catch { /* noop */ }
+      }
+      // portable boots keep their URL fresh too — the bookmarked link
+      // always reopens the newest show, even on a machine with no registry
+      if (this.portableBoot) this.schedulePortableUrlRefresh()
+      this.syncOutputOverlay()
+    }
+    return this.liveLinked
   }
 
   /** trailing refresh of the ?d= payload after live pushes (portable boots) */
@@ -373,7 +436,7 @@ export class ProjectionManager {
       const rtTxt = rt ? ` · RT ${rt.w}×${rt.h}${rt.msaa ? ` ${rt.msaa}×AA` : ''}` : ''
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
       const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
-      const live = this.liveLinked ? 'LIVE LINK · ' : ''
+      const live = this.liveLinked ? (this.liveFresh() ? 'LIVE LINK · ' : 'HOLDING · ') : ''
       info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
@@ -390,6 +453,11 @@ export class ProjectionManager {
     if (sel && this.surfaces.surfaces.length) {
       sel.value = this.surfaces.surfaces[0].calibration
     }
+  }
+
+  /** studio contact within the freshness window? (pushes + relay heartbeat) */
+  private liveFresh(): boolean {
+    return this.lastSyncAt > 0 && performance.now() - this.lastSyncAt < LIVE_FRESH_MS
   }
 
   /** rebuild the session list (published sessions can appear while running) */
@@ -484,7 +552,40 @@ export class ProjectionManager {
     if (this.outputOnly) return
     window.clearTimeout(this.broadcastTimer)
     this.lastBroadcastAt = performance.now()
-    try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* channel closed */ }
+    const project = this.project.serialize()
+    try { this.channel?.postMessage({ type: 'project', project }) } catch { /* channel closed */ }
+    this.relayPost(project)
+  }
+
+  // -------- studio → server relay (crosses browsers & machines) -------------
+  /**
+   * Push the state through the Next.js server. BroadcastChannel only crosses
+   * tabs of ONE browser — the relay is what makes /output on another browser,
+   * another monitor's browser or the projector machine follow live.
+   */
+  private relayPost(project: ProjectionProject) {
+    this.relayLastPostAt = performance.now()
+    fetch('/api/projection/relay', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project }),
+    })
+      .then(() => { this.relayLastOk = true })
+      .catch(() => { this.relayLastOk = false })
+  }
+
+  /** while the studio is open, announce it every few seconds so every
+   *  /output page can keep showing LIVE LINK (and flip to HOLDING if the
+   *  control disappears) without any state churn */
+  private startRelayHeartbeat() {
+    if (this.outputOnly || this.hbTimer) return
+    this.hbTimer = window.setInterval(() => {
+      fetch('/api/projection/relay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hb: 1 }),
+      }).catch(() => { /* relay down — channel pushes still work same-browser */ })
+    }, RELAY_HEARTBEAT)
   }
 
   // ------------------------------------------------------------ editing API (used by the editor UI)
@@ -868,10 +969,26 @@ export class ProjectionManager {
   }
 
   // ------------------------------------------------------------ QA / dispose
+  /** live-sync transport diagnostics (QA + operator debugging) */
+  relayInfo() {
+    return {
+      lastPostOk: this.relayLastOk,
+      esState: this.relayES ? this.relayES.readyState : -1,
+      rev: this.relayRev,
+      liveLinked: this.liveLinked,
+      msSinceSync: this.lastSyncAt ? Math.round(performance.now() - this.lastSyncAt) : null,
+    }
+  }
+
+  /** QA: force an immediate full push (BroadcastChannel + relay) */
+  qaPush() { this.broadcastNow() }
+
   qaState() {
     return {
       active: this.active,
       outputLive: this.outputLive,
+      liveLinked: this.liveLinked,
+      relay: this.relayInfo(),
       surfaces: this.surfaces.surfaces.map((s) => ({
         id: s.id, name: s.name, enabled: s.enabled, locked: s.locked,
         output: { ...s.output }, calibration: s.calibration,
@@ -896,6 +1013,9 @@ export class ProjectionManager {
     window.clearTimeout(this.overlayTimer)
     window.clearTimeout(this.broadcastTimer)
     window.clearTimeout(this.portableUrlTimer)
+    window.clearInterval(this.hbTimer)
+    this.relayES?.close()
+    this.relayES = null
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)
     this.unsubs.forEach((u) => u())
