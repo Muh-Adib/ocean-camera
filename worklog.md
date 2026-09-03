@@ -347,3 +347,31 @@ Stage Summary:
 - Output links are now real show files: publish → copy /output?s=… → the projector opens byte-identical settings forever, control tab or not, and the operator can flip between published shows from the projector itself
 - /output can no longer show stale settings — every edit persists, and session links are immune to studio drift
 - Camera width and aspect are first-class: spans locked everywhere by default, slice/canvas ratios editable with one-click ratio snaps and camera↔slice matching
+
+---
+Task ID: 14-b
+Agent: main (Super Z)
+Task: Fix /output not matching the studio's full settings + no live sync when the output shape changes
+
+Work Log:
+- Root causes found (3): (1) session-linked /output tabs hard-ignored every studio push (currentSession lock) — published links froze at publish-time settings; (2) pushed warp/grid changes never rebuilt composite geometry — OutputManager.syncSurface only rebuilt when gridResolution changed, so corner pins / mesh edits / surface moves serialized in project pushes (and studio undo/redo) rendered stale; (3) studio→output sync rode the 900 ms autosave debounce, which a continuous drag kept resetting — /output only moved ≥0.9 s after the last edit and felt disconnected
+- ProjectionManager: removed the session lock — /output (plain or ?s=) now always adopts studio pushes; session tabs also post 'request' at boot so they mirror the live studio immediately; new liveLinked flag + "LIVE LINK ·" marker in the overlay readout; picking a session from the overlay resets the marker
+- New fast sync path: broadcastSoon()/broadcastNow() — trailing-correct 300 ms throttle, fully independent of the autosave; wired into onChange(syncAll), onLightChange, setOutputSize, setQuality, setRenderScale, publishSession (immediate) and onSave (immediate, kept as hard sync); timer cleared in dispose
+- Session links stay current: ProjectManager.updateSessionProject() — an /output?s= tab that adopts a push also rewrites its session's stored snapshot, so reloading the link later boots the newest settings even without a republish
+- OutputManager: gridSignature() (grid length + gridCustom + rounded node coords) stored per entry; syncSurface rebuilds geometry when the signature changes — pushed warp edits now rebuild exactly when the shape actually changed; invalidateGeometry clears the signature
+- main.ts QA hook moveSurface(name, dx, dy) — walks a surface's rect + corners + grid through the LIGHT path (surfaces.touch) like a real output-editor drag
+- README: session + live-sync sections rewritten to the new model
+
+Verified headless (agent-browser, two tabs):
+- Boot handshake: /output adopts the studio's exact state at open (surface rect, HIGH) — overlay "LIVE LINK · 1 surface · 1920×1080 · HIGH · RT 1167×691 2×AA"
+- Light path: studio moveSurface(260,140) → /output rect (490,248) within 250 ms; pixel-diff of before/after screenshots confirms the picture actually moved
+- Full path: warpCorner br(1750,1000) → /output corners match; keystone visible in screenshot (sync-after-warp.png)
+- Quality: studio ULTRA → session tab RT jumps to 1459×864 4×AA live
+- Session: publish 'Sync Show' → /output?s= boots snapshot then follows every later studio edit (previously frozen); studio tab CLOSED → session tab keeps rendering (frameCost 8.2 ms); reload → boots the newest pushed snapshot (ULTRA + moved rect), no republish needed; registry record verified updated (storedQuality 'ultra', storedOut 340,188)
+- Session resume: reopened studio lists the session, LOAD restores ULTRA + rect, continued edits propagate to the still-open /output tabs (440,238 · HIGH · LIVE LINK)
+- Canvas: 2560×720 push adopted by /output (readout "2560×720"); tsc clean; zero page errors (only the 3 pre-existing three.js warnings)
+
+Stage Summary:
+- /output is now a true live mirror of the studio's full settings — shape edits (corners, mesh, surface moves, canvas, quality) land in ≤300 ms and rebuild geometry only when the shape really changed
+- Session links: boot from the published snapshot, follow the studio while it's open, keep running when it closes, and self-update so a later reload always restores the newest settings
+- Control-off model intact: no studio → no pushes → the output holds its state forever, exactly as published/pushed last
