@@ -480,6 +480,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       link: (id: string) => projection.portableSessionLink(String(id)),
       portable: () => projection.portableBoot,
       fsEdit: (on?: boolean) => projection.setFullscreenEditor(on !== false),
+      /** live-sync transport diagnostics (BroadcastChannel + server relay) */
+      relay: () => projection.relayInfo(),
+      /** force an immediate full push to every open /output */
+      pushNow: () => projection.qaPush(),
       freeze: (on: boolean) => { projection.qaFrozen = on },
       save: () => projection.project.saveLocal(),
       loadLocal: () => projection.project.loadLocal(),
