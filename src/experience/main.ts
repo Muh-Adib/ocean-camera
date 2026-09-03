@@ -492,6 +492,21 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         projection.surfaces.emit()
         return true
       },
+      /** QA: move a whole surface through the LIGHT path (like a real drag in
+       *  the output editor) — exercises the fast live-push chain */
+      moveSurface: (surfaceName: string, dx: number, dy: number) => {
+        const s = projection.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === String(surfaceName).toLowerCase())
+        if (!s) return false
+        s.output.x += dx
+        s.output.y += dy
+        for (const k of ['tl', 'tr', 'br', 'bl'] as const) {
+          s.warp.corners[k].x += dx
+          s.warp.corners[k].y += dy
+        }
+        s.warp.grid.forEach((p) => { p.x += dx; p.y += dy })
+        projection.surfaces.touch(s)
+        return true
+      },
     },
   }
 

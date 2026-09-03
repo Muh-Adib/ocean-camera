@@ -16,6 +16,8 @@ interface SurfaceEntry {
   material: THREE.ShaderMaterial
   geometry: THREE.BufferGeometry
   res: number
+  /** content signature of the warp grid the geometry was built from */
+  gridSig: string
   rt: THREE.WebGLRenderTarget
   rtW: number
   rtH: number
@@ -102,22 +104,36 @@ export class OutputManager {
       mesh.frustumCulled = false
       mesh.matrixAutoUpdate = false
       this.scene.add(mesh)
-      entry = { mesh, material, geometry, res: -1, rt, rtW: 0, rtH: 0, samples: 0, order: index }
+      entry = { mesh, material, geometry, res: -1, gridSig: '', rt, rtW: 0, rtH: 0, samples: 0, order: index }
       this.entries.set(s.id, entry)
     }
     entry.order = index
     entry.mesh.renderOrder = index
     entry.mesh.visible = s.enabled
 
-    if (entry.res !== s.warp.gridResolution) {
+    if (entry.res !== s.warp.gridResolution || entry.gridSig !== this.gridSignature(s)) {
       this.rebuildGeometry(entry, s)
     }
     this.blend.update(entry.material, s, this.calib.getTexture(s.calibration))
   }
 
+  /**
+   * Cheap content signature of the warp grid — catches corner pin / mesh
+   * node / whole-surface moves that keep the same grid resolution but change
+   * the shape. Without it, shape edits arriving via project pushes (or
+   * undo/redo) never rebuilt the composite geometry.
+   */
+  private gridSignature(s: ProjectionSurface): string {
+    const g = s.warp.grid
+    let sig = `${g.length}:${s.warp.gridCustom ? 1 : 0}`
+    for (let i = 0; i < g.length; i++) sig += `|${Math.round(g[i].x)},${Math.round(g[i].y)}`
+    return sig
+  }
+
   /** recompute the warped mesh from the surface grid (y-down output px) */
   rebuildGeometry(entry: SurfaceEntry, s: ProjectionSurface) {
     const res = s.warp.gridResolution
+    entry.gridSig = this.gridSignature(s)
     const grid = s.warp.grid
     const n = res + 1
     const positions = new Float32Array(n * n * 3)
@@ -172,7 +188,7 @@ export class OutputManager {
   /** drop geometry caches so grids rebuild on next sync (grid edited) */
   invalidateGeometry(id: string) {
     const entry = this.entries.get(id)
-    if (entry) entry.res = -1
+    if (entry) { entry.res = -1; entry.gridSig = '' }
   }
 
   renderComposite(renderer: THREE.WebGLRenderer) {

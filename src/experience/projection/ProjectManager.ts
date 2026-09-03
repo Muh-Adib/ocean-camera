@@ -84,6 +84,19 @@ export class ProjectManager {
     return this.load(rec.project)
   }
 
+  /**
+   * Replace the stored snapshot of a published session. Live studio pushes
+   * keep a session link's settings current even without an explicit
+   * republish — reloading the link boots the newest state the operator set.
+   */
+  updateSessionProject(id: string, project: ProjectionProject): boolean {
+    const reg = this.readRegistry()
+    if (!reg[id]) return false
+    reg[id] = { ...reg[id], project }
+    this.writeRegistry(reg)
+    return true
+  }
+
   deleteSession(id: string): boolean {
     const reg = this.readRegistry()
     if (!reg[id]) return false

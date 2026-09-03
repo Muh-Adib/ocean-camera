@@ -31,6 +31,8 @@ export interface ProjectionDeps {
 }
 
 const AUTOSAVE_DELAY = 900
+/** studio → /output live pushes stream at least this often while editing */
+const BROADCAST_INTERVAL = 300
 const SYNC_CHANNEL = 'ocean-projection-sync-v1'
 
 export class ProjectionManager {
@@ -62,6 +64,10 @@ export class ProjectionManager {
   private channel: BroadcastChannel | null = null
   private overlay: HTMLElement | null = null
   private overlayTimer = 0
+  private broadcastTimer = 0
+  private lastBroadcastAt = 0
+  /** /output tab adopted a live studio push (overlay shows LIVE LINK) */
+  liveLinked = false
   /** MSAA render targets need float-buffer rendering support (already required by the HalfFloat RTs) */
   private msaaOK = true
 
@@ -86,10 +92,12 @@ export class ProjectionManager {
 
     // full data change → rebuild everything visual
     this.unsubs.push(this.surfaces.onChange(() => this.syncAll()))
-    // light change (node drag / numeric edit) → visuals + a debounced autosave,
-    // so /output always matches what the operator set even if the tab closes fast
+    // light change (node drag / numeric edit) → visuals + a fast live push
+    // + a debounced autosave, so /output streams the edit as it happens and
+    // the config survives even a fast tab close
     this.unsubs.push(this.surfaces.onLightChange((s) => {
       this.syncVisuals(s)
+      this.broadcastSoon()
       this.scheduleAutosave()
     }))
 
@@ -198,16 +206,27 @@ export class ProjectionManager {
       const msg = e.data as { type?: string; project?: unknown } | null
       if (!msg) return
       if (this.outputOnly && msg.type === 'project' && msg.project) {
-        // a session link is a fixed snapshot — it never drifts with studio edits
-        if (this.currentSession) return
-        this.project.load(msg.project)
-        this.syncOutputOverlay()
+        // The studio is the live master: /output always follows it — plain
+        // tabs and session-linked tabs alike, so the picture always matches
+        // the operator's full settings. With the control closed nothing
+        // arrives and the boot state (published session / autosave) keeps
+        // running untouched — the show never dies when the studio leaves.
+        this.liveLinked = this.project.load(msg.project)
+        if (this.liveLinked) {
+          // keep the published session's stored settings current — reloading
+          // the link boots the newest state the operator pushed, even if the
+          // studio closed without republishing
+          if (this.currentSession) {
+            try { this.project.updateSessionProject(this.currentSession.id, msg.project as never) } catch { /* noop */ }
+          }
+          this.syncOutputOverlay()
+        }
       } else if (!this.outputOnly && msg.type === 'request') {
         try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* noop */ }
       }
     }
-    if (this.outputOnly && !this.currentSession) {
-      // ask any open studio for its current config immediately
+    if (this.outputOnly) {
+      // adopt the live studio state immediately when one is open
       try { this.channel.postMessage({ type: 'request' }) } catch { /* noop */ }
     }
   }
@@ -252,6 +271,7 @@ export class ProjectionManager {
       if (this.loadSession(id)) {
         const rec = this.project.getSession(id)
         if (rec) this.currentSession = { id: rec.id, name: rec.name }
+        this.liveLinked = false   // switched back to the published snapshot
       }
       this.syncOutputOverlay()
     })
@@ -290,7 +310,8 @@ export class ProjectionManager {
       const rt = this.effectiveRT()
       const rtTxt = rt ? ` · RT ${rt.w}×${rt.h}${rt.msaa ? ` ${rt.msaa}×AA` : ''}` : ''
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
-      info.textContent = `${sess}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      const live = this.liveLinked ? 'LIVE LINK · ' : ''
+      info.textContent = `${sess}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
@@ -359,6 +380,7 @@ export class ProjectionManager {
       }
     }
     this.cameras.updateVisibility(this.surfaces.selectedId, this.active && this.showFrustums)
+    this.broadcastSoon()
     this.scheduleAutosave()
   }
 
@@ -379,6 +401,27 @@ export class ProjectionManager {
     if (this.outputOnly) return
     window.clearTimeout(this.autosaveTimer)
     this.autosaveTimer = window.setTimeout(() => this.project.saveLocal(), AUTOSAVE_DELAY)
+  }
+
+  // -------- studio → /output live link (fast, independent of the autosave) ----
+  /**
+   * Push the current project to open /output tabs within ~300 ms of any
+   * change. Trailing-correct: a burst of drag frames always ends with a
+   * final push, and the fast path is never blocked by the slower 900 ms
+   * localStorage autosave debounce.
+   */
+  private broadcastSoon() {
+    if (this.outputOnly) return
+    const wait = Math.max(0, BROADCAST_INTERVAL - (performance.now() - this.lastBroadcastAt))
+    window.clearTimeout(this.broadcastTimer)
+    this.broadcastTimer = window.setTimeout(() => this.broadcastNow(), wait)
+  }
+
+  private broadcastNow() {
+    if (this.outputOnly) return
+    window.clearTimeout(this.broadcastTimer)
+    this.lastBroadcastAt = performance.now()
+    try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* channel closed */ }
   }
 
   // ------------------------------------------------------------ editing API (used by the editor UI)
@@ -456,6 +499,7 @@ export class ProjectionManager {
     const meta = this.project.saveSession(name, sameName ? this.currentSession?.id : undefined)
     if (!meta) return null
     this.currentSession = { id: meta.id, name: meta.name }
+    this.broadcastNow()   // open /output tabs jump straight to the published state
     this.deps.toast(`Output session published — /output?s=${meta.id}`, 3600)
     this.ui?.refreshAll()
     this.syncOutputOverlay()
@@ -531,6 +575,7 @@ export class ProjectionManager {
   setOutputSize(width: number, height: number) {
     this.output.width = width
     this.output.height = height
+    this.broadcastSoon()
     this.scheduleAutosave()
     this.ui?.refreshAll()
   }
@@ -539,6 +584,7 @@ export class ProjectionManager {
     this.output.renderScale = Math.min(1, Math.max(0.1, scale))
     // a manual scale leaves the named profiles (AUTO keeps tuning on its own)
     if (this.output.quality !== 'auto') this.output.quality = 'custom'
+    this.broadcastSoon()
     this.scheduleAutosave()
     this.ui?.refreshAll()
     this.syncOutputOverlay()
@@ -560,6 +606,7 @@ export class ProjectionManager {
     } else if (level !== 'custom') {
       this.output.renderScale = QUALITY_PROFILES[level].renderScale
     }
+    this.broadcastSoon()
     this.scheduleAutosave()
     this.ui?.refreshAll()
     this.syncOutputOverlay()
@@ -779,6 +826,7 @@ export class ProjectionManager {
     this.exit()
     window.clearTimeout(this.autosaveTimer)
     window.clearTimeout(this.overlayTimer)
+    window.clearTimeout(this.broadcastTimer)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)
     this.unsubs.forEach((u) => u())
