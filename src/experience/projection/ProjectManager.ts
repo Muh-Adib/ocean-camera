@@ -23,6 +23,67 @@ interface SessionRecord extends OutputSessionMeta {
   project: ProjectionProject
 }
 
+// ---------------------------------------------------------------- portable payloads
+// Output links must survive OUTSIDE the control's browser — projectors are
+// usually another machine. These helpers pack a whole project snapshot into a
+// URL-safe string (deflate + base64url when CompressionStream exists) so the
+// /output page can boot the exact show straight from the link itself.
+
+function bytesToB64url(bytes: Uint8Array): string {
+  let bin = ''
+  const chunk = 0x8000
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + chunk))
+  }
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function b64urlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/')
+  const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : ''
+  const bin = atob(b64 + pad)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/** pack a project into a portable string: "z…" deflate or "j…" raw JSON base64url */
+export async function encodeProjectPayload(project: ProjectionProject): Promise<string> {
+  const json = JSON.stringify(project)
+  if (typeof CompressionStream !== 'undefined') {
+    try {
+      const stream = new Blob([json]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+      const buf = await new Response(stream).arrayBuffer()
+      return 'z' + bytesToB64url(new Uint8Array(buf))
+    } catch { /* deflate unavailable — fall through to plain */ }
+  }
+  return 'j' + bytesToB64url(new TextEncoder().encode(json))
+}
+
+/** unpack a portable string back into a project (returns null when broken) */
+export async function decodeProjectPayload(raw: string): Promise<ProjectionProject | null> {
+  try {
+    const mode = raw[0]
+    const bytes = b64urlToBytes(raw.slice(1))
+    let text: string
+    if (mode === 'z' && typeof DecompressionStream !== 'undefined') {
+      const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      text = new TextDecoder().decode(await new Response(stream).arrayBuffer())
+    } else {
+      text = new TextDecoder().decode(bytes)
+    }
+    const parsed = JSON.parse(text) as ProjectionProject
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+/** portable links cap — beyond this some browsers / QR tools choke on the URL */
+export const PORTABLE_LINK_LIMIT = 24000
+
+export const SESSION_ID_RE = /^[a-z0-9][a-z0-9-]{4,48}$/
+
 export class ProjectManager {
   /** fired after every successful localStorage persist (studio → /output live sync) */
   onSave: ((project: ProjectionProject) => void) | null = null
@@ -103,6 +164,25 @@ export class ProjectManager {
     delete reg[id]
     this.writeRegistry(reg)
     return true
+  }
+
+  /**
+   * Install a session record that arrived OUTSIDE this browser — a portable
+   * /output?s=…&d=… link carries its own snapshot. Seeding the registry makes
+   * the overlay's session picker work and a plain /output?s=<id> reload boot
+   * the same show even when the long URL was trimmed.
+   */
+  seedSession(id: string, name: string, project: ProjectionProject): void {
+    if (!SESSION_ID_RE.test(id)) return
+    try {
+      const reg = this.readRegistry()
+      const now = Date.now()
+      const prev = reg[id]
+      reg[id] = prev
+        ? { ...prev, name, project }
+        : { id, name, createdAt: now, updatedAt: now, project }
+      this.writeRegistry(reg)
+    } catch { /* storage full — the URL itself still carries the data */ }
   }
 
   serialize(): ProjectionProject {

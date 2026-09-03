@@ -15,7 +15,7 @@ import { CameraManager } from './CameraManager'
 import { BlendManager } from './BlendManager'
 import { CalibrationManager } from './CalibrationManager'
 import { OutputManager } from './OutputManager'
-import { ProjectManager } from './ProjectManager'
+import { ProjectManager, encodeProjectPayload, decodeProjectPayload, PORTABLE_LINK_LIMIT } from './ProjectManager'
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
@@ -68,6 +68,9 @@ export class ProjectionManager {
   private lastBroadcastAt = 0
   /** /output tab adopted a live studio push (overlay shows LIVE LINK) */
   liveLinked = false
+  /** /output booted from a portable link (?d=…) — settings live in the URL itself */
+  portableBoot = false
+  private portableUrlTimer = 0
   /** MSAA render targets need float-buffer rendering support (already required by the HalfFloat RTs) */
   private msaaOK = true
 
@@ -170,9 +173,33 @@ export class ProjectionManager {
 
     const params = new URLSearchParams(window.location.search)
     const sid = params.get('s')
+    const payload = params.get('d')
     let restored = false
     let missingSession = false
-    if (sid) {
+
+    // 1) portable link — the whole project snapshot rides INSIDE the URL, so
+    //    this works on any machine, any browser, even with zero shared storage
+    if (payload) {
+      void decodeProjectPayload(payload).then((project) => {
+        if (!project) return
+        if (this.project.load(project)) {
+          this.portableBoot = true
+          // seed the local registry so the session picker works and a trimmed
+          // /output?s=<id> reload still boots the same show
+          if (sid && /^[a-z0-9][a-z0-9-]{4,48}$/.test(sid)) {
+            const name = (params.get('n') || 'Portable session').slice(0, 48)
+            this.project.seedSession(sid, name, project)
+            this.currentSession = { id: sid, name }
+          }
+          this.overlay?.querySelector('.pm-out-warn')?.remove()
+          this.syncAll()
+          this.syncOutputOverlay()
+        }
+      })
+    }
+
+    // 2) published session from this browser's registry
+    if (!restored && sid) {
       const rec = this.project.getSession(sid)
       if (rec) {
         restored = this.project.loadSession(sid)
@@ -181,7 +208,7 @@ export class ProjectionManager {
         missingSession = true
       }
     }
-    if (!restored) {
+    if (!restored && !payload) {
       restored = this.project.loadLocal()
       if (!restored) this.applyPreset('flat-screen', { history: false, toast: false })
     }
@@ -197,6 +224,26 @@ export class ProjectionManager {
       this.setCalibrationAll(pattern as ProjectionSurface['calibration'])
       this.syncOutputOverlay()
     }
+  }
+
+  /**
+   * A self-contained output link: /output?s=<id>&n=<name>&d=<snapshot>.
+   * The projector machine needs NOTHING else — no shared storage, no open
+   * control tab — the show settings travel inside the URL itself.
+   * Falls back to the registry link when the snapshot would make the URL
+   * impractically long (huge meshes).
+   */
+  async portableSessionLink(id: string, name?: string): Promise<string> {
+    const rec = this.project.getSession(id)
+    const base = `${location.origin}/output?s=${id}`
+    if (!rec) return base
+    const label = encodeURIComponent((name ?? rec.name).slice(0, 48))
+    try {
+      const payload = await encodeProjectPayload(rec.project)
+      const url = `${base}&n=${label}&d=${payload}`
+      if (url.length <= PORTABLE_LINK_LIMIT) return url
+    } catch { /* encode failed — registry link still works same-browser */ }
+    return base
   }
 
   /** live link between the studio tab and /output tabs (same browser) */
@@ -219,6 +266,9 @@ export class ProjectionManager {
           if (this.currentSession) {
             try { this.project.updateSessionProject(this.currentSession.id, msg.project as never) } catch { /* noop */ }
           }
+          // portable boots keep their URL fresh too — the bookmarked link
+          // always reopens the newest show, even on a machine with no registry
+          if (this.portableBoot) this.schedulePortableUrlRefresh()
           this.syncOutputOverlay()
         }
       } else if (!this.outputOnly && msg.type === 'request') {
@@ -229,6 +279,18 @@ export class ProjectionManager {
       // adopt the live studio state immediately when one is open
       try { this.channel.postMessage({ type: 'request' }) } catch { /* noop */ }
     }
+  }
+
+  /** trailing refresh of the ?d= payload after live pushes (portable boots) */
+  private schedulePortableUrlRefresh() {
+    window.clearTimeout(this.portableUrlTimer)
+    this.portableUrlTimer = window.setTimeout(() => {
+      if (!this.currentSession) return
+      void this.portableSessionLink(this.currentSession.id, this.currentSession.name).then((url) => {
+        if (!url.includes('&d=') || url === location.href) return
+        try { window.history.replaceState(null, '', url) } catch { /* noop */ }
+      })
+    }, 1400)
   }
 
   /** auto-hiding settings overlay for the output page */
@@ -310,8 +372,9 @@ export class ProjectionManager {
       const rt = this.effectiveRT()
       const rtTxt = rt ? ` · RT ${rt.w}×${rt.h}${rt.msaa ? ` ${rt.msaa}×AA` : ''}` : ''
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
+      const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
       const live = this.liveLinked ? 'LIVE LINK · ' : ''
-      info.textContent = `${sess}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
@@ -500,7 +563,7 @@ export class ProjectionManager {
     if (!meta) return null
     this.currentSession = { id: meta.id, name: meta.name }
     this.broadcastNow()   // open /output tabs jump straight to the published state
-    this.deps.toast(`Output session published — /output?s=${meta.id}`, 3600)
+    this.deps.toast(`Session "${meta.name}" published — COPY LINK in PROJECT gives a portable URL`, 3600)
     this.ui?.refreshAll()
     this.syncOutputOverlay()
     return meta
@@ -525,6 +588,11 @@ export class ProjectionManager {
     if (ok && this.currentSession?.id === id) this.currentSession = null
     if (ok) { this.ui?.refreshAll(); this.syncOutputOverlay() }
     return ok
+  }
+
+  /** fullscreen calibration editor (delegates to the editor UI) */
+  setFullscreenEditor(on: boolean) {
+    this.ui?.toggleFullscreenEditor(on)
   }
 
   setOutputLive(on: boolean) {
@@ -827,6 +895,7 @@ export class ProjectionManager {
     window.clearTimeout(this.autosaveTimer)
     window.clearTimeout(this.overlayTimer)
     window.clearTimeout(this.broadcastTimer)
+    window.clearTimeout(this.portableUrlTimer)
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)
     this.unsubs.forEach((u) => u())

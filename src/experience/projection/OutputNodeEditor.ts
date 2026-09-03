@@ -21,6 +21,19 @@ interface DragState {
   origCorners: ProjectionSurface['warp']['corners']
 }
 
+interface SnapTargetSet {
+  pts: Vec2[]
+  edges: [Vec2, Vec2][]
+}
+
+interface SnapHit {
+  p: Vec2
+  d2: number
+  kind: 'point' | 'edge'
+  a: Vec2
+  b?: Vec2
+}
+
 const CORNER_KEYS: (keyof ProjectionSurface['warp']['corners'])[] = ['tl', 'tr', 'br', 'bl']
 
 export class OutputNodeEditor {
@@ -35,6 +48,14 @@ export class OutputNodeEditor {
   private oy = 0
   private snapEnabled = true
   private snapSize = 10
+  /** magnetic seams — snap to neighbouring surfaces so edges connect gap-free */
+  private surfSnap = true
+  /** rule-of-thirds / center / ruler guides drawn over the output space */
+  guides = true
+  /** live snap indicator while dragging */
+  private snapHit: SnapHit | null = null
+  /** UI bridge — fullscreen editor toggle (wired by ProjectionEditorUI) */
+  onFullscreen: (() => void) | null = null
   private dpr = Math.min(window.devicePixelRatio || 1, 2)
   private previewCanvas: HTMLCanvasElement
   private ro: ResizeObserver
@@ -51,6 +72,8 @@ export class OutputNodeEditor {
           <option value="25">25 px</option>
           <option value="50">50 px</option>
         </select>
+        <label class="pm-check" title="Magnetic seams — surfaces snap to each other so edges connect without gaps"><input type="checkbox" id="pm-magnet" checked> MAGNET</label>
+        <label class="pm-check" title="Rule-of-thirds, center cross and ruler guides over the output"><input type="checkbox" id="pm-guides" checked> GUIDES</label>
         <span class="pm-toolbar-sep"></span>
         <button class="pm-btn pm-btn-sm" data-act="undo" title="Undo (Ctrl+Z)">UNDO</button>
         <button class="pm-btn pm-btn-sm" data-act="redo" title="Redo (Ctrl+Shift+Z)">REDO</button>
@@ -58,7 +81,8 @@ export class OutputNodeEditor {
         <button class="pm-btn pm-btn-sm" data-act="reset" title="Reset corners to the output rectangle">RESET CORNERS</button>
         <button class="pm-btn pm-btn-sm" data-act="fit" title="Fit surface to the whole output">FIT OUTPUT</button>
         <button class="pm-btn pm-btn-sm" data-act="center" title="Center the surface">CENTER</button>
-        <span class="pm-editor-tip">drag corners to pin · select a surface by clicking it · drag inside to move</span>
+        <button class="pm-btn pm-btn-sm" data-act="fullscreen" title="Edit this canvas fullscreen with guides — same tools, whole screen">⛶ FULLSCREEN</button>
+        <span class="pm-editor-tip">drag corners to pin · select a surface by clicking it · drag inside to move · hold ALT to bypass snapping</span>
       </div>
       <div class="pm-editor-stage">
         <canvas id="pm-output-canvas"></canvas>
@@ -82,6 +106,14 @@ export class OutputNodeEditor {
       this.snapSize = Number((e.target as HTMLSelectElement).value)
       this.draw()
     })
+    this.root.querySelector('#pm-magnet')?.addEventListener('change', (e) => {
+      this.surfSnap = (e.target as HTMLInputElement).checked
+      this.draw()
+    })
+    this.root.querySelector('#pm-guides')?.addEventListener('change', (e) => {
+      this.guides = (e.target as HTMLInputElement).checked
+      this.draw()
+    })
     this.root.querySelectorAll('[data-act]').forEach((b) => {
       b.addEventListener('click', () => this.runAction((b as HTMLElement).dataset.act!))
     })
@@ -99,6 +131,7 @@ export class OutputNodeEditor {
     switch (act) {
       case 'undo': this.pm.undo(); return
       case 'redo': this.pm.redo(); return
+      case 'fullscreen': this.onFullscreen?.(); return
       case 'reset':
         if (!s) return
         this.pm.surfaces.snapshot()
@@ -263,6 +296,73 @@ export class OutputNodeEditor {
     }
   }
 
+  // ------------------------------------------------------------ magnetic seams
+  /**
+   * Snap targets from every OTHER surface: their corners plus their four
+   * outline edges (and the boundary nodes of hand-edited meshes). Dragging a
+   * surface (or any of its nodes) near a neighbour lands EXACTLY on the
+   * neighbour's geometry, so projected seams stay connected without gaps.
+   */
+  private snapTargets(excludeId: string | null): SnapTargetSet {
+    const pts: Vec2[] = []
+    const edges: [Vec2, Vec2][] = []
+    for (const s of this.pm.surfaces.surfaces) {
+      if (s.id === excludeId || !s.enabled) continue
+      const c = s.warp.corners
+      pts.push({ ...c.tl }, { ...c.tr }, { ...c.br }, { ...c.bl })
+      edges.push([c.tl, c.tr], [c.tr, c.br], [c.br, c.bl], [c.bl, c.tl])
+      if (s.warp.gridCustom && s.warp.gridResolution > 1) {
+        const res = s.warp.gridResolution
+        const n = res + 1
+        const g = s.warp.grid
+        for (let i = 1; i < res; i++) {
+          pts.push({ ...g[gridIndex(res, i, 0)] }, { ...g[gridIndex(res, i, res)] })
+          pts.push({ ...g[gridIndex(res, 0, i)] }, { ...g[gridIndex(res, res, i)] })
+        }
+        void n
+      }
+    }
+    return { pts, edges }
+  }
+
+  /** nearest point-snap, else nearest edge-snap, within a ~14 px (canvas) radius */
+  private snapToTargets(p: Vec2, targets: SnapTargetSet): SnapHit | null {
+    const R = Math.max(8, 14 / this.scale)
+    let best: SnapHit | null = null
+    for (const t of targets.pts) {
+      const d2 = (t.x - p.x) ** 2 + (t.y - p.y) ** 2
+      if (d2 <= R * R && (!best || d2 < best.d2)) best = { p: { ...t }, d2, kind: 'point', a: { ...t } }
+    }
+    if (best) return best
+    for (const [a, b] of targets.edges) {
+      const vx = b.x - a.x, vy = b.y - a.y
+      const len2 = vx * vx + vy * vy
+      if (len2 < 1e-6) continue
+      let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2
+      t = Math.max(0, Math.min(1, t))
+      const q = { x: a.x + vx * t, y: a.y + vy * t }
+      const d2 = (q.x - p.x) ** 2 + (q.y - p.y) ** 2
+      if (d2 <= R * R && (!best || d2 < best.d2)) best = { p: q, d2, kind: 'edge', a: { ...a }, b: { ...b } }
+    }
+    return best
+  }
+
+  /**
+   * Whole-surface drag: test all four would-be corners against the targets
+   * and shift by the single best snap — the surface glues edge-first onto
+   * its neighbour instead of fighting the grid snap.
+   */
+  private snapSurfaceDelta(corners: Vec2[], targets: SnapTargetSet): SnapHit | null {
+    let best: SnapHit | null = null
+    for (const c of corners) {
+      const hit = this.snapToTargets(c, targets)
+      if (hit && (!best || hit.d2 < best.d2)) {
+        best = { ...hit, p: { x: hit.p.x - c.x, y: hit.p.y - c.y } }  // store delta in p
+      }
+    }
+    return best
+  }
+
   private onPointerMove = (e: PointerEvent) => {
     const rect = this.canvas.getBoundingClientRect()
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top
@@ -271,6 +371,7 @@ export class OutputNodeEditor {
 
     if (!this.drag) {
       // hover state
+      this.snapHit = null
       let hover: string | null = null
       if (s && !s.locked) {
         const hit = this.hitNode(s, out)
@@ -291,8 +392,35 @@ export class OutputNodeEditor {
     const W = this.pm.output.width, H = this.pm.output.height
     let dx = out.x - this.drag.startX
     let dy = out.y - this.drag.startY
+    this.snapHit = null
 
-    if (this.snapEnabled) {
+    // magnetic seams first — surfaces glue onto their neighbours edge-exact;
+    // hold ALT (or untick MAGNET) to bypass. Grid snap only fills the gaps.
+    const magnet = this.snapEnabled && this.surfSnap && !e.altKey
+    const targets = magnet ? this.snapTargets(sel.id) : null
+    if (targets && this.drag.kind === 'surface') {
+      const cand = CORNER_KEYS.map((k) => ({
+        x: this.drag!.origCorners[k].x + dx,
+        y: this.drag!.origCorners[k].y + dy,
+      }))
+      const hit = this.snapSurfaceDelta(cand, targets)
+      if (hit) {
+        dx += hit.p.x; dy += hit.p.y
+        this.snapHit = { kind: hit.kind, a: hit.a, b: hit.b, d2: hit.d2, p: hit.p }
+      }
+    } else if (targets && (this.drag.kind === 'corner' || this.drag.kind === 'node')) {
+      const base = this.drag.kind === 'corner'
+        ? this.drag.origCorners[this.drag.cornerKey!]
+        : this.drag.origGrid[this.drag.nodeIndex!]
+      const hit = this.snapToTargets({ x: base.x + dx, y: base.y + dy }, targets)
+      if (hit) {
+        dx = hit.p.x - base.x
+        dy = hit.p.y - base.y
+        this.snapHit = hit
+      }
+    }
+
+    if (this.snapEnabled && !e.altKey && !this.snapHit) {
       let absX: number, absY: number
       if (this.drag.kind === 'surface') {
         absX = this.drag.origOutput.x + dx
@@ -358,6 +486,7 @@ export class OutputNodeEditor {
   private onPointerUp = () => {
     if (!this.drag) return
     this.drag = null
+    this.snapHit = null
     this.showCoords(false)
     this.pm.endEdit()
     this.pm.surfaces.emit()   // full refresh: properties, list, autosave
@@ -420,6 +549,122 @@ export class OutputNodeEditor {
     // surfaces (topmost last)
     for (const s of this.pm.surfaces.surfaces) this.drawSurface(ctx, s, s.id === this.pm.surfaces.selectedId)
 
+    // connection proofs + calibration guides + live snap feedback
+    this.drawSeamGlue(ctx)
+    if (this.guides) this.drawGuides(ctx)
+    if (this.snapHit) this.drawSnapHit(ctx)
+
+    ctx.restore()
+  }
+
+  /** bright “glue” where two surfaces’ edges touch within ~3 px — proof the seams connect */
+  private drawSeamGlue(ctx: CanvasRenderingContext2D) {
+    const list = this.pm.surfaces.surfaces.filter((s) => s.enabled)
+    if (list.length < 2) return
+    const EPS = 3
+    const quads = list.map((s) => {
+      const c = s.warp.corners
+      return [[c.tl, c.tr], [c.tr, c.br], [c.br, c.bl], [c.bl, c.tl]] as [Vec2, Vec2][]
+    })
+    const distToSeg = (p: Vec2, a: Vec2, b: Vec2): number => {
+      const vx = b.x - a.x, vy = b.y - a.y
+      const len2 = vx * vx + vy * vy
+      if (len2 < 1e-6) return Math.hypot(p.x - a.x, p.y - a.y)
+      let t = ((p.x - a.x) * vx + (p.y - a.y) * vy) / len2
+      t = Math.max(0, Math.min(1, t))
+      return Math.hypot(p.x - (a.x + vx * t), p.y - (a.y + vy * t))
+    }
+    const segs: [Vec2, Vec2][] = []
+    const dots: Vec2[] = []
+    for (let i = 0; i < quads.length; i++) {
+      for (let j = i + 1; j < quads.length; j++) {
+        for (const ea of quads[i]) {
+          for (const eb of quads[j]) {
+            const na = distToSeg(ea[0], eb[0], eb[1]) < EPS
+            const nb = distToSeg(ea[1], eb[0], eb[1]) < EPS
+            if (na && nb) { segs.push([{ ...ea[0] }, { ...ea[1] }]); segs.push([{ ...eb[0] }, { ...eb[1] }]) }
+            else if (na || nb) dots.push({ ...(na ? ea[0] : ea[1]) })
+          }
+        }
+      }
+    }
+    if (!segs.length && !dots.length) return
+    ctx.save()
+    ctx.lineCap = 'round'
+    for (const [p, q] of segs) {
+      const cp = this.toCanvas(p), cq = this.toCanvas(q)
+      ctx.strokeStyle = 'rgba(255,224,138,0.25)'
+      ctx.lineWidth = 7
+      ctx.beginPath(); ctx.moveTo(cp.x, cp.y); ctx.lineTo(cq.x, cq.y); ctx.stroke()
+      ctx.strokeStyle = 'rgba(255,224,138,0.85)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.moveTo(cp.x, cp.y); ctx.lineTo(cq.x, cq.y); ctx.stroke()
+    }
+    for (const p of dots) {
+      const cp = this.toCanvas(p)
+      ctx.fillStyle = 'rgba(255,224,138,0.95)'
+      ctx.beginPath(); ctx.arc(cp.x, cp.y, 3.4, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.restore()
+  }
+
+  /** rule-of-thirds, center cross and a 100 px ruler over the output space */
+  private drawGuides(ctx: CanvasRenderingContext2D) {
+    const W = this.pm.output.width, H = this.pm.output.height
+    const o = this.toCanvas({ x: 0, y: 0 })
+    const w = W * this.scale, h = H * this.scale
+    if (w < 30 || h < 30) return
+    ctx.save()
+    ctx.strokeStyle = 'rgba(140,220,245,0.20)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    for (let i = 1; i <= 2; i++) {
+      const x = o.x + (w * i) / 3, y = o.y + (h * i) / 3
+      ctx.moveTo(x, o.y); ctx.lineTo(x, o.y + h)
+      ctx.moveTo(o.x, y); ctx.lineTo(o.x + w, y)
+    }
+    ctx.stroke()
+    const cx = o.x + w / 2, cy = o.y + h / 2
+    ctx.strokeStyle = 'rgba(255,224,138,0.45)'
+    ctx.beginPath()
+    ctx.moveTo(cx - 11, cy); ctx.lineTo(cx + 11, cy)
+    ctx.moveTo(cx, cy - 11); ctx.lineTo(cx, cy + 11)
+    ctx.stroke()
+    ctx.strokeStyle = 'rgba(150,215,235,0.42)'
+    ctx.fillStyle = 'rgba(190,228,240,0.62)'
+    ctx.font = '500 8px ui-monospace, monospace'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'top'
+    ctx.beginPath()
+    for (let x = 0; x <= W; x += 100) {
+      const px = this.toCanvas({ x, y: 0 }).x
+      ctx.moveTo(px, o.y); ctx.lineTo(px, o.y - 6)
+      if (x > 0 && x % 500 === 0) ctx.fillText(String(x), px + 2, o.y - 14)
+    }
+    for (let y = 0; y <= H; y += 100) {
+      const py = this.toCanvas({ x: 0, y }).y
+      ctx.moveTo(o.x, py); ctx.lineTo(o.x - 6, py)
+    }
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  /** the live magnet indicator — the exact corner/edge the drag is glued to */
+  private drawSnapHit(ctx: CanvasRenderingContext2D) {
+    const hit = this.snapHit!
+    const a = this.toCanvas(hit.a)
+    ctx.save()
+    if (hit.kind === 'edge' && hit.b) {
+      const b = this.toCanvas(hit.b)
+      ctx.strokeStyle = 'rgba(255,224,138,0.9)'
+      ctx.lineWidth = 3
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+    }
+    ctx.fillStyle = '#ffe08a'
+    ctx.beginPath(); ctx.arc(a.x, a.y, 4.6, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = 'rgba(4,20,30,0.9)'
+    ctx.lineWidth = 1.4
+    ctx.beginPath(); ctx.arc(a.x, a.y, 4.6, 0, Math.PI * 2); ctx.stroke()
     ctx.restore()
   }
 

@@ -30,6 +30,14 @@ export class ProjectionEditorUI {
   private previewTimer = 0
   private chromeTimer = 0
   private disposers: (() => void)[] = []
+  // output preview PiP — the projected picture, visible while you edit the world
+  private pipEl: HTMLElement | null = null
+  private pipCanvas: HTMLCanvasElement | null = null
+  private pipVisible = true
+  // fullscreen calibration editor (the OUTPUT-tab editor, whole screen + guides)
+  private fsOpen = false
+  private fsRoot: HTMLElement | null = null
+  private fsHome: HTMLElement | null = null
 
   constructor(private container: HTMLElement, private pm: ProjectionManager) {
     document.body.classList.add('projection-studio-open')
@@ -46,6 +54,7 @@ export class ProjectionEditorUI {
         <div class="pm-top-actions">
           <button id="pm-mode-preview" class="pm-btn pm-btn-active">PREVIEW</button>
           <button id="pm-mode-output" class="pm-btn">OUTPUT</button>
+          <button id="pm-pip" class="pm-btn pm-btn-active" title="Show the final output picture inside the screen preview">OUTPUT PREVIEW</button>
           <button id="pm-fullscreen" class="pm-btn">⛶ FULLSCREEN</button>
           <button id="pm-exit" class="pm-btn pm-btn-danger">EXIT STUDIO</button>
         </div>
@@ -96,6 +105,8 @@ export class ProjectionEditorUI {
 
     this.buildTopbar()
     this.nodeEditor = new OutputNodeEditor(this.tabBody, pm)
+    this.nodeEditor.onFullscreen = () => this.toggleFullscreenEditor()
+    this.buildOutputPip()
     // tab switching
     this.root.querySelectorAll('.pm-tab').forEach((t) => {
       t.addEventListener('click', () => this.showTab((t as HTMLElement).dataset.tab!))
@@ -140,6 +151,88 @@ export class ProjectionEditorUI {
     this.root.querySelector('#pm-mode-output')?.addEventListener('click', () => this.pm.setOutputLive(true))
     this.root.querySelector('#pm-fullscreen')?.addEventListener('click', () => this.pm.requestFullscreen())
     this.root.querySelector('#pm-exit')?.addEventListener('click', () => this.pm.exit())
+  }
+
+  // ------------------------------------------------------------ output PiP
+  /**
+   * The final composite, always visible inside the screen preview — the
+   * operator sees exactly what the projector will show while shaping the
+   * world, without leaving the editor view.
+   */
+  private buildOutputPip() {
+    const center = this.root.querySelector('.pm-center')
+    if (!center) return
+    const pip = document.createElement('div')
+    pip.className = 'pm-out-pip'
+    pip.innerHTML = `
+      <div class="pm-out-pip-head">
+        <span>OUTPUT PREVIEW</span>
+        <span class="pm-out-pip-size"></span>
+      </div>
+      <canvas width="480" height="270"></canvas>`
+    center.appendChild(pip)
+    this.pipEl = pip
+    this.pipCanvas = pip.querySelector('canvas')
+    this.compositeCanvas.width = 480
+    this.compositeCanvas.height = 270
+    this.root.querySelector('#pm-pip')?.addEventListener('click', () => {
+      this.pipVisible = !this.pipVisible
+      this.pipEl?.classList.toggle('pm-out-pip-hidden', !this.pipVisible)
+      this.root.querySelector('#pm-pip')?.classList.toggle('pm-btn-active', this.pipVisible)
+    })
+  }
+
+  // ------------------------------------------------------------ fullscreen calibration editor
+  /**
+   * The OUTPUT-tab editor blown up to the whole control screen: same corner
+   * pins, same mesh nodes, same snapping — plus guides — so surfaces can be
+   * calibrated pixel-accurately against the room while the ocean keeps
+   * running underneath.
+   */
+  toggleFullscreenEditor(on?: boolean) {
+    const want = on ?? !this.fsOpen
+    if (want === this.fsOpen) return
+    this.fsOpen = want
+    if (want) {
+      const root = document.createElement('div')
+      root.id = 'pm-fs-edit'
+      root.innerHTML = `
+        <div class="pm-fs-bar">
+          <span class="pm-fs-title">FULLSCREEN CALIBRATION — same surfaces · same tools · guides on</span>
+          <div class="pm-fs-actions">
+            <span class="pm-fs-label">PATTERN</span>
+            ${['off', 'grid', 'crosshair', 'white'].map((p) => `<button class="pm-btn pm-btn-sm" data-pat="${p}">${p.toUpperCase()}</button>`).join('')}
+            <button class="pm-btn pm-btn-sm pm-btn-danger" data-fs-close>EXIT — ESC</button>
+          </div>
+        </div>
+        <div class="pm-fs-stage"></div>`
+      document.body.appendChild(root)
+      this.fsRoot = root
+      this.fsHome = this.tabBody
+      this.nodeEditor.root.style.display = 'flex'
+      root.querySelector('.pm-fs-stage')!.appendChild(this.nodeEditor.root)
+      this.nodeEditor.handleResizePublic()
+      root.querySelectorAll('[data-pat]').forEach((b) => {
+        b.addEventListener('click', () => this.pm.setCalibrationAll((b as HTMLElement).dataset.pat as never))
+      })
+      root.querySelector('[data-fs-close]')?.addEventListener('click', () => this.toggleFullscreenEditor(false))
+      const esc = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && this.fsOpen) {
+          e.preventDefault()
+          e.stopPropagation()
+          this.toggleFullscreenEditor(false)
+        }
+      }
+      window.addEventListener('keydown', esc, true)
+      this.disposers.push(() => window.removeEventListener('keydown', esc, true))
+      gsap.fromTo(root, { opacity: 0 }, { opacity: 1, duration: 0.28, ease: 'power1.out' })
+    } else if (this.fsRoot) {
+      this.fsHome?.appendChild(this.nodeEditor.root)
+      const el = this.fsRoot
+      this.fsRoot = null
+      gsap.to(el, { opacity: 0, duration: 0.2, ease: 'power1.in', onComplete: () => el.remove() })
+      this.showTab(this.activeTab)   // restore dock display + size for the tab we left
+    }
   }
 
   // ------------------------------------------------------------ tabs
@@ -320,7 +413,12 @@ export class ProjectionEditorUI {
     outRow.className = 'pm-btn-row'
     outRow.appendChild(this.btn('OPEN PROJECTION OUTPUT (ENTER)', () => this.pm.setOutputLive(true)))
     body.appendChild(outRow)
-    body.appendChild(this.hint('Patterns replace the ocean image on the output only — the 3D world keeps running. Use white/black flashes to set projector brightness, grids to align edges.'))
+
+    const fsRow = document.createElement('div')
+    fsRow.className = 'pm-btn-row'
+    fsRow.appendChild(this.btn('⛶ FULLSCREEN CALIBRATION EDITOR', () => this.toggleFullscreenEditor(true), 'pm-btn-sm'))
+    body.appendChild(fsRow)
+    body.appendChild(this.hint('Patterns replace the ocean image on the output only — the 3D world keeps running. Use white/black flashes to set projector brightness, grids to align edges. The fullscreen editor opens the OUTPUT-tab tools across the whole control screen with guides — shape every surface pixel-accurately, seams snap together.'))
   }
 
   private buildProjectPane() {
@@ -490,7 +588,7 @@ export class ProjectionEditorUI {
 
     const sessions = this.pm.listSessions()
     if (!sessions.length) {
-      body.appendChild(this.hint('Publish the current setup to get a permanent /output?s=… link — the projector page then always opens with these exact settings, even with the studio closed. Publish again with the same name to update the link in place.'))
+      body.appendChild(this.hint('Publish the current setup to get a permanent output link. COPY LINK gives a PORTABLE URL — the whole show rides inside the link itself, so the projector machine opens these exact settings with no studio open, no shared browser, nothing else needed. Publish again with the same name to update the link in place.'))
     } else {
       const list = document.createElement('div')
       list.className = 'pm-session-list'
@@ -507,9 +605,17 @@ export class ProjectionEditorUI {
         const tools = document.createElement('div')
         tools.className = 'pm-btn-row'
         tools.appendChild(this.btn('COPY LINK', async () => {
-          const url = `${location.origin}/output?s=${sess.id}`
+          // portable link: the session snapshot rides INSIDE the URL, so the
+          // projector machine needs nothing else — no shared storage, no open studio
+          const url = await this.pm.portableSessionLink(sess.id, sess.name)
           const ok = await copyText(url)
-          this.pm.depsToast(ok ? `Link copied — /output?s=${sess.id}` : 'Copy failed — select the link: ' + url, 3000)
+          const portable = url.includes('&d=')
+          this.pm.depsToast(
+            ok
+              ? portable ? 'Portable link copied — settings travel inside the URL, works on any device' : 'Link copied (project too large to embed) — same-browser link'
+              : 'Copy failed — select the link: ' + url.slice(0, 80) + '…',
+            3200,
+          )
         }, 'pm-btn-sm'))
         tools.appendChild(this.btn('LOAD', () => {
           this.pm.loadSession(sess.id)
@@ -919,6 +1025,8 @@ export class ProjectionEditorUI {
     this.refreshProps()
     if (this.activeTab === 'camera') this.buildCamGrid()
     this.nodeEditor.draw()
+    const sizeLbl = this.pipEl?.querySelector('.pm-out-pip-size')
+    if (sizeLbl) sizeLbl.textContent = `${this.pm.output.width}×${this.pm.output.height}`
   }
 
   setOutputLiveState(on: boolean) {
@@ -949,11 +1057,18 @@ export class ProjectionEditorUI {
     // selected camera preview (right panel)
     const sel = this.pm.surfaces.selected
     if (sel?.enabled) this.pm.renderCameraPreview(sel, this.previewCanvas)
-    // composite underlay in the OUTPUT tab
-    if (this.activeTab === 'output') {
+    // one composite readback feeds all three views of the final picture
+    const wantComposite = this.activeTab === 'output' || this.fsOpen || (this.pipVisible && this.pipCanvas)
+    if (wantComposite) {
       this.pm.renderOutputPreview(this.compositeCanvas)
-      this.nodeEditor.setPreview(this.compositeCanvas)
-      this.nodeEditor.draw()
+      if (this.activeTab === 'output' || this.fsOpen) {
+        this.nodeEditor.setPreview(this.compositeCanvas)
+        this.nodeEditor.draw()
+      }
+      if (this.pipVisible && this.pipCanvas) {
+        const ctx = this.pipCanvas.getContext('2d')
+        if (ctx) ctx.drawImage(this.compositeCanvas, 0, 0, this.pipCanvas.width, this.pipCanvas.height)
+      }
     }
     // camera grid thumbnails in the CAMERA tab
     if (this.activeTab === 'camera' && this.camGrid) {
@@ -979,6 +1094,8 @@ export class ProjectionEditorUI {
     this.disposers.forEach((d) => d())
     this.disposers = []
     this.nodeEditor.dispose()
+    this.fsRoot?.remove()
+    this.fsRoot = null
     this.root.remove()
     this.chrome.remove()
     document.body.classList.remove('projection-studio-open', 'projection-live')

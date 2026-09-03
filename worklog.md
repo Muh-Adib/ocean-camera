@@ -375,3 +375,34 @@ Stage Summary:
 - /output is now a true live mirror of the studio's full settings — shape edits (corners, mesh, surface moves, canvas, quality) land in ≤300 ms and rebuild geometry only when the shape really changed
 - Session links: boot from the published snapshot, follow the studio while it's open, keep running when it closes, and self-update so a later reload always restores the newest settings
 - Control-off model intact: no studio → no pushes → the output holds its state forever, exactly as published/pushed last
+
+---
+Task ID: 15
+Agent: main (Super Z)
+Task: Output still didn't show the shaped surfaces (screenshot: control left / projector right) + control should show the output preview inside the screen preview + fullscreen calibration editing with guides + surfaces must snap to each other
+
+Work Log:
+- Reproduced headlessly: same-browser BroadcastChannel sync actually works (light + full paths both land ≤300 ms) — the real break was cross-context: sessions live in localStorage and live sync in BroadcastChannel, and NEITHER crosses a browser or machine, so a projector browser booted the flat-screen preset ("Main Screen", one plain full frame — exactly the user's screenshot). Proven with an isolated agent-browser session.
+- ProjectManager: portable payload codec — encodeProjectPayload/decodeProjectPayload (deflate-raw via CompressionStream → base64url, "z…" prefix; plain base64url "j…" fallback), PORTABLE_LINK_LIMIT 24000, SESSION_ID_RE, seedSession() installs a session that arrived from outside the browser
+- ProjectionManager: portableSessionLink(id) builds /output?s=<id>&n=<name>&d=<snapshot>; enterOutputOnly boots ?d= FIRST (works with zero shared storage), seeds the registry + currentSession, clears the stale "no saved project" warn, marks portableBoot (overlay shows "PORTABLE LINK ·"); live pushes refresh the URL's ?d= payload via debounced history.replaceState (1.4 s trailing) so a bookmarked portable link self-updates; dispose clears the new timer
+- ProjectionEditorUI: COPY LINK now copies the PORTABLE link (toast explains settings travel inside the URL; falls back to registry link when the project is too large); publish toast updated; session hint rewritten around portable links
+- Output preview PiP: new "OUTPUT PREVIEW" topbar toggle + a .pm-out-pip panel inside the main screen preview (pm-center) showing the letterboxed live composite (shared 480×270 readback, 140 ms tick, existing frame-cost back-off), canvas-size label follows output W×H
+- Fullscreen calibration editor: "⛶ FULLSCREEN CALIBRATION EDITOR" in the CALIBRATION tab (+ "⛶ FULLSCREEN" action in the shared node-editor toolbar) reparents the SAME OutputNodeEditor into a fullscreen #pm-fs-edit overlay — same corner pins, mesh nodes, snapping — with a bar of quick patterns (OFF/GRID/CROSSHAIR/WHITE) + EXIT; ESC closes (capture-phase, stops before other handlers) and the editor returns to the dock; preview ticker feeds it while open
+- Magnetic seams in OutputNodeEditor: MAGNET + GUIDES checkboxes; snapTargets() collects every other surface's corners + 4 outline edges (+ custom-mesh boundary nodes); corner/node drags point-snap then edge-snap (project onto segment) within ~14 canvas px; whole-surface drags test all 4 corners and apply the single best snap; grid snap only fills gaps when no magnet hit; ALT bypasses; live snap indicator (bright point/edge); drawSeamGlue() paints yellow glue lines/dots where surfaces' edges touch within 3 px — visible proof seams connect; drawGuides() adds rule-of-thirds, center cross and a 100 px ruler with 500 px labels
+- main.ts QA hooks: projection.link(id) → portable URL, projection.portable() → boot flag, projection.fsEdit(on) → fullscreen editor
+- projection.css: .pm-out-pip panel + #pm-fs-edit overlay styles (+ small-screen PiP shrink)
+
+Verified headless (agent-browser, main session + isolated "proj2" browser as the projector machine):
+- Portable link (3502 chars, ?s=&n=Wall%20Show&d=z…): opened in the ISOLATED browser (empty storage) → boots 3 surfaces with the warped Front Wall tr(1500,80) intact, overlay "SESSION "Wall Show" · PORTABLE LINK · 3 surfaces · 1920×1080 · BALANCED · RT 507×596", portable:true — the user's exact bug (output ≠ control across devices) is dead
+- Trimmed /output?s=<id> on that same isolated browser also boots the full show from the seeded registry (was "Main Screen" flat before)
+- PiP: present, visible, size label 1920×1080, 118240/129600 lit pixels — real composite picture
+- Fullscreen editor: opens (editor reparented, canvas resizes to 1280×~550, pattern buttons present), grid pattern renders, ESC closes, editor back in dock (display flex), pattern state persists
+- Magnet: gap test — moved Left Wall −60, dropped tr corner at 546 (8 px off) with MAGNET ON → lands EXACTLY (538,43) matching Front Wall tl (cornerExact:true); bottom corner likewise (538,1037)===bl; MAGNET OFF control run → same gesture lands (550,40), gap −12 (no glue)
+- Seam glue lines visible in dock editor screenshot (yellow line at the shared edge)
+- Live-sync regression: studio calibrate('off') + moveSurface(+40) → /output tab mirrors within the 300 ms push (pattern off, tl x −20)
+- tsc clean; zero page errors (only the 3 pre-existing three.js warnings); screenshots: download/screenshots/{fs-calibration-grid,seam-snap-connected}.png
+
+Stage Summary:
+- Output links are now truly portable: the whole show rides inside the URL, so ANY browser or machine opens the exact shaped multi-surface output with no control open and no shared storage — same-browser live sync (≤300 ms) still layers on top when available
+- The control screen now always shows the projected result inside the screen preview (PiP), and the CALIBRATION tab can blow the same surface editor up fullscreen with guides and patterns for pixel-accurate alignment
+- Surfaces magnetically snap edge-exact to their neighbours (with live seam-glue feedback), so multi-wall layouts connect without breaks

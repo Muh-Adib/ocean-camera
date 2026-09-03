@@ -476,6 +476,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       publish: (name: string) => projection.publishSession(String(name)),
       sessions: () => projection.listSessions(),
       loadSession: (id: string) => projection.loadSession(String(id)),
+      /** portable /output link with the whole project embedded (?…&d=…) */
+      link: (id: string) => projection.portableSessionLink(String(id)),
+      portable: () => projection.portableBoot,
+      fsEdit: (on?: boolean) => projection.setFullscreenEditor(on !== false),
       freeze: (on: boolean) => { projection.qaFrozen = on },
       save: () => projection.project.saveLocal(),
       loadLocal: () => projection.project.loadLocal(),
