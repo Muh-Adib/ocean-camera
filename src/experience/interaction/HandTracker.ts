@@ -11,7 +11,9 @@
 // openness (0 fist → 1 open), scale (distance proxy for push/pull).
 // ---------------------------------------------------------------
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
-import { clamp, damp } from '../utils/math'
+import { damp } from '../utils/math'
+import { extractHandSample, mirrorLandmarks } from './handMath'
+export { extractHandSample, mirrorLandmarks } from './handMath'
 
 export interface HandSample {
   present: boolean
@@ -27,6 +29,8 @@ export type Landmark = { x: number; y: number; z: number }
 /** local assets served by Next from /public — zero CDN dependency */
 const WASM_PATH = '/mediapipe/wasm'
 const MODEL_PATH = '/mediapipe/models/hand_landmarker.task'
+/** TWO hands: the ocean follows both (swim strokes, two-palm steering) */
+const NUM_HANDS = 2
 
 export type CameraFailure =
   | 'insecure'    // no getUserMedia (http / unsupported browser)
@@ -61,6 +65,16 @@ export class HandTracker {
   private smoothed: HandSample = { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: 0 }
   /** latest raw landmarks (mirrored to match sample.x) — feeds the gesture view overlay */
   lastLandmarks: Landmark[] | null = null
+
+  // ---- multi-hand (numHands = 2) ----
+  /** every hand seen in the newest video frame (up to 2, unsmoothed) */
+  private rawHands: HandSample[] = []
+  private rawLandmarks: Landmark[][] = []
+  /** smoothed per-slot samples — slot i follows the detected hand closest to its previous position */
+  private slotSamples: HandSample[] = []
+  private slotLandmarks: Landmark[][] = []
+  /** latest per-frame raw landmarks per hand (mirrored) for overlays */
+  lastLandmarksList: Landmark[][] = []
   onStatus?: (status: 'loading' | 'ready' | 'denied' | 'error' | 'stopped') => void
   onFailure?: (reason: CameraFailure) => void
 
@@ -150,14 +164,14 @@ export class HandTracker {
         this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
           runningMode: 'VIDEO',
-          numHands: 1,
+          numHands: NUM_HANDS,
         }), 20000, 'gpu landmarker')
       } catch {
         // some devices/drivers reject the GPU delegate — CPU still runs fine
         this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
           runningMode: 'VIDEO',
-          numHands: 1,
+          numHands: NUM_HANDS,
         }), 20000, 'cpu landmarker')
       }
     } catch {
@@ -180,6 +194,11 @@ export class HandTracker {
     this.lastSample.present = false
     this.smoothed.present = false
     this.lastLandmarks = null
+    this.rawHands = []
+    this.rawLandmarks = []
+    this.slotSamples = []
+    this.slotLandmarks = []
+    this.lastLandmarksList = []
   }
 
   /** call once per animation frame; returns smoothed sample */
@@ -193,22 +212,27 @@ export class HandTracker {
       this.lastVideoTime = this.video.currentTime
       try {
         const res = this.landmarker.detectForVideo(this.video, now)
-        const lm: Landmark[] | undefined = res?.landmarks?.[0]
-        if (lm && lm.length >= 21) {
-          const s = this.extract(lm, now)
-          this.lastSample = s
-          this.lastLandmarks = lm.map((p) => ({ x: 1 - p.x, y: p.y, z: p.z }))
-        } else {
-          this.lastSample.present = false
-          this.lastLandmarks = null
+        const list: Landmark[][] = []
+        for (const lm of res?.landmarks ?? []) {
+          if (lm && lm.length >= 21) list.push(mirrorLandmarks(lm as Landmark[]))
         }
+        this.rawLandmarks = list
+        this.rawHands = list.map((lm) => extractHandSample(lm, now))
+        this.lastLandmarksList = list
+        this.lastLandmarks = list[0] ?? null
+        this.matchSlots(now)
+        // primary sample = slot 0 (stable identity, not detection order)
+        this.lastSample = this.slotSamples[0] ?? { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: now }
       } catch {
         this.lastSample.present = false
         this.lastLandmarks = null
+        this.lastLandmarksList = []
+        this.rawHands = []
+        this.rawLandmarks = []
       }
     }
 
-    // exponential smoothing (organic, no jitter)
+    // exponential smoothing (organic, no jitter) — primary slot
     const k = damp(14, Math.max(dt, 0.001))
     const s = this.lastSample
     const m = this.smoothed
@@ -223,37 +247,74 @@ export class HandTracker {
     } else {
       m.present = false
     }
+
+    // per-slot smoothing for the multi-hand pipeline
+    for (let i = 0; i < this.slotSamples.length; i++) {
+      const raw = this.rawHands[i]
+      const slot = this.slotSamples[i]
+      if (raw) {
+        if (!slot.present) { slot.x = raw.x; slot.y = raw.y; slot.scale = raw.scale; slot.openness = raw.openness }
+        slot.present = true
+        slot.x += (raw.x - slot.x) * k
+        slot.y += (raw.y - slot.y) * k
+        slot.scale += (raw.scale - slot.scale) * damp(8, dt)
+        slot.openness += (raw.openness - slot.openness) * damp(9, dt)
+        slot.t = raw.t
+      } else {
+        slot.present = false
+      }
+    }
     return m
   }
 
-  private extract(lm: Landmark[], now: number): HandSample {
-    // palm centre = wrist + finger MCP joints
-    const ids = [0, 5, 9, 13, 17]
-    let px = 0, py = 0
-    for (const i of ids) { px += lm[i].x; py += lm[i].y }
-    px /= ids.length; py /= ids.length
+  /**
+   * Assign detected hands to stable slots: each detected hand joins the
+   * slot whose previous position it is closest to (greedy 1–2 matching).
+   * Keeps slot 0 = "the hand that was already being followed", so a
+   * second hand entering the frame never steals the primary channel.
+   */
+  private matchSlots(now: number) {
+    const MAX_AGE_MS = 450
+    const prev0 = this.slotSamples[0]?.present && (now - (this.slotSamples[0]?.t ?? 0)) < MAX_AGE_MS ? this.slotSamples[0] : null
+    const prev1 = this.slotSamples[1]?.present && (now - (this.slotSamples[1]?.t ?? 0)) < MAX_AGE_MS ? this.slotSamples[1] : null
 
-    // hand scale = wrist → middle-MCP distance (push/pull proxy)
-    const dx = lm[9].x - lm[0].x
-    const dy = lm[9].y - lm[0].y
-    const scale = Math.hypot(dx, dy) || 0.001
-
-    // openness = mean fingertip distance from wrist ÷ hand scale
-    const tips = [8, 12, 16, 20]
-    let sum = 0
-    for (const i of tips) {
-      sum += Math.hypot(lm[i].x - lm[0].x, lm[i].y - lm[0].y)
+    let a = 0, b = 1   // default assignment: raw[0]→slot0, raw[1]→slot1
+    if (this.rawHands.length === 2 && prev0 && prev1) {
+      // choose the assignment with the smaller total travel
+      const direct = Math.hypot(this.rawHands[0].x - prev0.x, this.rawHands[0].y - prev0.y)
+        + Math.hypot(this.rawHands[1].x - prev1.x, this.rawHands[1].y - prev1.y)
+      const swapped = Math.hypot(this.rawHands[1].x - prev0.x, this.rawHands[1].y - prev0.y)
+        + Math.hypot(this.rawHands[0].x - prev1.x, this.rawHands[0].y - prev1.y)
+      if (swapped < direct) { a = 1; b = 0 }
     }
-    const openness = clamp((sum / tips.length / scale - 1.35) / 1.25, 0, 1)
 
-    return {
-      present: true,
-      x: 1 - px,          // mirror for natural selfie-space control
-      y: py,
-      openness,
-      scale,
-      t: now,
+    const hands: HandSample[] = []
+    const lms: Landmark[][] = []
+    const idx = [a, b]
+    for (let slot = 0; slot < 2; slot++) {
+      const src = idx[slot]
+      if (src < this.rawHands.length) {
+        hands[slot] = this.rawHands[src]
+        lms[slot] = this.rawLandmarks[src]
+      }
     }
+    this.slotSamples = [0, 1].map((i) => hands[i] ?? { present: false, x: 0.5, y: 0.5, openness: 0.5, scale: 0.15, t: now })
+    this.slotLandmarks = [0, 1].map((i) => lms[i] ?? [])
+  }
+
+  /**
+   * All tracked hands this frame, smoothed, in stable slots
+   * (slot 0 = primary hand). Empty when none are visible.
+   */
+  hands(): HandSample[] {
+    return this.slotSamples.filter((s) => s.present)
+  }
+
+  /** mirrored landmarks per slot — index-aligned with slotSamples (empty array when that hand is gone) */
+  landmarksList(): Landmark[][] {
+    return this.slotLandmarks
+      .map((lm, i) => (this.slotSamples[i]?.present ? lm : []))
+      .filter((lm) => lm.length > 0)
   }
 }
 

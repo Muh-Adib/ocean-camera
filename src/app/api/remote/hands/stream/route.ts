@@ -1,21 +1,24 @@
 // ---------------------------------------------------------------
-// GET /api/projection/relay/stream — Server-Sent Events feed of the
-// studio's projection state. Every /output page keeps one open:
+// GET /api/remote/hands/stream?room=ocean — Server-Sent Events feed
+// of the smartphone controller's tracked hands. Every ocean client
+// (studio and /output pages) keeps one open:
 //
-//   · on connect → the current snapshot arrives immediately (so a
-//     freshly opened output adopts the running show at once)
-//   · on every studio push → an 'relay' event with the full project
-//   · on studio heartbeat (4 s) → an 'hb' event (state unchanged)
-//   · SSE comments every 15 s keep proxies from idling the stream out
+//   · on connect → a fresh snapshot is replayed immediately (if the
+//     phone is already streaming) so control feels instant
+//   · on every phone POST → a 'hands' event with the frame
+//   · SSE comments every 15 s keep proxies from idling the stream
 //
 // EventSource reconnects on its own when the dev server restarts.
 // ---------------------------------------------------------------
-import { relayStore } from '../store'
+import { remoteHandsStore, type RemoteHandsSnapshot } from '../store'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
+const REPLAY_FRESH_MS = 1500
+
 export async function GET(req: Request) {
+  const room = new URL(req.url).searchParams.get('room')?.slice(0, 32) || 'ocean'
   const encoder = new TextEncoder()
   let unsubscribe: (() => void) | null = null
   let hbTimer: ReturnType<typeof setInterval> | null = null
@@ -29,11 +32,13 @@ export async function GET(req: Request) {
       }
       const send = (event: string, data: unknown) => push(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 
-      const s = relayStore.state
-      if (s.project) send('relay', { rev: s.rev, project: s.project, at: s.updatedAt })
-      send('hello', { at: Date.now() })
+      // instant catch-up: if the phone is already streaming, the ocean
+      // starts following it without waiting for the next POST
+      const snap = remoteHandsStore.get(room)
+      if (snap && Date.now() - snap.t < REPLAY_FRESH_MS) send('hands', snap)
+      send('hello', { room, at: Date.now(), live: remoteHandsStore.seenRecently(room) })
 
-      unsubscribe = relayStore.subscribe((event, data) => send(event, data))
+      unsubscribe = remoteHandsStore.subscribe(room, (s: RemoteHandsSnapshot) => send('hands', s))
       hbTimer = setInterval(() => push(': hb\n\n'), 15000)
 
       const abort = () => {

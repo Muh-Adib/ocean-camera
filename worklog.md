@@ -434,3 +434,33 @@ Verified headless (agent-browser, main session + isolated "proj2" browser as the
 Stage Summary:
 - The control no longer needs an embedded preview at all: /output is the preview — pixel-identical, live in ≤300 ms, and it now follows the control across browsers and machines via the server relay, not just across tabs
 - The show-must-not-die contract is untouched: close the control and every output keeps rendering its last state; reopen and edit and they snap back to LIVE LINK
+
+---
+Task ID: 17
+Agent: main (Super Z)
+Task: Smartphone remote control via QR code — phone camera mode tracking BOTH hands, every page follows in real time
+
+Work Log:
+- New server relay src/app/api/remote/hands/: store.ts (globalThis in-memory bus per room — snapshot, listeners, phoneSeenAt, 8-room LRU cap), route.ts (POST phone frames — validated/sanitized: hard cap 2 hands, x/y/openness clamped 0..1, 21-point landmark matrices, garbage-tolerant; GET ?room= snapshot), stream/route.ts (SSE: instant replay of a fresh snapshot on connect, live 'hands' events, 15 s keep-alives, abort/cancel cleanup), host/route.ts (GET /api/remote/host → LAN IPv4 candidates via os.networkInterfaces so the QR can point the phone at the machine instead of localhost)
+- Shared math: interaction/handMath.ts — extractHandSample() + mirrorLandmarks() moved out of HandTracker so the DESKTOP tracker and the PHONE controller produce byte-identical HandSamples (same mirroring, same openness/scale curves)
+- HandTracker: numHands 1 → 2; per-frame results matched to stable slots (greedy nearest-previous-position assignment, 450 ms memory) so a second hand entering never steals the primary channel; hands() + landmarksList() expose smoothed per-hand samples; detect() still returns the primary sample for swim steering
+- InteractionField: full second force point (point2/dir2/strength2/mode2 + independent idle clock + setTarget2) — FieldSnapshot/FieldCtx extended; Boids got a mirrored second gesture-force block (current/push/repel/attract per point) so schools follow both hands of a swimming stroke
+- GestureEngine rewritten as per-hand channels: HandChannel state (hist, velocity, palm/fist hysteresis, cadence) ×2; channel 0 → field.setTarget, channel 1 → field.setTarget2; callbacks fire from either hand; merged status (priority: push > swipe > pull > attract > caution > current), hands count added
+- RemoteHands client (experience/remote/): EventSource on /api/remote/hands/stream, freshness window 1300 ms, 400 ms watchdog live→stale→live, exposes hands+landmarks in the exact same shape as the local tracker
+- main.ts: gesture source priority = phone remote while fresh → local camera (both 2-hand); status chip REMOTE HANDS on phone contact with toast, honest fallback to HAND TRACKING/MOUSE MODE when the stream dies; GestureView updated to draw BOTH skeletons (cyan/amber) with per-hand crosshairs + "TRACKED × n"; QA hooks __ocean.remote.{status,fresh,hands,room,inject,clear} + __ocean.field() + __ocean.gesture()
+- RemotePhone (experience/remote/ + src/app/remote/page.tsx): ocean-styled phone controller — front camera preview (mirrored) with live skeleton overlay, START CAMERA gate, GPU→CPU landmarker fallback, ~25 Hz POST (400 ms idle keepalive), sendBeacon 'hands gone' on pagehide, OFFLINE/status chip + FPS, insecure-context warning (phone cameras need HTTPS off-localhost)
+- RemoteQR modal: REMOTE QR buttons in the projection-studio topbar and the /output overlay → glass modal with QR (npm qrcode, dynamic import), URL row + COPY, candidate origin chips (this origin + LAN addresses from /api/remote/host, localhost deprioritized for the phone), live connection poll ("● PHONE CONNECTED — 2 hands streaming"), HTTPS hint when !isSecureContext; modal closes on ESC/backdrop and in projection dispose
+- package.json: npm run dev:https (next dev --experimental-https) for LAN phone camera; README: new "Smartphone remote control" section + Quick Start note
+
+Verified headless (agent-browser + curl/python fake phone):
+- API: POST 2-hand frames → {ok,hands:2}; snapshot GET live:true; 4-hand/garbage payload → sanitized to 2 (clamps verified); SSE stream connects + hello event
+- Studio /: remote.status connecting → with fake stream fresh:true, hands:2, field {active, active2, point [-6,1.6,1.7] for hand@x0.3, point2 [4.9,0.9,1.7] for hand@x0.68 — mirroring + channel split correct}, gesture 'attract' (open palm) — park('pufferfish') drifted toward the attract point under stream
+- /output: same stream lands live (fresh, 2 hands, strength 0.80/0.59 both points) — the projector page follows the phone directly, no control tab needed
+- QR modals on studio AND /output: open, QR data-URL renders (first open pays one dev compile), URL correct /remote?room=ocean, /output modal reads "● PHONE CONNECTED — 2 hands streaming"
+- /remote page boots: START CAMERA card, no insecure warning on localhost, headless camera-denial handled by TRY AGAIN state
+- Regression: fresh reload + __ocean.remote.inject two hands → both field points engaged, zero console errors; tsc clean; eslint clean on all new/modified files (only pre-existing MediaPipe WASM vendor warnings remain)
+
+Stage Summary:
+- Scan a QR (studio topbar or /output overlay) → the phone's camera becomes a two-hand gesture controller; every ocean page on the network — control and outputs — follows the swim in real time, and falls back to local tracking the moment the phone stops
+- Two-hand tracking is now native everywhere: desktop camera (stable slots) and phone remote share one pipeline with two independent force points, so alternating swimming strokes drive two currents instead of being averaged away
+- Show-time safety unchanged: the phone is a pure ADD-ON — closing it never disturbs the output pages

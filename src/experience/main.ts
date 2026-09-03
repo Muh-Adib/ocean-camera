@@ -27,9 +27,11 @@ import { SpecialCreatures } from './fish/SpecialCreatures'
 import { Feeding } from './fish/Feeding'
 import { InteractionField } from './interaction/InteractionField'
 import { HandTracker } from './interaction/HandTracker'
+import type { HandSample, Landmark } from './interaction/HandTracker'
 import { GestureEngine } from './interaction/GestureEngine'
 import { PointerFallback } from './interaction/PointerFallback'
 import { SwimController } from './interaction/SwimController'
+import { RemoteHands } from './remote/RemoteHands'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
@@ -109,6 +111,11 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // ---------------- audio / tracking ----------------
   const audio = new AudioManager()
   const handTracker = new HandTracker()
+  // smartphone remote: the phone streams both hands over SSE and —
+  // while fresh — takes priority over the local camera as the
+  // gesture source on THIS page (and on every /output page too)
+  const remoteHands = new RemoteHands()
+  remoteHands.start()
   const gestureEngine = new GestureEngine(sceneMgr.camera, field, {
     onSwipe: (_dir, strength, point, dirVec) => {
       bursts.trail(point, dirVec, strength)
@@ -217,6 +224,18 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     if (s === 'loading') {
       ui.setStatus('LOADING HAND MODEL…', 'loading')
       ui.setCameraButtonLoading(true)
+    }
+  }
+
+  // phone contact — the status chip mirrors who is steering the ocean
+  remoteHands.onStatus = (s) => {
+    if (s === 'live') {
+      ui.setStatus('REMOTE HANDS', 'hand')
+      ui.toast('Phone connected — both hands steer the ocean.', 3200)
+    } else if (s === 'stale' || s === 'off') {
+      if (!swim.active) {
+        ui.setStatus(handTracker.isRunning ? 'HAND TRACKING' : 'MOUSE MODE', handTracker.isRunning ? 'hand' : 'mouse')
+      }
     }
   }
 
@@ -357,16 +376,30 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
     // ---- interaction pipeline ----
     pointer.updateKeyboard(dt)
-    if (handTracker.isRunning) {
-      const sample = handTracker.detect(dt)
-      gestureEngine.update(sample, dt)
-      gestureView?.update(dt, sample, handTracker.lastLandmarks, gestureEngine.status, true, handTracker.video)
-      // in swim mode the palm doubles as a steering joystick
-      if (swim.active) {
-        swim.setHandSteer(sample.x, sample.y, sample.present, sample.present && sample.openness < 0.28)
-      }
-    } else {
-      gestureView?.update(dt, null, null, gestureEngine.status, false, null)
+    // gesture source: the phone remote while its stream is fresh,
+    // otherwise the local camera (both can track TWO hands)
+    let samples: HandSample[] = []
+    let lmList: Landmark[][] = []
+    let tracking = false
+    let video: HTMLVideoElement | null = null
+    if (remoteHands.isFresh) {
+      samples = remoteHands.hands
+      lmList = remoteHands.landmarks
+      tracking = true
+    } else if (handTracker.isRunning) {
+      handTracker.detect(dt)          // drives per-slot smoothing
+      samples = handTracker.hands()
+      lmList = handTracker.landmarksList()
+      tracking = true
+      video = handTracker.video
+    }
+    gestureEngine.update(samples, dt)
+    gestureView?.update(dt, samples, lmList, gestureEngine.status, tracking, video)
+    // in swim mode the primary palm doubles as a steering joystick
+    // (local or remote — whichever is driving)
+    if (swim.active) {
+      const steer = samples[0]
+      swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
     }
     field.update(dt)
 
@@ -449,6 +482,35 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       f.vel.set(0, 0, 0)
       return true
     },
+    /** live force-field state (QA: two-hand / remote verification) */
+    field: () => ({
+      active: field.active,
+      active2: field.active2,
+      strength: Math.round(field.strength * 1000) / 1000,
+      strength2: Math.round(field.strength2 * 1000) / 1000,
+      point: field.point.toArray().map((n) => Math.round(n * 10) / 10),
+      point2: field.point2.toArray().map((n) => Math.round(n * 10) / 10),
+    }),
+    gesture: () => ({ ...gestureEngine.status }),
+    /** smartphone remote link diagnostics */
+    remote: {
+      status: () => remoteHands.status,
+      fresh: () => remoteHands.isFresh,
+      hands: () => remoteHands.hands.length,
+      room: () => remoteHands.room,
+      /** simulate a phone frame straight into the pipeline (QA, no network) */
+      inject: (x: number, y: number, openness: number, second?: { x: number; y: number; openness: number }) => {
+        const now = Date.now()
+        const mk = (hx: number, hy: number, ho: number): HandSample => ({ present: true, x: hx, y: hy, openness: ho, scale: 0.15, t: now })
+        remoteHands.hands = second
+          ? [mk(x, y, openness), mk(second.x, second.y, second.openness)]
+          : [mk(x, y, openness)]
+        remoteHands.landmarks = []
+        remoteHands.lastAt = now
+        return remoteHands.hands.length
+      },
+      clear: () => { remoteHands.hands = []; remoteHands.landmarks = []; remoteHands.lastAt = 0 },
+    },
     threats: () => creatures.getThreatPoints().map((p) => p.toArray()),
     pufferPos: () => fish.schools.filter((s) => s.species === 'pufferfish')
       .map((s) => s.fish.map((f) => f.pos.toArray().map((n) => Math.round(n * 10) / 10))),
@@ -523,6 +585,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     dispose: () => {
       cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', onVis)
+      remoteHands.stop()
       handTracker.stop()
       swim.disable()
       audio.dispose()

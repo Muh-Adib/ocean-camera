@@ -382,6 +382,7 @@ export class ProjectionManager {
           </select>
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-remote" title="Show a QR code — a smartphone controls the ocean with both hands, real time">REMOTE QR</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
         ${missingSession
           ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'
@@ -407,6 +408,9 @@ export class ProjectionManager {
       this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
     })
     el.querySelector('#pm-out-fullscreen')?.addEventListener('click', () => this.requestFullscreen())
+    el.querySelector('#pm-out-remote')?.addEventListener('click', () => {
+      void import('../remote/RemoteQR').then((m) => m.openRemoteQR(document.body))
+    })
     el.querySelector('#pm-out-import')?.addEventListener('click', async () => {
       const ok = await this.project.importFile()
       this.syncOutputOverlay()
@@ -1024,6 +1028,8 @@ export class ProjectionManager {
     this.channel = null
     this.overlay?.remove()
     this.overlay = null
+    // the QR modal lives on <body>, outside this subtree — close it too
+    void import('../remote/RemoteQR').then((m) => m.closeRemoteQR()).catch(() => { /* not open */ })
     this.cameras.dispose()
     this.outputMgr.dispose()
     this.calib.dispose()

@@ -51,6 +51,7 @@ export class ProjectionEditorUI {
           <button id="pm-mode-preview" class="pm-btn pm-btn-active">PREVIEW</button>
           <button id="pm-mode-output" class="pm-btn">OUTPUT</button>
           <button id="pm-open-output" class="pm-btn" title="Open the live /output page — it mirrors every edit in real time (works across browsers & machines)">OPEN OUTPUT ↗</button>
+          <button id="pm-remote-qr" class="pm-btn" title="Show a QR code — a smartphone scans it and controls the ocean with its camera (both hands, real time)">REMOTE QR</button>
           <button id="pm-fullscreen" class="pm-btn">⛶ FULLSCREEN</button>
           <button id="pm-exit" class="pm-btn pm-btn-danger">EXIT STUDIO</button>
         </div>
@@ -150,6 +151,10 @@ export class ProjectionEditorUI {
     this.root.querySelector('#pm-open-output')?.addEventListener('click', () => {
       window.open('/output', '_blank', 'noopener')
       this.pm.depsToast('Output opened in a new tab — it follows every edit live', 3000)
+    })
+    // smartphone remote control via QR
+    this.root.querySelector('#pm-remote-qr')?.addEventListener('click', () => {
+      void import('../remote/RemoteQR').then((m) => m.openRemoteQR(document.body))
     })
     this.root.querySelector('#pm-fullscreen')?.addEventListener('click', () => this.pm.requestFullscreen())
     this.root.querySelector('#pm-exit')?.addEventListener('click', () => this.pm.exit())

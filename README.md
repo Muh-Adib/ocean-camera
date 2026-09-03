@@ -95,6 +95,15 @@ For real installs, open **`/output`** on the projector machine (or a second wind
 - **Operator settings in place** — move the mouse and a small overlay fades in: **QUALITY** (Auto / Performance / Balanced / High / Ultra — saved into the project and synced back to the show), **PATTERN** (show/hide grid · crosshair · color bars · checkerboard · white · black · corners for alignment — set back to OFF for the show), **FULLSCREEN**, **IMPORT .JSON** and a live surface/resolution readout (active quality + per-surface source pixels). It hides itself (and the cursor) after a moment, so the projection stays clean. `?pattern=grid` starts pre-calibrated.
 - **Seamless edges (span lock)** — room presets derive every camera's frustum from the world angles its wall covers (shared eye point + 90°×90° spans for right-angle rooms). Adjacent frustum edges meet **exactly**, so the frame is never cut or duplicated between walls; floor wedges continue walls at the matching pitch. Toggle it per surface via **“Match wall edges (span lock)”** in the properties panel (SPAN H / SPAN V sliders).
 
+### Smartphone remote control — QR code, both hands, real time
+
+Press **REMOTE QR** in the projection studio topbar (or on the `/output` overlay): a modal shows a QR code plus the controller URL. Scan it with a phone and the phone becomes the gesture controller.
+
+- **`/remote` controller page** — the phone's front camera is shown live (mirrored) with both hand skeletons drawn on top; **up to TWO hands** are tracked on the phone with the same local MediaPipe model, and the frames stream to the server at ~25 Hz. Open palm = attract, fist = caution, moving both hands like a swimming stroke = two flowing currents.
+- **Every page follows, in real time** — the studio and every `/output` page (any browser, any machine on the network) subscribe to the hand stream (`/api/remote/hands` + SSE). While the phone is streaming, its hands take priority over the local camera and drive the same two-point force field the local hands use — the HUD shows **REMOTE HANDS** and the QR modal turns green (**PHONE CONNECTED — n hands streaming**). Stop the phone and every page falls back to local tracking automatically.
+- **Two hands on the desktop camera too** — the local tracker now runs `numHands: 2` with stable per-hand slots (a hand keeps its identity when the second one enters), so fish schools can follow both sides of a swimming stroke even without a phone.
+- **HTTPS note** — phones only grant camera access on secure origins. `http://localhost` works; over the LAN run `npm run dev:https` (self-signed cert) or open the app through its HTTPS link. The QR modal and the controller page show an explicit warning when the origin is insecure.
+
 ## 🚀 Quick Start
 
 ```bash
@@ -107,6 +116,8 @@ npm install        # or: bun install
 
 # 3. run
 npm run dev        # http://localhost:3000
+# over the LAN with a phone controller (camera needs HTTPS):
+# npm run dev:https
 
 # 4. production
 npm run build

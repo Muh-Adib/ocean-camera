@@ -27,6 +27,12 @@ export interface FieldSnapshot {
   caution: number
   curiosity: number
   scatter: number
+  // ---- second hand (two-hand / remote control) ----
+  active2: boolean
+  point2: THREE.Vector3
+  dir2: THREE.Vector3
+  strength2: number
+  mode2: FieldMode
 }
 
 export class InteractionField {
@@ -37,6 +43,14 @@ export class InteractionField {
   strength = 0
   radius = 11
   mode: FieldMode = 'current'
+
+  // ---- second hand: a full extra force point so TWO hands (local or
+  //      remote phone hands) can drive the ocean at once ----
+  active2 = false
+  point2 = new THREE.Vector3(0, 0, -12)
+  dir2 = new THREE.Vector3(0, 0, -1)
+  strength2 = 0
+  mode2: FieldMode = 'current'
 
   // ---- ecosystem state machine ----
   state: EcosystemState = 'CALM'
@@ -51,6 +65,9 @@ export class InteractionField {
   private lastGestureTime = 0
   private pendingMode: FieldMode | null = null
   private pendingStrength = 0
+  private lastGestureTime2 = 0
+  private pendingMode2: FieldMode | null = null
+  private pendingStrength2 = 0
 
   private listeners = new Set<(s: EcosystemState) => void>()
 
@@ -77,6 +94,23 @@ export class InteractionField {
       this.boostEnergy(strength, mode)
     } else {
       this.active = false
+    }
+  }
+
+  /** the second hand pushes its intent here (independent point/mode) */
+  setTarget2(worldPoint: THREE.Vector3 | null, dir?: THREE.Vector3, strength = 0, mode: FieldMode = 'current') {
+    if (worldPoint) {
+      this.point2.lerp(worldPoint, 0.45)
+      if (dir) {
+        if (dir.lengthSq() > 1e-6) this.dir2.lerp(dir.normalize(), 0.35)
+      }
+      this.pendingStrength2 = strength
+      this.pendingMode2 = mode
+      this.active2 = true
+      this.lastGestureTime2 = performance.now()
+      this.boostEnergy(strength, mode)
+    } else {
+      this.active2 = false
     }
   }
 
@@ -155,6 +189,14 @@ export class InteractionField {
     if (!idle && this.pendingMode) this.mode = this.pendingMode
     if (idle && this.mode !== 'current') this.mode = 'current'
 
+    // ---- second hand: same lifecycle, independent clock ----
+    const idle2 = now - this.lastGestureTime2 > 2600
+    const targetStrength2 = this.active2 && !idle2 ? this.pendingStrength2 : 0
+    this.strength2 += (targetStrength2 - this.strength2) * damp(6, dt)
+    if (idle2 && this.strength2 < 0.01) this.active2 = false
+    if (!idle2 && this.pendingMode2) this.mode2 = this.pendingMode2
+    if (idle2 && this.mode2 !== 'current') this.mode2 = 'current'
+
     // energy decay → recovery → calm
     this.recentActivity = Math.max(0, this.recentActivity - dt * 0.12)
     if (idle) {
@@ -183,6 +225,8 @@ export class InteractionField {
       active: this.active, point: this.point, dir: this.dir,
       strength: this.strength, radius: this.radius, mode: this.mode,
       caution: this.caution, curiosity: this.curiosity, scatter: this.scatter,
+      active2: this.active2, point2: this.point2, dir2: this.dir2,
+      strength2: this.strength2, mode2: this.mode2,
     }
   }
 }

@@ -31,6 +31,9 @@ const GESTURE_LABEL: Record<string, string> = {
   caution: 'FIST · CAUTION',
 }
 
+/** per-hand accent colors (hand 1 / hand 2) */
+const HAND_COLORS = ['#6ee7ff', '#ffd670']
+
 const CW = 208
 const CH = 156
 
@@ -160,8 +163,8 @@ export class GestureView {
   /** per-frame update — throttled internally to ~30 fps */
   update(
     dt: number,
-    sample: HandSample | null,
-    landmarks: Landmark[] | null,
+    samples: HandSample[] | null,
+    landmarksList: Landmark[][] | null,
     status: GestureStatus,
     tracking: boolean,
     video: HTMLVideoElement | null,
@@ -171,11 +174,11 @@ export class GestureView {
     if (this.drawAcc < 1 / 30) return
     this.drawAcc = 0
 
-    this.drawVideo(landmarks, tracking, sample, video)
+    this.drawVideo(samples ?? [], landmarksList ?? [], tracking, video)
     this.updateReadouts(status, tracking)
   }
 
-  private drawVideo(landmarks: Landmark[] | null, tracking: boolean, sample: HandSample | null, video: HTMLVideoElement | null) {
+  private drawVideo(samples: HandSample[], landmarksList: Landmark[][], tracking: boolean, video: HTMLVideoElement | null) {
     const ctx = this.ctx
     ctx.clearRect(0, 0, CW, CH)
     ctx.fillStyle = 'rgba(2, 16, 28, 0.9)'
@@ -207,38 +210,54 @@ export class GestureView {
       ctx.fillText('waiting for camera feed…', CW / 2, CH / 2)
     }
 
-    // crosshair at the smoothed control point
-    const px = sample?.present ? sample.x * CW : CW / 2
-    const py = sample?.present ? sample.y * CH : CH / 2
-    ctx.strokeStyle = 'rgba(255, 214, 112, 0.8)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(px - 8, py); ctx.lineTo(px + 8, py)
-    ctx.moveTo(px, py - 8); ctx.lineTo(px, py + 8)
-    ctx.stroke()
-
-    // skeleton + landmarks
-    if (landmarks && landmarks.length >= 21) {
-      ctx.lineWidth = 2
-      ctx.strokeStyle = 'rgba(110, 231, 255, 0.85)'
-      for (const [a, b] of BONES) {
+    // crosshair + skeleton per hand (up to two)
+    if (tracking && samples.length > 0) {
+      for (let h = 0; h < Math.min(2, samples.length); h++) {
+        const s = samples[h]
+        if (!s?.present) continue
+        const accent = HAND_COLORS[h] ?? HAND_COLORS[0]
+        const px = s.x * CW
+        const py = s.y * CH
+        ctx.strokeStyle = accent
+        ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(landmarks[a].x * CW, landmarks[a].y * CH)
-        ctx.lineTo(landmarks[b].x * CW, landmarks[b].y * CH)
+        ctx.moveTo(px - 8, py); ctx.lineTo(px + 8, py)
+        ctx.moveTo(px, py - 8); ctx.lineTo(px, py + 8)
         ctx.stroke()
+        ctx.fillStyle = accent
+        ctx.font = '9px system-ui, sans-serif'
+        ctx.textAlign = 'left'
+        ctx.fillText(`HAND ${h + 1}`, px + 10, py - 8)
       }
-      for (let i = 0; i < landmarks.length; i++) {
-        const tip = i === 4 || i === 8 || i === 12 || i === 16 || i === 20
-        ctx.fillStyle = tip ? '#ffd670' : '#6ee7ff'
-        ctx.beginPath()
-        ctx.arc(landmarks[i].x * CW, landmarks[i].y * CH, tip ? 3.2 : 2.3, 0, Math.PI * 2)
-        ctx.fill()
+    }
+
+    // skeleton + landmarks for every visible hand
+    if (landmarksList.length > 0) {
+      ctx.lineWidth = 2
+      for (let h = 0; h < Math.min(2, landmarksList.length); h++) {
+        const landmarks = landmarksList[h]
+        if (!landmarks || landmarks.length < 21) continue
+        const accent = HAND_COLORS[h] ?? HAND_COLORS[0]
+        ctx.strokeStyle = accent
+        for (const [a, b] of BONES) {
+          ctx.beginPath()
+          ctx.moveTo(landmarks[a].x * CW, landmarks[a].y * CH)
+          ctx.lineTo(landmarks[b].x * CW, landmarks[b].y * CH)
+          ctx.stroke()
+        }
+        for (let i = 0; i < landmarks.length; i++) {
+          const tip = i === 4 || i === 8 || i === 12 || i === 16 || i === 20
+          ctx.fillStyle = tip ? '#ffffff' : accent
+          ctx.beginPath()
+          ctx.arc(landmarks[i].x * CW, landmarks[i].y * CH, tip ? 3.2 : 2.3, 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
-    } else {
+    } else if (tracking) {
       ctx.fillStyle = 'rgba(150, 210, 235, 0.7)'
       ctx.font = '11px system-ui, sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('show your hand to the camera', CW / 2, CH - 10)
+      ctx.fillText('show your hand(s) to the camera', CW / 2, CH - 10)
     }
   }
 
@@ -246,7 +265,7 @@ export class GestureView {
     const present = tracking && status.handPresent
     this.handDot.classList.toggle('is-on', present)
     const handVal = this.root.querySelector('#gv-hand-val') as HTMLElement | null
-    if (handVal) handVal.textContent = present ? 'TRACKED' : 'SEARCHING…'
+    if (handVal) handVal.textContent = present ? `TRACKED × ${status.hands || 1}` : 'SEARCHING…'
 
     this.gestureChip.textContent = GESTURE_LABEL[status.name] ?? 'NO GESTURE'
     this.gestureChip.dataset.active = String(status.name !== 'idle')
