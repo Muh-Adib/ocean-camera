@@ -86,8 +86,12 @@ export class ProjectionManager {
 
     // full data change → rebuild everything visual
     this.unsubs.push(this.surfaces.onChange(() => this.syncAll()))
-    // light change (node drag) → just geometry + camera + uniforms
-    this.unsubs.push(this.surfaces.onLightChange((s) => this.syncVisuals(s)))
+    // light change (node drag / numeric edit) → visuals + a debounced autosave,
+    // so /output always matches what the operator set even if the tab closes fast
+    this.unsubs.push(this.surfaces.onLightChange((s) => {
+      this.syncVisuals(s)
+      this.scheduleAutosave()
+    }))
 
     window.addEventListener('resize', this.onResize)
     window.addEventListener('keydown', this.onKeyDown)
@@ -144,25 +148,43 @@ export class ProjectionManager {
   // ------------------------------------------------------------ dedicated /output page
   /**
    * Boot straight into the clean projection composite: no editor, no HUD —
-   * just the picture. Config arrives from localStorage (studio autosave) or
-   * live over BroadcastChannel from an open studio tab. A small auto-hiding
-   * overlay lets the operator show/hide calibration patterns in place.
+   * just the picture. A session link (/output?s=<id>) locks the feed to that
+   * published session — it renders those exact settings forever, even with
+   * the studio closed. Without a session it reads the autosave and accepts
+   * live pushes from an open studio tab. A small auto-hiding overlay lets
+   * the operator switch sessions, change quality and show calibration
+   * patterns in place.
    */
   enterOutputOnly() {
     if (this.active) return
     this.active = true
     this.outputOnly = true
 
-    const restored = this.project.loadLocal()
-    if (!restored) this.applyPreset('flat-screen', { history: false, toast: false })
+    const params = new URLSearchParams(window.location.search)
+    const sid = params.get('s')
+    let restored = false
+    let missingSession = false
+    if (sid) {
+      const rec = this.project.getSession(sid)
+      if (rec) {
+        restored = this.project.loadSession(sid)
+        if (restored) this.currentSession = { id: sid, name: rec.name }
+      } else {
+        missingSession = true
+      }
+    }
+    if (!restored) {
+      restored = this.project.loadLocal()
+      if (!restored) this.applyPreset('flat-screen', { history: false, toast: false })
+    }
 
     this.wireSyncChannel()
     this.syncAll()
     this.setOutputLive(true)
-    this.buildOutputOverlay(restored)
+    this.buildOutputOverlay(restored, missingSession)
 
     // ?pattern=grid — start with a calibration pattern already up
-    const pattern = new URLSearchParams(window.location.search).get('pattern')
+    const pattern = params.get('pattern')
     if (pattern && CalibrationManager.patternList.includes(pattern as never)) {
       this.setCalibrationAll(pattern as ProjectionSurface['calibration'])
       this.syncOutputOverlay()
@@ -176,26 +198,31 @@ export class ProjectionManager {
       const msg = e.data as { type?: string; project?: unknown } | null
       if (!msg) return
       if (this.outputOnly && msg.type === 'project' && msg.project) {
+        // a session link is a fixed snapshot — it never drifts with studio edits
+        if (this.currentSession) return
         this.project.load(msg.project)
         this.syncOutputOverlay()
       } else if (!this.outputOnly && msg.type === 'request') {
         try { this.channel?.postMessage({ type: 'project', project: this.project.serialize() }) } catch { /* noop */ }
       }
     }
-    if (this.outputOnly) {
+    if (this.outputOnly && !this.currentSession) {
       // ask any open studio for its current config immediately
       try { this.channel.postMessage({ type: 'request' }) } catch { /* noop */ }
     }
   }
 
   /** auto-hiding settings overlay for the output page */
-  private buildOutputOverlay(restored: boolean) {
+  private buildOutputOverlay(restored: boolean, missingSession = false) {
     const el = document.createElement('div')
     el.id = 'pm-out-overlay'
     el.innerHTML = `
       <div class="pm-out-panel">
         <span class="pm-out-title">PROJECTION OUTPUT</span>
         <span class="pm-out-info" id="pm-out-info"></span>
+        <label class="pm-out-field">SESSION
+          <select id="pm-out-session" class="pm-select pm-select-sm"></select>
+        </label>
         <label class="pm-out-field">QUALITY
           <select id="pm-out-quality" class="pm-select pm-select-sm">
             <option value="auto">AUTO (ADAPTIVE)</option>
@@ -212,11 +239,22 @@ export class ProjectionManager {
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
-        ${restored ? '' : '<span class="pm-out-warn">no saved project — open the studio or import a .json</span>'}
+        ${missingSession
+          ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'
+          : restored ? '' : '<span class="pm-out-warn">no saved project — open the studio or import a .json</span>'}
       </div>`
     this.deps.container.appendChild(el)
     this.overlay = el
 
+    el.querySelector('#pm-out-session')?.addEventListener('change', (e) => {
+      const id = (e.target as HTMLSelectElement).value
+      if (!id) return
+      if (this.loadSession(id)) {
+        const rec = this.project.getSession(id)
+        if (rec) this.currentSession = { id: rec.id, name: rec.name }
+      }
+      this.syncOutputOverlay()
+    })
     el.querySelector('#pm-out-quality')?.addEventListener('change', (e) => {
       this.setQuality((e.target as HTMLSelectElement).value as QualityLevel)
     })
@@ -246,12 +284,15 @@ export class ProjectionManager {
     const info = this.overlay.querySelector('#pm-out-info')
     const sel = this.overlay.querySelector('#pm-out-pattern') as HTMLSelectElement | null
     const qsel = this.overlay.querySelector('#pm-out-quality') as HTMLSelectElement | null
+    const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
     if (info) {
       const n = this.surfaces.surfaces.filter((s) => s.enabled).length
       const rt = this.effectiveRT()
       const rtTxt = rt ? ` · RT ${rt.w}×${rt.h}${rt.msaa ? ` ${rt.msaa}×AA` : ''}` : ''
-      info.textContent = `${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
+      info.textContent = `${sess}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
     }
+    if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
       const cur = this.output.quality
       if (cur === 'custom' && !qsel.querySelector('option[value="custom"]')) {
@@ -267,8 +308,33 @@ export class ProjectionManager {
     }
   }
 
+  /** rebuild the session list (published sessions can appear while running) */
+  private refreshSessionSelect(ssel: HTMLSelectElement) {
+    const sessions = this.project.listSessions()
+    ssel.innerHTML = ''
+    if (!sessions.length) {
+      const o = document.createElement('option')
+      o.value = ''
+      o.textContent = 'NO SESSIONS PUBLISHED'
+      ssel.appendChild(o)
+      return
+    }
+    for (const s of sessions) {
+      const o = document.createElement('option')
+      o.value = s.id
+      o.textContent = s.name
+      ssel.appendChild(o)
+    }
+    ssel.value = this.currentSession && sessions.some((s) => s.id === this.currentSession!.id)
+      ? this.currentSession.id
+      : sessions[0].id
+  }
+
   private pokeOverlay() {
     if (!this.outputOnly || !this.overlay) return
+    // sessions may have been published elsewhere since the last look
+    const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
+    if (ssel && this.overlay.classList.contains('pm-out-visible') !== true) this.refreshSessionSelect(ssel)
     this.overlay.classList.add('pm-out-visible')
     document.body.classList.add('pm-out-interacting')
     window.clearTimeout(this.overlayTimer)
@@ -329,13 +395,17 @@ export class ProjectionManager {
     this.surfaces.snapshot()
     const W = this.output.width, H = this.output.height
     const rect = { x: Math.round(W * 0.3), y: Math.round(H * 0.3), width: Math.round(W * 0.4), height: Math.round(H * 0.4) }
+    // new surfaces follow the house rule: angular spans locked so camera width
+    // stays put and edges stay connectable (seeded from the rect's ratio)
+    const fov = 55
+    const hFov = 2 * Math.atan(Math.tan((fov * Math.PI) / 360) * Math.max(0.05, rect.width / Math.max(1, rect.height)))
     const s: ProjectionSurface = {
       id: `surf-add-${Date.now().toString(36)}`,
       name: `Surface ${this.surfaces.surfaces.length + 1}`,
       enabled: true,
       locked: false,
       output: { ...rect },
-      camera: { position: [0, 2.2, 2], yaw: 0, pitch: 0, fov: 55, near: 0.1, far: 300, span: { h: 55, v: 55, lock: false } },
+      camera: { position: [0, 2.2, 2], yaw: 0, pitch: 0, fov, near: 0.1, far: 300, span: { h: Math.round((hFov * 180) / Math.PI), v: fov, lock: true } },
       warp: {
         corners: { tl: { x: rect.x, y: rect.y }, tr: { x: rect.x + rect.width, y: rect.y }, br: { x: rect.x + rect.width, y: rect.y + rect.height }, bl: { x: rect.x, y: rect.y + rect.height } },
         gridResolution: 8,
@@ -367,6 +437,50 @@ export class ProjectionManager {
 
   redo() {
     if (this.surfaces.redo()) this.deps.toast('Redo', 1200)
+  }
+
+  /** the published session this project was loaded from / last published as (if any) */
+  currentSession: { id: string; name: string } | null = null
+
+  listSessions() { return this.project.listSessions() }
+
+  /**
+   * Publish the current setup as a named output session. The returned id is
+   * the stable ?s= key for /output — publish again with the same name to
+   * update that link's settings in place.
+   */
+  publishSession(name: string): { id: string; name: string } | null {
+    // same name → update the session in place (its /output?s= link stays);
+    // a different name → a brand-new session with its own link
+    const sameName = this.currentSession?.name === name.trim()
+    const meta = this.project.saveSession(name, sameName ? this.currentSession?.id : undefined)
+    if (!meta) return null
+    this.currentSession = { id: meta.id, name: meta.name }
+    this.deps.toast(`Output session published — /output?s=${meta.id}`, 3600)
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+    return meta
+  }
+
+  /** load a published session back into the live project (continue editing) */
+  loadSession(id: string): boolean {
+    const rec = this.project.getSession(id)
+    if (!rec) return false
+    this.surfaces.snapshot()
+    if (!this.project.loadSession(id)) return false
+    this.currentSession = { id: rec.id, name: rec.name }
+    this.syncAll()
+    this.deps.toast(`Session "${rec.name}" loaded — keep editing`, 2600)
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+    return true
+  }
+
+  deleteSession(id: string): boolean {
+    const ok = this.project.deleteSession(id)
+    if (ok && this.currentSession?.id === id) this.currentSession = null
+    if (ok) { this.ui?.refreshAll(); this.syncOutputOverlay() }
+    return ok
   }
 
   setOutputLive(on: boolean) {

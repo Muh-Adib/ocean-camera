@@ -319,3 +319,31 @@ Stage Summary:
 - The projection is sharper by default (0.5 → 0.6 render scale) and can now be pushed to true 1:1 + 4× AA on show machines, or throttled to PERFORMANCE on weak rigs
 - AUTO genuinely measures the machine: seeds from hardware, then keeps tuning from live frame cost — no user action required
 - Quality choice travels with the project file (v2) and stays backward compatible with v1 autosaves
+
+---
+Task ID: 14
+Agent: main (Super Z)
+Task: Published output sessions with permanent ?s= links; output-faithful settings; camera/slice ratio controls (Resolume-style)
+
+Work Log:
+- Sessions registry (ProjectManager): localStorage 'ocean-projection-sessions-v1' — saveSession/listSessions/getSession/loadSession/deleteSession; publishing again with the same name UPDATES that session in place (its link keeps working), a new name creates a new session; snapshots carry the full project (surfaces, cameras, warp, blend, quality, canvas)
+- ProjectionManager: publishSession/loadSession/deleteSession/listSessions + currentSession tracking; /output?s=<id> loads that exact session at boot and LOCKS it — BroadcastChannel pushes are ignored for session-linked tabs so the picture never drifts from the published settings; ?s= unknown → autosave fallback + explicit overlay warning; /output overlay gains a SESSION menu (switch published shows live; re-reads the registry each time the overlay wakes); info line shows SESSION "name"
+- Fixed the reported "output doesn't match the settings" bug: onLightChange (corner drags, numeric field edits) never scheduled the autosave — /output kept rendering stale config after a fast close. Light changes now autosave (900 ms debounce) — verified W=500 edit lands in localStorage within 1.6 s
+- Ratios, input & output: master canvas gets free CANVAS W/H number fields + 16:9/32:9/4:3/1:1 quick buttons + reduced-ratio label (1920×1080 → "16:9"); the resolution select recognizes custom sizes; per-surface SLICE RATIO quick-sets + persisted lockAspect (W↔H stay coupled while editing, sanitized through project load); locked cameras show CAM RATIO with a MATCH SLICE button (SPAN V reshaped so frustum ratio = slice ratio)
+- House rule enforcement: all presets were already span-locked; addSurface() now births new surfaces span-locked too (seeded from the rect ratio) so camera width stays put and edges stay connectable everywhere
+- Studio PROJECT pane: OUTPUT SESSIONS section (name + PUBLISH, session rows with COPY LINK → clipboard w/ execCommand fallback, LOAD, DEL, active highlight); QA hooks projection.publish/sessions/loadSession
+- Headless-verify fixes/notes: agent-browser tab switching proved unreliable in this session (tab N didn't move) — earlier apparent "session drift" was actually quality() being applied on the /output tab itself; retested with distinct tabs → lock holds (studio push PERFORMANCE, session link stays HIGH); stale Next dev bundle once masked the new-name-session fix (cache-buster reload confirmed the fix)
+
+Verified headless:
+- Publish 'Wall Show' → /output?s=<id> renders session settings (HIGH, RT 1167×691 2×AA) even though the studio autosave held custom 0.5; studio push to PERFORMANCE leaves the session tab untouched
+- Same-name republish keeps the id (updatedAt refreshed); different name → new id; registry lists both
+- /output overlay SESSION select switches Floor Show ↔ Cube Ultra Show in place; info follows
+- With every tab closed except /output (control gone), reload still renders the published session — config comes from the registry, not the studio
+- Studio LOAD restores the session (ULTRA + surfaces) → continue editing → republish keeps the same link
+- Light-edit autosave fix verified (savedW 500 = liveW); slice 16:9 → 500×281; Lock + W=640 → 360 (ratio held 1.778); MATCH SLICE 62×40 → 62×35 (cam 1.771 ≈ slice 1.779); canvas 3200×900 + 32:9 snap
+- tsc clean; zero page errors; screenshots: download/screenshots/sessions-project-pane.png, session-output-overlay.png
+
+Stage Summary:
+- Output links are now real show files: publish → copy /output?s=… → the projector opens byte-identical settings forever, control tab or not, and the operator can flip between published shows from the projector itself
+- /output can no longer show stale settings — every edit persists, and session links are immune to studio drift
+- Camera width and aspect are first-class: spans locked everywhere by default, slice/canvas ratios editable with one-click ratio snaps and camera↔slice matching

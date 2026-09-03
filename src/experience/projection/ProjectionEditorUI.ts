@@ -331,9 +331,10 @@ export class ProjectionEditorUI {
     const rsel = document.createElement('select')
     rsel.className = 'pm-select pm-select-sm'
     const resOpts: [string, number, number][] = [
-      ['1920 × 1080', 1920, 1080], ['2560 × 720 (triple wall)', 2560, 720],
-      ['3840 × 1080', 3840, 1080], ['5120 × 1440', 5120, 1440], ['7680 × 2160', 7680, 2160],
+      ['1920 × 1080 (16:9)', 1920, 1080], ['2560 × 720 (triple wall)', 2560, 720],
+      ['3840 × 1080 (32:9)', 3840, 1080], ['5120 × 1440', 5120, 1440], ['7680 × 2160', 7680, 2160],
     ]
+    const customKey = 'custom'
     for (const [label, w, h] of resOpts) {
       const o = document.createElement('option')
       o.value = `${w}x${h}`
@@ -341,12 +342,49 @@ export class ProjectionEditorUI {
       if (this.pm.output.width === w && this.pm.output.height === h) o.selected = true
       rsel.appendChild(o)
     }
+    const known = resOpts.some(([, w, h]) => this.pm.output.width === w && this.pm.output.height === h)
+    if (!known) {
+      const o = document.createElement('option')
+      o.value = customKey
+      o.textContent = `CUSTOM ${this.pm.output.width} × ${this.pm.output.height}`
+      o.selected = true
+      rsel.appendChild(o)
+    }
     rsel.addEventListener('change', () => {
+      if (rsel.value === customKey) return
       const [w, h] = rsel.value.split('x').map(Number)
       this.pm.setOutputSize(w, h)
+      this.showTab('project')
     })
     resRow.appendChild(rsel)
     body.appendChild(resRow)
+
+    // ---- free output canvas size + ratio (Resolume-style master aspect) ----
+    const whRow = document.createElement('div')
+    whRow.className = 'pm-grid2'
+    whRow.appendChild(this.numField('CANVAS W', this.pm.output.width, 4, (v) => {
+      this.pm.setOutputSize(Math.max(320, Math.min(16384, v)), this.pm.output.height)
+    }, 320, 16384))
+    whRow.appendChild(this.numField('CANVAS H', this.pm.output.height, 4, (v) => {
+      this.pm.setOutputSize(this.pm.output.width, Math.max(240, Math.min(8640, v)))
+    }, 240, 8640))
+    body.appendChild(whRow)
+
+    const ratioRow = document.createElement('div')
+    ratioRow.className = 'pm-btn-row'
+    ratioRow.appendChild(this.labelEl('CANVAS RATIO'))
+    const aspLbl = document.createElement('span')
+    aspLbl.className = 'pm-slider-val'
+    aspLbl.textContent = aspectLabel(this.pm.output.width, this.pm.output.height)
+    ratioRow.appendChild(aspLbl)
+    for (const [label, ratio] of [['16:9', 16 / 9], ['32:9', 32 / 9], ['4:3', 4 / 3], ['1:1', 1]] as const) {
+      ratioRow.appendChild(this.btn(label, () => {
+        const h = Math.round(this.pm.output.width / ratio)
+        this.pm.setOutputSize(this.pm.output.width, h)
+        this.showTab('project')
+      }, 'pm-btn-sm'))
+    }
+    body.appendChild(ratioRow)
 
     // ---- output quality — sized to the machine driving the show ----
     const qRow = document.createElement('div')
@@ -431,6 +469,62 @@ export class ProjectionEditorUI {
     }))
     body.appendChild(saveRow)
     body.appendChild(this.hint('Projects autosave to this browser. Export writes ocean-projection.project.json for other machines and shows.'))
+
+    // ---- output sessions — published setups with permanent /output?s= links ----
+    body.appendChild(this.sepEl())
+    body.appendChild(this.labelEl('OUTPUT SESSIONS — SHAREABLE OUTPUT LINKS'))
+    const pubRow = document.createElement('div')
+    pubRow.className = 'pm-row'
+    const sessName = document.createElement('input')
+    sessName.type = 'text'
+    sessName.className = 'pm-input pm-input-grow'
+    sessName.maxLength = 48
+    sessName.placeholder = this.pm.currentSession ? `${this.pm.currentSession.name} (update)` : 'Session name — e.g. FRONT WALL SHOW'
+    const pubBtn = this.btn('PUBLISH', () => {
+      const name = sessName.value.trim() || this.pm.currentSession?.name || `Session ${this.pm.listSessions().length + 1}`
+      this.pm.publishSession(name)
+      this.showTab('project')
+    }, 'pm-btn-sm')
+    pubRow.append(sessName, pubBtn)
+    body.appendChild(pubRow)
+
+    const sessions = this.pm.listSessions()
+    if (!sessions.length) {
+      body.appendChild(this.hint('Publish the current setup to get a permanent /output?s=… link — the projector page then always opens with these exact settings, even with the studio closed. Publish again with the same name to update the link in place.'))
+    } else {
+      const list = document.createElement('div')
+      list.className = 'pm-session-list'
+      for (const sess of sessions) {
+        const row = document.createElement('div')
+        row.className = 'pm-session-row' + (this.pm.currentSession?.id === sess.id ? ' pm-session-active' : '')
+        const label = document.createElement('span')
+        label.className = 'pm-session-name'
+        label.textContent = sess.name
+        label.title = `/output?s=${sess.id}`
+        const when = document.createElement('span')
+        when.className = 'pm-session-date'
+        when.textContent = new Date(sess.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + new Date(sess.updatedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+        const tools = document.createElement('div')
+        tools.className = 'pm-btn-row'
+        tools.appendChild(this.btn('COPY LINK', async () => {
+          const url = `${location.origin}/output?s=${sess.id}`
+          const ok = await copyText(url)
+          this.pm.depsToast(ok ? `Link copied — /output?s=${sess.id}` : 'Copy failed — select the link: ' + url, 3000)
+        }, 'pm-btn-sm'))
+        tools.appendChild(this.btn('LOAD', () => {
+          this.pm.loadSession(sess.id)
+          this.showTab('project')
+        }, 'pm-btn-sm'))
+        tools.appendChild(this.btn('DEL', () => {
+          this.pm.deleteSession(sess.id)
+          this.showTab('project')
+        }, 'pm-btn-sm pm-btn-danger'))
+        row.append(label, when, tools)
+        list.appendChild(row)
+      }
+      body.appendChild(list)
+      body.appendChild(this.hint('COPY LINK puts the projector URL on the clipboard. LOAD restores the session here so you can keep editing it — publish again with the same name to refresh its link.'))
+    }
   }
 
   // ------------------------------------------------------------ surfaces list
@@ -559,9 +653,41 @@ export class ProjectionEditorUI {
     grid.className = 'pm-grid2'
     grid.appendChild(this.numField('X', rect.x, 1, (v) => { rect.x = v; this.light(s) }, -16384, 16384))
     grid.appendChild(this.numField('Y', rect.y, 1, (v) => { rect.y = v; this.light(s) }, -16384, 16384))
-    grid.appendChild(this.numField('W', rect.width, 1, (v) => { rect.width = Math.max(32, v); this.light(s) }, 32, 16384))
-    grid.appendChild(this.numField('H', rect.height, 1, (v) => { rect.height = Math.max(32, v); this.light(s) }, 32, 16384))
+    grid.appendChild(this.numField('W', rect.width, 1, (v) => {
+      const ratio = rect.width / Math.max(1, rect.height)
+      rect.width = Math.max(32, v)
+      if (rect.lockAspect) rect.height = Math.max(32, Math.round(rect.width / ratio))
+      this.light(s)
+    }, 32, 16384))
+    grid.appendChild(this.numField('H', rect.height, 1, (v) => {
+      const ratio = rect.width / Math.max(1, rect.height)
+      rect.height = Math.max(32, v)
+      if (rect.lockAspect) rect.width = Math.max(32, Math.round(rect.height * ratio))
+      this.light(s)
+    }, 32, 16384))
     this.propsEl.appendChild(grid)
+
+    // slice ratio — input side of the Resolume-style slice
+    const sliceAsp = document.createElement('div')
+    sliceAsp.className = 'pm-btn-row'
+    sliceAsp.appendChild(this.labelEl('SLICE RATIO'))
+    const sliceLbl = document.createElement('span')
+    sliceLbl.className = 'pm-slider-val'
+    sliceLbl.textContent = aspectLabel(rect.width, rect.height)
+    sliceAsp.appendChild(sliceLbl)
+    for (const [label, ratio] of [['16:9', 16 / 9], ['4:3', 4 / 3], ['1:1', 1], ['9:16', 9 / 16]] as const) {
+      sliceAsp.appendChild(this.btn(label, () => {
+        this.pm.surfaces.snapshot()
+        rect.height = Math.max(32, Math.round(rect.width / ratio))
+        this.pm.surfaces.emit()
+      }, 'pm-btn-sm'))
+    }
+    sliceAsp.appendChild(this.check('Lock', rect.lockAspect === true, (on) => {
+      this.pm.surfaces.snapshot()
+      rect.lockAspect = on
+      this.pm.surfaces.emit()
+    }))
+    this.propsEl.appendChild(sliceAsp)
 
     // CAMERA
     this.propsEl.appendChild(this.sectionEl('VIRTUAL CAMERA — world space'))
@@ -593,7 +719,25 @@ export class ProjectionEditorUI {
       this.propsEl.appendChild(spanRow)
       this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => { c.span.h = v; this.lightCam(s) }))
       this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => { c.span.v = v; this.lightCam(s) }))
-      this.propsEl.appendChild(this.hint('Frustum edges derive from these world angles — adjacent walls tile with no gaps or duplicated content.'))
+      // camera input ratio vs the slice it feeds — one click keeps them equal
+      const camRatio = c.span.h / Math.max(1, c.span.v)
+      const sliceRatio = rect.width / Math.max(1, rect.height)
+      const ratioRow = document.createElement('div')
+      ratioRow.className = 'pm-btn-row'
+      ratioRow.appendChild(this.labelEl('CAM RATIO'))
+      const rl = document.createElement('span')
+      rl.className = 'pm-slider-val'
+      rl.textContent = `${camRatio.toFixed(2)} · ${aspectLabel(c.span.h, c.span.v)}`
+      ratioRow.appendChild(rl)
+      ratioRow.appendChild(this.btn('MATCH SLICE', () => {
+        this.pm.surfaces.snapshot()
+        // keep SPAN H (the wall's angular width) and reshape SPAN V so the
+        // frustum ratio equals the slice ratio — no stretched pixels
+        c.span.v = Math.max(4, Math.min(179, Math.round(c.span.h / Math.max(0.05, sliceRatio))))
+        this.pm.surfaces.emit()
+      }, 'pm-btn-sm'))
+      this.propsEl.appendChild(ratioRow)
+      this.propsEl.appendChild(this.hint('Frustum edges derive from these world angles — adjacent walls tile with no gaps or duplicated content. MATCH SLICE reshapes SPAN V so the camera ratio equals the slice ratio.'))
     } else {
       this.propsEl.appendChild(this.sliderRow('FOV', c.fov, 10, 130, 1, (v) => { c.fov = v; this.lightCam(s) }))
       const lockRow = document.createElement('div')
@@ -845,4 +989,36 @@ export class ProjectionEditorUI {
 
 function formatVal(v: number): string {
   return Math.abs(v) >= 10 ? String(Math.round(v)) : String(Math.round(v * 100) / 100)
+}
+
+/** readable W:H label — 1920×1080 → "16:9", 3840×1080 → "32:9", odd sizes → "1.78:1" */
+function aspectLabel(w: number, h: number): string {
+  if (w <= 0 || h <= 0) return '—'
+  const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a)
+  const g = gcd(Math.round(w), Math.round(h))
+  const rw = Math.round(w) / g
+  const rh = Math.round(h) / g
+  if (rw <= 64 && rh <= 64) return `${rw}:${rh}`
+  return `${(w / h).toFixed(2)}:1`
+}
+
+/** clipboard with a legacy fallback (headless / non-secure contexts) */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
+      document.body.appendChild(ta)
+      ta.select()
+      const ok = document.execCommand('copy')
+      ta.remove()
+      return ok
+    } catch {
+      return false
+    }
+  }
 }

@@ -4,8 +4,9 @@
 // autosave so the studio reopens exactly as the operator left it.
 // ---------------------------------------------------------------
 import {
-  AUTOSAVE_KEY, PROJECT_VERSION, QUALITY_LEVELS, clampNum,
-  type ProjectionOutput, type ProjectionProject, type ProjectionSurface, type QualityLevel,
+  AUTOSAVE_KEY, PROJECT_VERSION, QUALITY_LEVELS, SESSIONS_KEY, clampNum,
+  type OutputSessionMeta, type ProjectionOutput, type ProjectionProject,
+  type ProjectionSurface, type QualityLevel,
 } from './ProjectionTypes'
 import { gridFromCorners, cornersFromGrid } from './ProjectionMath'
 import { CalibrationManager } from './CalibrationManager'
@@ -17,11 +18,79 @@ export interface ProjectHost {
   setOutput(o: ProjectionOutput): void
 }
 
+/** one published output session — a full project snapshot under a stable id */
+interface SessionRecord extends OutputSessionMeta {
+  project: ProjectionProject
+}
+
 export class ProjectManager {
   /** fired after every successful localStorage persist (studio → /output live sync) */
   onSave: ((project: ProjectionProject) => void) | null = null
 
   constructor(private host: ProjectHost) {}
+
+  // ------------------------------------------------------------ sessions
+  // Published output sessions: each one is a full project snapshot with a
+  // stable id — reopenable from any tab via /output?s=<id>, independent of
+  // the studio, and loadable back into the studio to continue editing.
+
+  private readRegistry(): Record<string, SessionRecord> {
+    try {
+      const raw = localStorage.getItem(SESSIONS_KEY)
+      if (!raw) return {}
+      const reg = JSON.parse(raw) as Record<string, SessionRecord>
+      return reg && typeof reg === 'object' ? reg : {}
+    } catch { return {} }
+  }
+
+  private writeRegistry(reg: Record<string, SessionRecord>) {
+    try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(reg)) } catch { /* storage full — non-fatal */ }
+  }
+
+  /** all published sessions, newest update first */
+  listSessions(): OutputSessionMeta[] {
+    return Object.values(this.readRegistry())
+      .map(({ id, name, createdAt, updatedAt }) => ({ id, name, createdAt, updatedAt }))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  getSession(id: string): (OutputSessionMeta & { project: ProjectionProject }) | null {
+    const rec = this.readRegistry()[id]
+    return rec ? { id: rec.id, name: rec.name, createdAt: rec.createdAt, updatedAt: rec.updatedAt, project: rec.project } : null
+  }
+
+  /**
+   * Publish the current project as a named session. Publishing again with
+   * the same name (or an explicit id) UPDATES that session in place so its
+   * /output?s=<id> link keeps working with the newest settings.
+   */
+  saveSession(name: string, id?: string): OutputSessionMeta | null {
+    const cleanName = (name || '').trim().slice(0, 48) || 'Output session'
+    const reg = this.readRegistry()
+    const key = id && reg[id] ? id : Object.values(reg).find((r) => r.name === cleanName)?.id
+    const now = Date.now()
+    const rec: SessionRecord = key && reg[key]
+      ? { ...reg[key], name: cleanName, updatedAt: now, project: this.serialize() }
+      : { id: `sess-${now.toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name: cleanName, createdAt: now, updatedAt: now, project: this.serialize() }
+    reg[rec.id] = rec
+    this.writeRegistry(reg)
+    return { id: rec.id, name: rec.name, createdAt: rec.createdAt, updatedAt: rec.updatedAt }
+  }
+
+  /** restore a published session into the live project (studio or /output) */
+  loadSession(id: string): boolean {
+    const rec = this.readRegistry()[id]
+    if (!rec) return false
+    return this.load(rec.project)
+  }
+
+  deleteSession(id: string): boolean {
+    const reg = this.readRegistry()
+    if (!reg[id]) return false
+    delete reg[id]
+    this.writeRegistry(reg)
+    return true
+  }
 
   serialize(): ProjectionProject {
     return {
@@ -130,6 +199,7 @@ function sanitizeSurface(raw: unknown): ProjectionSurface | null {
     y: clampNum(out.y, 0, -16384, 16384),
     width,
     height,
+    ...(out.lockAspect === true ? { lockAspect: true } : {}),
   }
   const res = [1, 2, 4, 6, 8, 12, 16].includes(clampNum(warp.gridResolution, 8, 1, 16))
     ? clampNum(warp.gridResolution, 8, 1, 16) : 8

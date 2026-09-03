@@ -63,6 +63,29 @@
 .pm-btn-active { background: rgba(63, 224, 200, 0.16); border-color: var(--pm-accent); color: #aef2e4; }
 .pm-btn-danger { border-color: rgba(255, 120, 120, 0.4); color: #ffb0a6; }
 .pm-btn-danger:hover { background: rgba(120, 40, 34, 0.5); border-color: rgba(255, 140, 130, 0.7); }
+.pm-session-list { display: flex; flex-direction: column; gap: 0.28rem; }
+.pm-session-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.34rem 0.5rem;
+  background: rgba(6, 24, 38, 0.5);
+  border: 1px solid rgba(90, 180, 210, 0.14);
+  border-radius: 4px;
+}
+.pm-session-row.pm-session-active { border-color: rgba(110, 240, 210, 0.45); background: rgba(10, 40, 50, 0.6); }
+.pm-session-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(190, 235, 245, 0.92);
+}
+.pm-session-date { flex: none; font-size: 0.52rem; color: rgba(150, 195, 215, 0.55); font-variant-numeric: tabular-nums; }
 .pm-btn-sm { font-size: 0.54rem; padding: 0.3rem 0.5rem; }
 .pm-btn:disabled { opacity: 0.35; cursor: default; }
 

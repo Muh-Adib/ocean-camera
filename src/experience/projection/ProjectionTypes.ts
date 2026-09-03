@@ -27,8 +27,9 @@ export interface ProjectionSurface {
   enabled: boolean
   locked: boolean
 
-  /** OUTPUT SPACE — the slice rectangle on the projector canvas */
-  output: { x: number; y: number; width: number; height: number }
+  /** OUTPUT SPACE — the slice rectangle on the projector canvas.
+   *  lockAspect keeps W:H fixed while editing (Resolume-style slice ratio). */
+  output: { x: number; y: number; width: number; height: number; lockAspect?: boolean }
 
   /** WORLD SPACE — the virtual camera rendering the shared scene */
   camera: {
@@ -157,6 +158,15 @@ export interface ProjectionProject {
 
 export const PROJECT_VERSION = 2
 export const AUTOSAVE_KEY = 'ocean-projection-v1'
+/** published output sessions — every entry is reopenable via /output?s=<id> */
+export const SESSIONS_KEY = 'ocean-projection-sessions-v1'
+
+export interface OutputSessionMeta {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt: number
+}
 
 let uid = 0
 export function makeSurfaceId(): string {
@@ -188,19 +198,19 @@ export function deepCloneSurface(s: ProjectionSurface): ProjectionSurface {
 
 export function createSurface(init: {
   name: string
-  output: { x: number; y: number; width: number; height: number }
+  output: { x: number; y: number; width: number; height: number; lockAspect?: boolean }
   camera: ProjectionSurface['camera']
   gridResolution?: number
   calibration?: CalibrationPattern
 }): ProjectionSurface {
-  const rect = init.output
+  const { lockAspect, ...rect } = init.output
   const res = init.gridResolution ?? 8
   return {
     id: makeSurfaceId(),
     name: init.name,
     enabled: true,
     locked: false,
-    output: { ...rect },
+    output: { ...rect, ...(lockAspect ? { lockAspect: true } : {}) },
     camera: {
       position: [...init.camera.position] as [number, number, number],
       yaw: init.camera.yaw,
