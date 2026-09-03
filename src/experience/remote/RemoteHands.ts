@@ -60,7 +60,13 @@ export class RemoteHands {
             lm?: number[][]; label?: string
           }[]
         }
-        if (typeof data.seq === 'number' && data.seq <= this.seq) return   // old frame
+        // freshness gate on the SERVER receive stamp (the POST route
+        // overwrites t with server time): replays carry an older t and
+        // are dropped, while frames from ANY number of phones — each
+        // with its own private seq — still interleave safely. Gating
+        // on the sender seq would let a second phone (or a QA inject)
+        // starve the first one forever.
+        if (typeof data.t === 'number' && data.t <= this.lastAt) return
         this.seq = typeof data.seq === 'number' ? data.seq : this.seq
         this.lastAt = typeof data.t === 'number' ? data.t : Date.now()
         const hands: HandSample[] = []

@@ -51,7 +51,7 @@ export class ProjectionEditorUI {
           <button id="pm-mode-preview" class="pm-btn pm-btn-active">PREVIEW</button>
           <button id="pm-mode-output" class="pm-btn">OUTPUT</button>
           <button id="pm-open-output" class="pm-btn" title="Open the live /output page — it mirrors every edit in real time (works across browsers & machines)">OPEN OUTPUT ↗</button>
-          <button id="pm-remote-qr" class="pm-btn" title="Show a QR code — a smartphone scans it and controls the ocean with its camera (both hands, real time)">REMOTE QR</button>
+          <button id="pm-remote-qr" class="pm-btn" title="Show a QR code — a smartphone scans it and controls the ocean with its camera (both hands) or the button pad — real time">REMOTE QR</button>
           <button id="pm-fullscreen" class="pm-btn">⛶ FULLSCREEN</button>
           <button id="pm-exit" class="pm-btn pm-btn-danger">EXIT STUDIO</button>
         </div>

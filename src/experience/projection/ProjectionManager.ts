@@ -382,7 +382,7 @@ export class ProjectionManager {
           </select>
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
-        <button class="pm-btn pm-btn-sm" id="pm-out-remote" title="Show a QR code — a smartphone controls the ocean with both hands, real time">REMOTE QR</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-remote" title="Show a QR code — a smartphone controls the ocean with both hands or the button pad — real time">REMOTE QR</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
         ${missingSession
           ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'

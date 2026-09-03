@@ -1,20 +1,27 @@
 // ---------------------------------------------------------------
 // RemotePhone — the smartphone controller behind the /remote route.
 //
-// Scanned from the QR code (or opened directly), it:
-//   1. opens the phone's FRONT camera (visible preview, mirrored)
-//   2. tracks up to TWO hands with the same local MediaPipe model
-//      the desktop uses — nothing leaves the phone except the
-//      tiny landmark samples
-//   3. streams both hands to /api/remote/hands at ~25 Hz
+// Scanned from the QR code (or opened directly), it offers TWO
+// controller modes behind a segmented switch:
+//
+//   CAMERA — the phone's FRONT camera (visible preview, mirrored)
+//   tracks up to TWO hands with the same local MediaPipe model the
+//   desktop uses; both hands stream to /api/remote/hands at ~25 Hz.
+//
+//   BUTTONS — a touch pad: action grid (feed/burst/shark/turtle/
+//   ray/pulse), SWIM & SOUND toggles with real studio-state badges,
+//   hold-to-BOOST, and a joystick that steers the current by
+//   streaming a synthesized open-palm hand through the same hands
+//   pipeline — see RemotePhonePad.
 //
 // Every ocean page (studio and /output, any machine on the LAN)
-// picks the stream up over SSE and steers the fish in real time —
-// a swimming stroke with both arms becomes two moving attractors.
+// picks both channels up over SSE and reacts in real time.
 // ---------------------------------------------------------------
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import { extractHandSample, mirrorLandmarks } from '../interaction/handMath'
 import type { Landmark } from '../interaction/HandTracker'
+import type { RemoteCmdType } from './RemoteCmds'
+import { buildPadStage, type PadHandle, type PadHandFrame } from './RemotePhonePad'
 
 const ROOM = new URLSearchParams(window.location.search).get('room') || 'ocean'
 const WASM_PATH = '/mediapipe/wasm'
@@ -49,7 +56,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   ].join(';')
 
   const header = document.createElement('div')
-  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px 8px;'
+  header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px 6px;'
   const title = document.createElement('div')
   title.innerHTML = '<span style="font-size:13px;font-weight:700;letter-spacing:0.14em;">LIVING OCEAN</span>' +
     '<span style="font-size:11px;color:#7fd4ee;letter-spacing:0.1em;"> · REMOTE</span>'
@@ -62,6 +69,45 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   statusChip.append(dot, statusText)
   header.append(title, statusChip)
 
+  // ---- mode switch (CAMERA / BUTTONS) ----
+  const tabs = document.createElement('div')
+  tabs.setAttribute('role', 'tablist')
+  tabs.style.cssText = [
+    'display:flex', 'gap:4px', 'margin:2px 14px 8px', 'padding:4px', 'flex:none',
+    'border-radius:999px', 'background:rgba(2,16,28,0.75)',
+    'border:1px solid rgba(110,231,255,0.22)',
+  ].join(';')
+  const mkTab = (label: string) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.setAttribute('role', 'tab')
+    b.textContent = label
+    b.style.cssText = [
+      'flex:1', 'appearance:none', 'border:none', 'border-radius:999px',
+      'padding:9px 0', 'font-size:11.5px', 'font-weight:700', 'letter-spacing:0.16em',
+      'color:#8fb9ca', 'background:transparent', 'cursor:pointer', 'min-height:38px',
+      'transition:background 0.15s ease, color 0.15s ease',
+    ].join(';')
+    return b
+  }
+  const camTab = mkTab('CAMERA')
+  const padTab = mkTab('BUTTONS')
+  tabs.append(camTab, padTab)
+
+  const tabBase = [
+    'flex:1', 'appearance:none', 'border:none', 'border-radius:999px',
+    'padding:9px 0', 'font-size:11.5px', 'font-weight:700', 'letter-spacing:0.16em',
+    'cursor:pointer', 'min-height:38px', 'min-width:0',
+    'transition:background 0.15s ease, color 0.15s ease',
+  ]
+  const paintTabs = (mode: 'cam' | 'pad') => {
+    const active = ['background:linear-gradient(135deg,#8fe6ff,#5ec8ea)', 'color:#04222f', 'box-shadow:0 4px 14px rgba(94,200,234,0.35)']
+    const idle = ['background:transparent', 'color:#8fb9ca', 'box-shadow:none']
+    camTab.style.cssText = [...tabBase, ...(mode === 'cam' ? active : idle)].join(';')
+    padTab.style.cssText = [...tabBase, ...(mode === 'pad' ? active : idle)].join(';')
+  }
+
+  // ---- CAMERA stage (unchanged visuals) ----
   const stage = document.createElement('div')
   stage.style.cssText = 'position:relative;flex:1;overflow:hidden;background:rgba(1,12,22,0.6);'
   const video = document.createElement('video')
@@ -72,10 +118,6 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   const canvas = document.createElement('canvas')
   canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
   stage.append(video, canvas)
-
-  const legend = document.createElement('div')
-  legend.style.cssText = 'padding:8px 14px 10px;font-size:11px;line-height:1.6;color:#8fb9ca;text-align:center;'
-  legend.innerHTML = 'open palm → attract · fist → caution · move both hands like swimming'
 
   const startCard = document.createElement('div')
   startCard.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(2,16,28,0.55);backdrop-filter:blur(4px);'
@@ -103,17 +145,65 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   startCard.append(startTitle, startHint, startBtn, privacy, warn)
   stage.appendChild(startCard)
 
-  root.append(header, stage, legend)
+  // ---- BUTTONS stage ----
+  const legend = document.createElement('div')
+  legend.style.cssText = 'padding:8px 14px 10px;font-size:11px;line-height:1.6;color:#8fb9ca;text-align:center;flex:none;'
+  legend.innerHTML = 'open palm → attract · fist → caution · move both hands like swimming'
+
+  root.append(header, tabs, stage, legend)
   container.appendChild(root)
 
-  // insecure origin (plain http over LAN): the phone will block the camera
-  const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
-  if (!window.isSecureContext && !isLocalHost) {
-    warn.style.display = 'block'
-    warn.textContent =
-      'This page is not HTTPS, so the phone will block the camera. ' +
-      'Open it through the app\u2019s HTTPS link, or run the server with `npm run dev:https` and scan that QR.'
+  const setStatus = (text: string, color: string) => {
+    statusText.textContent = text
+    dot.style.background = color
+    dot.style.boxShadow = `0 0 8px ${color}`
   }
+  const buzz = (ms = 12) => { try { navigator.vibrate?.(ms) } catch { /* no haptics */ } }
+
+  // ---------------- shared network helpers ----------------
+  let seq = 0
+  async function postHands(hands: PadHandFrame[]): Promise<boolean> {
+    try {
+      const res = await fetch('/api/remote/hands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: ROOM, seq: seq++, t: Date.now(), hands }),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  async function sendCmd(type: RemoteCmdType, on?: boolean): Promise<boolean> {
+    try {
+      const res = await fetch('/api/remote/cmd', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ room: ROOM, cmd: { type, ...(on === undefined ? {} : { on }) } }),
+      })
+      return res.ok
+    } catch {
+      return false
+    }
+  }
+
+  // ---------------- BUTTONS pad ----------------
+  let padStatusRevert = 0
+  const pad = buildPadStage({
+    room: ROOM,
+    sendCmd,
+    postHands,
+    setStatus: (text, color) => {
+      setStatus(text, color)
+      if (padStatusRevert) { clearTimeout(padStatusRevert); padStatusRevert = 0 }
+      if (text.startsWith('SENT')) {
+        padStatusRevert = window.setTimeout(() => setStatus('PAD READY', '#7fd4ee'), 900)
+      }
+    },
+    buzz,
+  })
+  stage.appendChild(pad.root)
 
   // ---------------- state ----------------
   const ctx = canvas.getContext('2d')!
@@ -121,52 +211,46 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   let stream: MediaStream | null = null
   let running = false
   let disposed = false
+  let mode: 'cam' | 'pad' = 'cam'
   let lastVideoTime = -1
   let lastSend = 0
   let lastIdleSend = 0
-  let seq = 0
   let failCount = 0
   let fpsCount = 0
   let fpsShown = 0
   let fpsAt = performance.now()
   let lastHands: Landmark[][] = []
 
-  const setStatus = (text: string, color: string) => {
-    statusText.textContent = text
-    dot.style.background = color
-    dot.style.boxShadow = `0 0 8px ${color}`
+  // insecure origin (plain http over LAN): the phone will block the camera
+  const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
+  if (!window.isSecureContext && !isLocalHost) {
+    warn.style.display = 'block'
+    warn.textContent =
+      'This page is not HTTPS, so the phone will block the camera. ' +
+      'Open it through the app\u2019s HTTPS link, or run the server with `npm run dev:https` and scan that QR. ' +
+      'The BUTTONS pad works on plain http too.'
   }
 
-  // ---------------- sending ----------------
+  // ---------------- camera sending ----------------
   async function send(hands: {
     x: number; y: number; openness: number; scale: number
     lm: number[][]; label: string
   }[]) {
-    const now = Date.now()
-    try {
-      const res = await fetch('/api/remote/hands', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room: ROOM, seq: seq++, t: now, hands }),
-      })
-      if (res.ok) {
-        failCount = 0
-        if (running) setStatus(hands.length ? `LIVE · ${hands.length} HAND${hands.length === 1 ? '' : 'S'}${fpsShown ? ` · ${fpsShown} FPS` : ''}` : 'LIVE · SEARCHING', '#7bffb2')
-      } else {
-        throw new Error(`http ${res.status}`)
-      }
-    } catch {
-      if (++failCount >= 3 && running) setStatus('OFFLINE — server unreachable', '#ff8f8f')
+    const ok = await postHands(hands)
+    if (ok) {
+      failCount = 0
+      if (running) setStatus(hands.length ? `LIVE · ${hands.length} HAND${hands.length === 1 ? '' : 'S'}${fpsShown ? ` · ${fpsShown} FPS` : ''}` : 'LIVE · SEARCHING', '#7bffb2')
+    } else if (++failCount >= 3 && running) {
+      setStatus('OFFLINE — server unreachable', '#ff8f8f')
     }
   }
 
   function maybeSend(hands: ReturnType<typeof collectHands>, nowMs: number) {
     const empty = hands.length === 0
-    const lastSent = lastSend
     if (empty) {
       if (nowMs - lastIdleSend < IDLE_SEND_MS) return
       lastIdleSend = nowMs
-    } else if (nowMs - lastSent < SEND_INTERVAL_MS) {
+    } else if (nowMs - lastSend < SEND_INTERVAL_MS) {
       return
     }
     lastSend = nowMs
@@ -248,7 +332,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     maybeSend(collectHands(), now)
   }
 
-  // ---------------- start / stop ----------------
+  // ---------------- start / stop camera ----------------
   async function start() {
     startBtn.disabled = true
     startBtn.textContent = 'STARTING…'
@@ -289,7 +373,49 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     }
   }
 
+  function stopCamera() {
+    running = false
+    lastHands = []
+    try { landmarker?.close?.() } catch { /* partial landmarker may refuse */ }
+    landmarker = null
+    stream?.getTracks().forEach((t) => t.stop())
+    stream = null
+    video.srcObject = null
+    video.style.opacity = '0'
+    startBtn.disabled = false
+    startBtn.textContent = 'START CAMERA'
+    startCard.style.display = 'flex'
+  }
+
   startBtn.addEventListener('click', () => { void start() })
+
+  // ---------------- mode switching ----------------
+  function setMode(next: 'cam' | 'pad') {
+    if (mode === next || disposed) return
+    mode = next
+    if (next === 'pad') {
+      // release the camera entirely — the pad must not burn battery
+      if (running) { stopCamera(); void postHands([]) }
+      setStatus('PAD READY', '#7fd4ee')
+      stage.style.background = 'transparent'
+      legend.innerHTML = 'stick steers the fish · buttons fire the show · flick = current'
+      pad.start()
+    } else {
+      pad.stop()
+      stage.style.background = 'rgba(1,12,22,0.6)'
+      legend.innerHTML = 'open palm → attract · fist → caution · move both hands like swimming'
+      setStatus('IDLE', '#5b7c8d')
+    }
+    // stage children: video, canvas, startCard, pad.root — toggle pad only
+    pad.root.style.display = next === 'pad' ? 'flex' : 'none'
+    startCard.style.display = next === 'cam' ? (running ? 'none' : 'flex') : 'none'
+    canvas.style.display = next === 'cam' ? 'block' : 'none'
+    video.style.display = next === 'cam' ? 'block' : 'none'
+    paintTabs(next)
+  }
+  camTab.addEventListener('click', () => { buzz(8); setMode('cam') })
+  padTab.addEventListener('click', () => { buzz(8); setMode('pad') })
+  paintTabs('cam')
 
   // final "hands gone" beat so the fish calm down the moment the tab closes
   const onPageHide = () => {
@@ -306,6 +432,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     dispose() {
       disposed = true
       running = false
+      pad.stop()
       window.removeEventListener('pagehide', onPageHide)
       try { landmarker?.close?.() } catch { /* partial landmarker may refuse */ }
       landmarker = null

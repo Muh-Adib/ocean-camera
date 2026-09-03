@@ -464,3 +464,32 @@ Stage Summary:
 - Scan a QR (studio topbar or /output overlay) → the phone's camera becomes a two-hand gesture controller; every ocean page on the network — control and outputs — follows the swim in real time, and falls back to local tracking the moment the phone stops
 - Two-hand tracking is now native everywhere: desktop camera (stable slots) and phone remote share one pipeline with two independent force points, so alternating swimming strokes drive two currents instead of being averaged away
 - Show-time safety unchanged: the phone is a pure ADD-ON — closing it never disturbs the output pages
+
+---
+Task ID: 18
+Agent: main (Super Z)
+Task: Phone controller BUTTON PAD mode — one-thumb show control (action grid, joystick, toggles, hold-boost) beside the camera mode, all realtime
+
+Work Log:
+- New command relay src/app/api/remote/cmd/: store.ts (globalThis bus per room — cmd ring (24 cap, monotonic ids), hostState echo {swim,muted}, padSeenAt liveness, 8-room LRU), route.ts (POST cmd/host/ping — type whitelist REMOTE_CMD_TYPES, GET bootstrap snapshot with padLive), stream/route.ts (SSE: 3 s cmd replay on connect + host snapshot + live 'cmd'/'host' events + 15 s heartbeat)
+- RemoteCmds client (experience/remote/): EventSource on /api/remote/cmd/stream, id-set dedupe (64 cap), onCmd/onHost; main.ts assigns applyRemoteCmd — feed (doFeed), burst (fish-centroid shockwave + scatter + camera push), shark/turtle/ray (visitors), pulse (lighting), bubbles, impulse; swim/sound/boost are studio-only (outputOnly pages apply world events, never view changes); publishHostState() echoes swim/muted at boot + on every change (swim.onChange, sound toggle, remote swim/sound cmds)
+- RemotePhonePad (experience/remote/): ocean-glass touch pad — 6-button action grid (FEED/BURST/SHARK/TURTLE/RAY/PULSE with hand-drawn SVG stroke icons + per-action accent colors), joystick (pointer-capture, 90 ms keepalive, knob glow) that streams a synthesized open-palm hand (openness 0.78 → attract) through the EXISTING /api/remote/hands pipeline — fish follow the stick on every page with zero new consumption code; SWIM/SOUND toggles with live state badges (host poll 1.5 s), BOOST hold (press/release cmd pair, dimmed until SWIM is on), haptics (navigator.vibrate), pad heartbeat ping 2.5 s keeps the QR modal green in buttons mode
+- RemotePhone reworked into a two-mode controller: segmented CAMERA/BUTTONS switch; entering BUTTONS fully stops the camera (battery) and posts empty hands; leaving restores the START CAMERA card; per-mode legend text; pagehide beacon kept
+- Robustness fixes found by headless testing: RemoteHands frame gate moved from sender-seq to SERVER receive timestamp (the POST route stamps t) — a second phone/QA inject with its own private seq previously starved the first sender forever; joystick guards: finite-check + center fallback + hidden-rect bail (NaN → null → corner-clamp bug), setPointerCapture try/catch; removed duplicate pad legend
+- RemoteQR: modal copy now mentions the BUTTONS pad; connection poll checks hands liveness OR pad liveness ('● PHONE CONNECTED — pad / camera active'); REMOTE QR button tooltips updated (studio + /output)
+- QA hooks: __ocean.pad.{status,room,apply(type,on)} — pad.apply fires a command straight into the pipeline
+- README: remote section rewritten for the two-mode controller
+
+Verified headless (agent-browser + curl fake phone):
+- API: POST cmd → {ok,id}; host echo stored+returned; ping → padLive:true; unknown type rejected; GET snapshot lists cmds; SSE replayed host+hello then live 'cmd' events
+- End-to-end: curl shark → studio threat 1 + toast 'PHONE PAD · Shark!'; curl feed/swim/sound/boost all consumed (swimMode toggled true→false via commands, hostState published swim:true after)
+- Phone pad clicks (TURTLE/SHARK/BOOST) POSTed and recorded on the server (cmd ids 12-17); BOOST hold captured on:true → on:false pair ~580 ms apart
+- Joystick: synthetic drag → hands snapshot (0.808, 0.332, openness 0.78, 'stick') exactly as computed; same-page stream test → studio field.active true, point (0.9,1.4,-6.2) follows x0.75/y0.35; release → hands [] → field deactivates
+- Badges: curl swim → pad poll flips SWIM badge ON + BOOST opacity 1 (state-driven); sound badge tracks muted
+- UI: 390x844 screenshots — action grid + toggles + centered knob, single legend; QR modal on /output shows new copy + 'PHONE CONNECTED — pad / camera active'
+- CAMERA regression: tab back → START CAMERA card, no page errors; tsc clean; eslint clean on all new/modified files
+
+Stage Summary:
+- The phone is now a full remote: CAMERA (both-hand gesture steering) or BUTTONS (one-thumb show control: feed/burst/shark/turtle/ray/pulse + joystick current + swim/sound toggles + hold-boost), both channels realtime over SSE to the studio AND every /output page
+- Multi-sender hands relay is now timestamp-gated — any number of phones/QA sources can coexist safely
+- Show-time safety unchanged: closing the pad stops timers/releases the stick; closing the phone calms the water and falls back to local tracking

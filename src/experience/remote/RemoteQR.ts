@@ -49,8 +49,9 @@ export async function openRemoteQR(parent: HTMLElement) {
     <div style="font-size:12px;letter-spacing:0.16em;color:#7fd4ee;">SMARTPHONE REMOTE</div>
     <h3 style="margin:6px 0 2px;font-size:17px;font-weight:600;">Control the ocean with your phone</h3>
     <p style="margin:0 0 12px;font-size:12px;line-height:1.55;color:#9fc9da;">
-      Scan with your phone — its camera tracks <b>both hands</b> and steers
-      the fish in real time, on this screen and on every output page.
+      Scan with your phone — its camera tracks <b>both hands</b>, or switch to
+      the <b>BUTTONS</b> pad (feed, burst, shark, joystick…). Everything reacts
+      in real time, on this screen and on every output page.
     </p>
     <div class="rq-img-wrap" style="display:flex;justify-content:center;margin:4px 0 10px;">
       <div style="padding:10px;background:#f4fbff;border-radius:10px;display:inline-block;">
@@ -86,7 +87,9 @@ export async function openRemoteQR(parent: HTMLElement) {
   const setStatus = (live: boolean, hands: number) => {
     if (!statusEl) return
     statusEl.textContent = live
-      ? `● PHONE CONNECTED — ${hands} hand${hands === 1 ? '' : 's'} streaming`
+      ? hands > 0
+        ? `● PHONE CONNECTED — ${hands} hand${hands === 1 ? '' : 's'} streaming`
+        : '● PHONE CONNECTED — pad / camera active'
       : '○ WAITING FOR PHONE — scan the code to connect'
     statusEl.style.color = live ? '#7bffb2' : '#8fd8ef'
   }
@@ -154,13 +157,26 @@ export async function openRemoteQR(parent: HTMLElement) {
   await renderQr(pickDefault)
 
   // ---- live connection status (shared server state, zero coupling) ----
+  // a phone counts as connected while it streams hands (camera mode)
+  // OR while its button pad pings (buttons mode)
   const poll = async () => {
     try {
-      const res = await fetch(`/api/remote/hands?room=${encodeURIComponent(ROOM)}`)
-      if (res.ok) {
-        const data = await res.json() as { live?: boolean; snapshot?: { hands?: unknown[] } }
-        setStatus(!!data.live, data.snapshot?.hands?.length ?? 0)
+      const [handsRes, cmdRes] = await Promise.all([
+        fetch(`/api/remote/hands?room=${encodeURIComponent(ROOM)}`),
+        fetch(`/api/remote/cmd?room=${encodeURIComponent(ROOM)}`).catch(() => null),
+      ])
+      let live = false
+      let hands = 0
+      if (handsRes.ok) {
+        const data = await handsRes.json() as { live?: boolean; snapshot?: { hands?: unknown[] } }
+        live = !!data.live
+        hands = data.snapshot?.hands?.length ?? 0
       }
+      if (!live && cmdRes && cmdRes.ok) {
+        const data = await cmdRes.json() as { padLive?: boolean }
+        live = !!data.padLive
+      }
+      setStatus(live, hands)
     } catch { /* server hiccup — keep the last state */ }
   }
   void poll()

@@ -32,6 +32,7 @@ import { GestureEngine } from './interaction/GestureEngine'
 import { PointerFallback } from './interaction/PointerFallback'
 import { SwimController } from './interaction/SwimController'
 import { RemoteHands } from './remote/RemoteHands'
+import { RemoteCmds, type RemoteCmd } from './remote/RemoteCmds'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
@@ -116,6 +117,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // gesture source on THIS page (and on every /output page too)
   const remoteHands = new RemoteHands()
   remoteHands.start()
+  // smartphone BUTTON PAD: one-shot show commands + toggle echoes
+  // (feed/burst/shark/… + swim/sound/boost) over a second SSE link
+  const remoteCmds = new RemoteCmds()
+  remoteCmds.start()
   const gestureEngine = new GestureEngine(sceneMgr.camera, field, {
     onSwipe: (_dir, strength, point, dirVec) => {
       bursts.trail(point, dirVec, strength)
@@ -147,6 +152,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   swim.onChange = (on) => {
     pointer.swimMode = on
     ui.setSwimActive(on)
+    publishHostState()
     if (on) {
       cameraRig.enterSwim()
       ui.setStatus('SWIM MODE', 'hand')
@@ -177,6 +183,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       audio.setMuted(muted)
       ui.setSoundIcon(muted)
       ui.toast(muted ? 'Sound off' : 'Sound on', 1800)
+      publishHostState()
     },
     onToggleCamera: async () => {
       if (handTracker.isRunning) {
@@ -261,6 +268,88 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     ui.setCameraActive(false)
     ui.setStatus('MOUSE MODE', 'mouse')
     ui.showCameraHelp(reason, () => { void startCamera() })
+  }
+
+  // ---------------- smartphone button pad ----------------
+  /** every page runs its own sim, so world events land on the
+   *  studio AND on every /output; view-changing commands only run
+   *  where there is a view (the studio) */
+  const fishCentroid = () => {
+    const c = new THREE.Vector3()
+    let n = 0
+    for (const s of fish.schools) {
+      const f = s.fish[0]
+      if (f) { c.add(f.pos); n++ }
+    }
+    return n ? c.multiplyScalar(1 / n) : new THREE.Vector3(0, 2, -30)
+  }
+
+  function applyRemoteCmd(cmd: RemoteCmd) {
+    switch (cmd.type) {
+      case 'feed':
+        doFeed()
+        break
+      case 'burst': {
+        const p = fishCentroid()
+        bursts.shockwave(p, 0.85)
+        fish.scatterFrom(p, 0.85)
+        audio.gestureSpark(0.8)
+        if (!outputOnly) cameraRig.pushReaction(0.85)
+        break
+      }
+      case 'shark':
+        creatures.triggerPredator()
+        if (!outputOnly) ui.toast('PHONE PAD · Shark!', 1600)
+        break
+      case 'turtle':
+        creatures.triggerTurtle()
+        if (!outputOnly) ui.toast('PHONE PAD · Turtle glides in', 1600)
+        break
+      case 'ray':
+        creatures.triggerRay()
+        if (!outputOnly) ui.toast('PHONE PAD · Ray sweeps by', 1600)
+        break
+      case 'pulse':
+        lighting.pulseEnergy()
+        break
+      case 'bubbles':
+        bubbles.burstCluster(rand(-55, 55), rand(-72, -8), 18)
+        break
+      case 'impulse':
+        fish.randomImpulse()
+        break
+      case 'swim':
+        if (!outputOnly) {
+          swim.setActive(!swim.active)
+          publishHostState()
+        }
+        break
+      case 'sound':
+        if (!outputOnly) {
+          const muted = !audio.isMuted
+          audio.setMuted(muted)
+          ui.setSoundIcon(muted)
+          ui.toast(muted ? 'Sound off (phone)' : 'Sound on (phone)', 1600)
+          publishHostState()
+        }
+        break
+      case 'boost':
+        if (!outputOnly) swim.forwardBoost = cmd.on ? 1 : 0
+        break
+    }
+  }
+  remoteCmds.onCmd = applyRemoteCmd
+
+  /** echo the studio's toggle state so the pad badges SWIM/SOUND
+   *  with the real thing (phone polls /api/remote/cmd) */
+  function publishHostState() {
+    if (outputOnly) return
+    void fetch('/api/remote/cmd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: remoteCmds.room, host: { swim: swim.active, muted: audio.isMuted } }),
+      keepalive: true,
+    }).catch(() => { /* badges are cosmetic */ })
   }
 
   // ---------------- feeding ----------------
@@ -451,6 +540,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   } else {
     ui.runLoadingSequence(2600)
   }
+  publishHostState()   // the pad's SWIM/SOUND badges start from the truth
   loop()
 
   // QA/testing hooks (harmless in production, handy in devtools & CI)
@@ -492,6 +582,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       point2: field.point2.toArray().map((n) => Math.round(n * 10) / 10),
     }),
     gesture: () => ({ ...gestureEngine.status }),
+    /** smartphone BUTTON PAD diagnostics (QA: apply a pad command) */
+    pad: {
+      status: () => remoteCmds.status,
+      room: () => remoteCmds.room,
+      /** fire a pad command straight into the pipeline (no network) */
+      apply: (type: string, on?: boolean) => {
+        applyRemoteCmd({ id: -1, room: remoteCmds.room, t: Date.now(), type: type as RemoteCmd['type'], on })
+        return true
+      },
+    },
     /** smartphone remote link diagnostics */
     remote: {
       status: () => remoteHands.status,
@@ -585,6 +685,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     dispose: () => {
       cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', onVis)
+      remoteCmds.stop()
       remoteHands.stop()
       handTracker.stop()
       swim.disable()
