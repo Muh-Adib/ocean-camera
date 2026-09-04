@@ -29,10 +29,14 @@ function sanitizeView(raw: unknown): RemoteCmdView | undefined {
   const yaw = num(v.yaw, -180, 180)
   const pitch = num(v.pitch, -89, 89)
   const dolly = num(v.dolly, -20, 20)
+  const moveX = num(v.moveX, -20, 20)
+  const moveY = num(v.moveY, -20, 20)
   const speed = num(v.speed, 1, 30)
   if (yaw !== undefined) out.yaw = Math.round(yaw * 10) / 10
   if (pitch !== undefined) out.pitch = Math.round(pitch * 10) / 10
   if (dolly !== undefined) out.dolly = Math.round(dolly * 100) / 100
+  if (moveX !== undefined) out.moveX = Math.round(moveX * 100) / 100
+  if (moveY !== undefined) out.moveY = Math.round(moveY * 100) / 100
   if (speed !== undefined) out.speed = Math.round(speed * 10) / 10
   if (typeof v.auto === 'boolean') out.auto = v.auto
   if (typeof v.reset === 'boolean') out.reset = v.reset
@@ -68,18 +72,22 @@ export async function POST(req: Request) {
   // studio toggle-state echo
   if (b.host && typeof b.host === 'object') {
     const h = b.host as Record<string, unknown>
-    let chain: { yaw: number; pitch: number; dolly: number; auto: boolean } | undefined
+    let chain: { yaw: number; pitch: number; dolly: number; auto: boolean; moveX?: number; moveY?: number } | undefined
     if (h.chain && typeof h.chain === 'object') {
       const c = h.chain as Record<string, unknown>
       const yaw = num(c.yaw, -180, 180)
       const pitch = num(c.pitch, -89, 89)
       const dolly = num(c.dolly, -20, 20)
+      const moveX = num(c.moveX, -20, 20)
+      const moveY = num(c.moveY, -20, 20)
       if (yaw !== undefined && pitch !== undefined && dolly !== undefined) {
         chain = {
           yaw: Math.round(yaw * 10) / 10,
           pitch: Math.round(pitch * 10) / 10,
           dolly: Math.round(dolly * 100) / 100,
           auto: c.auto === true,
+          ...(moveX !== undefined ? { moveX: Math.round(moveX * 100) / 100 } : {}),
+          ...(moveY !== undefined ? { moveY: Math.round(moveY * 100) / 100 } : {}),
         }
       }
     }

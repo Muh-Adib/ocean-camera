@@ -362,8 +362,14 @@ export class ProjectionEditorUI {
     body.appendChild(this.sliderRow('PITCH °', chain.pitchT, -chain.pitchRange, chain.pitchRange, 1, (v) => {
       this.queueChainView({ pitch: v, auto: false })
     }))
-    body.appendChild(this.sliderRow('DOLLY M', chain.dollyT, -chain.dollyRange, chain.dollyRange, 0.5, (v) => {
+    body.appendChild(this.sliderRow('DOLLY Z M', chain.dollyT, -chain.dollyRange, chain.dollyRange, 0.5, (v) => {
       this.queueChainView({ dolly: v, auto: false })
+    }))
+    body.appendChild(this.sliderRow('MOVE X M', chain.moveXT, -chain.moveRange, chain.moveRange, 0.5, (v) => {
+      this.queueChainView({ moveX: v, auto: false })
+    }))
+    body.appendChild(this.sliderRow('LIFT Y M', chain.moveYT, -chain.moveRange, chain.moveRange, 0.5, (v) => {
+      this.queueChainView({ moveY: v, auto: false })
     }))
 
     // viewpoint chips across the 270° linked sweep
@@ -387,6 +393,7 @@ export class ProjectionEditorUI {
 
     body.appendChild(this.hint(
       'Every output camera moves as ONE motion around the center camera — the surface whose slice sits in the middle of the canvas. ' +
+      'ORBIT = yaw/pitch, MOVE X = strafe along the center camera\u2019s right, LIFT Y = raise/lower the whole chain (naik-turun), DOLLY Z = toward/away. ' +
       'Relative angles never change, so span-locked walls stay edge-to-edge: the picture sweeps 270° without a single break. ' +
       'The smartphone remote (REMOTE QR → VIEW tab) drives the same chain in real time.',
     ))
@@ -398,8 +405,9 @@ export class ProjectionEditorUI {
     if (!this.chainReadout) return
     const chain = this.pm.chain
     const sign = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}°`
+    const m = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`
     this.chainReadout.yaw.textContent =
-      `YAW ${sign(chain.yaw)} · PITCH ${sign(chain.pitch)} · DOLLY ${sign(chain.dolly)}${chain.auto ? ' · AUTO' : ''}`
+      `YAW ${sign(chain.yaw)} · PITCH ${sign(chain.pitch)} · XYZ ${m(chain.moveX)} ${m(chain.moveY)} ${m(chain.dolly)}${chain.auto ? ' · AUTO' : ''}`
     this.chainReadout.center.textContent = chain.centerName
       ? `pivot: ${chain.centerName}`
       : 'pivot: — (no surfaces)'

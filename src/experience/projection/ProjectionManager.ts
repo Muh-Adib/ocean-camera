@@ -82,6 +82,8 @@ export class ProjectionManager {
   private channel: BroadcastChannel | null = null
   private overlay: HTMLElement | null = null
   private overlayTimer = 0
+  /** small auto-QR badge on the output page (visible until a phone connects) */
+  private qrBadge: { dispose: () => void } | null = null
   private broadcastTimer = 0
   private lastBroadcastAt = 0
   /** /output tab adopted a live studio push (overlay shows LIVE LINK) */
@@ -399,6 +401,15 @@ export class ProjectionManager {
       </div>`
     this.deps.container.appendChild(el)
     this.overlay = el
+
+    // the small auto-QR: shows while NO phone is connected, hides on
+    // connection, comes back when the phone leaves (sizes with vmin)
+    if (!this.qrBadge) {
+      void import('../remote/RemoteQrBadge').then((m) => {
+        if (!this.qrBadge && !this.overlay) return
+        this.qrBadge = m.mountRemoteQrBadge(this.deps.container)
+      }).catch(() => { /* badge is a convenience — the REMOTE QR button remains */ })
+    }
 
     el.querySelector('#pm-out-session')?.addEventListener('change', (e) => {
       const id = (e.target as HTMLSelectElement).value
@@ -1055,6 +1066,8 @@ export class ProjectionManager {
     this.channel = null
     this.overlay?.remove()
     this.overlay = null
+    this.qrBadge?.dispose()
+    this.qrBadge = null
     // the QR modal lives on <body>, outside this subtree — close it too
     void import('../remote/RemoteQR').then((m) => m.closeRemoteQR()).catch(() => { /* not open */ })
     this.cameras.dispose()

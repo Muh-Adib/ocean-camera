@@ -523,3 +523,30 @@ Stage Summary:
 - The QR remote now primarily controls the CAMERA/SURFACE CHAIN: one motion, pivot at the center camera, 270° of linked viewpoints that interpolate continuously — walls stay seam-joined while the view sweeps
 - Same rig driven from the studio CHAIN tab; both apply at render time so no saved data is ever bent by a show-time move
 - pano-360 completes the span-locked preset family for full-ring rooms
+
+---
+Task ID: 20
+Agent: main (Super Z)
+Task: Remote VIEW gains MOVE XYZ + naik-turun kamera (pivot = center screen), and the /output auto-QR badge (small, vmin-sized, shows until a phone connects)
+
+Work Log:
+- ChainRig: new moveX/moveY axes (eased + targets, ±10 m moveRange) completing MOVE XYZ (dolly stays Z); applyView accepts moveX/moveY — applied BEFORE the auto-orbit early-return so translation keeps working while the sweep owns yaw; reset zeroes all five targets; pose now carries mx/my + `right` vector (center camera's horizontal right = (-fz,0,fx), always well-defined up to ±89°); transformedCenter includes the move; qaState exposes moveX/moveY/target/range.move
+- CameraManager.sync: after the orbit + dolly, adds ONE shared translation to every camera — right·mx + worldUp·my — so the chain strafes/rises as a rigid group: relative angles and span-locked wall edges stay exactly met, nothing patah
+- Relay: RemoteCmdView + host.chain gain moveX/moveY (sanitizeView clamps ±20, rounds 0.01; host parse passes them through); main.ts publishHostState echoes moveXT/moveYT so the phone sliders stay honest
+- RemotePhoneView rebuilt: two pads side by side — ORBIT (yaw/pitch, unchanged) + MOVE pad (drag right/left = strafe X, drag up/down = naik/turun Y, 0.034 m/px relative grab, ~18 Hz) — plus a 2×2 slider grid (YAW | PITCH / DOLLY Z | LIFT Y), two-line readout (YAW/PITCH + MOVE X·Y·Z), viewpoint chips, AUTO ORBIT + RESET; host poll syncs moveX/moveY; stop() releases both pads
+- Studio CHAIN tab: DOLLY Z relabel + new MOVE X M / LIFT Y M sliders (queued through the 120 ms trailing push like the rest), readout now shows `YAW · PITCH · XYZ x y z`, hint text explains the three translation axes
+- New RemoteQrBadge (experience/remote/): fixed bottom-right QR badge mounted on /output only — sizes with clamp(64px, 11vmin, 112px) + vmin label so it follows the screen size, renders the /remote?room= QR once via pickRemoteBase() (LAN-aware, refactored out of RemoteQR), polls hands live OR padLive every 1.5 s: shows while NO phone is connected, fades out on connection, comes back when the phone leaves, stays hidden while the full modal is open; tap opens openRemoteQR; disposed with the projection
+- RemoteQR refactor: exported pickRemoteBases/isLocalBase/pickRemoteBase (no duplicate LAN logic); README remote section rewritten (auto-QR + MOVE XYZ + LIFT Y)
+
+Verified headless (agent-browser + curl fake phone):
+- Badge: visible at boot (opacity 1, QR data-URL loaded, 105×80 @ 720p, 14 px from the corner) → pad ping → fades (0.86 mid-transition) → gone; 6 s later (heartbeat expired) back to 1 on its own; tap opens the modal with the right URL and the badge hides; ESC closes → badge returns on the next poll
+- Relay: POST view {moveX:2.5, moveY:-1.2, dolly:-2} → sanitized intact; studio chain eases toward it (0.5→1.6→…, RAF-throttled in headless, smooth by design) and the STORED camera stays [0,2.2,0]/yaw 0 — render-time-only transform confirmed
+- Studio CHAIN tab: all five sliders present; MOVE X slider → target.moveX −3 + relay push {moveX:-3, auto:false}; readout shows XYZ live; RESET zeroes everything
+- Phone VIEW: ORBIT + MOVE pads + 4 sliders render; synthetic drag on the MOVE pad (right + up) streams {moveX:3.13, moveY:3.23} = exactly dx·0.034 / dy·0.034; padLive stays true (badge logic consistent)
+- Multi-page: one move cmd → /output tab chain engaged, easing to (−1.5, 2) while targets land everywhere — one motion on every screen; zero page errors on studio, /output and /remote
+- Host echo now carries moveX/moveY; tsc clean (only pre-existing examples//skills/ errors); eslint clean on all changed files
+- Screenshots: download/qa-output-qr-badge.png, qa-phone-view-move.png, qa-studio-chain-move.png
+
+Stage Summary:
+- The QR remote now moves the camera chain through space, not just around it: ORBIT (yaw/pitch) + MOVE XYZ (strafe X, naik-turun Y, dolly Z) all pivot on the center camera and stay one synchronized motion on the studio and every output screen
+- The output screen sells itself: a small self-hiding QR waits in the corner until a phone joins, then vanishes until it's needed again

@@ -367,6 +367,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
             yaw: Math.round(chain.yawT * 10) / 10,
             pitch: Math.round(chain.pitchT * 10) / 10,
             dolly: Math.round(chain.dollyT * 100) / 100,
+            moveX: Math.round(chain.moveXT * 100) / 100,
+            moveY: Math.round(chain.moveYT * 100) / 100,
             auto: chain.auto,
           },
         },

@@ -27,6 +27,30 @@ export function remotePageUrl(base: string): string {
   return `${base.replace(/\/$/, '')}/remote?room=${encodeURIComponent(ROOM)}`
 }
 
+/** candidate origins the phone can reach: this origin first, then LAN addresses */
+export async function pickRemoteBases(): Promise<string[]> {
+  const candidates: string[] = [window.location.origin]
+  try {
+    const res = await fetch('/api/remote/host')
+    if (res.ok) {
+      const info = await res.json() as { lan?: string[] }
+      for (const lan of info.lan ?? []) if (!candidates.includes(lan)) candidates.push(lan)
+    }
+  } catch { /* host endpoint unavailable — origin alone is fine */ }
+  return candidates
+}
+
+/** localhost targets are useless on a phone — detect them */
+export function isLocalBase(u: string): boolean {
+  return /^(http:\/\/(localhost|127\.0\.0\.1)|https:\/\/(localhost|127\.0\.0\.1))/.test(u)
+}
+
+/** the preferred QR target: a LAN URL the phone can actually open */
+export async function pickRemoteBase(): Promise<string> {
+  const candidates = await pickRemoteBases()
+  return candidates.find((c) => !isLocalBase(c)) ?? candidates[0]
+}
+
 export async function openRemoteQR(parent: HTMLElement) {
   if (modal) { closeRemoteQR(); return }
 
@@ -96,21 +120,8 @@ export async function openRemoteQR(parent: HTMLElement) {
   setStatus(false, 0)
 
   // ---- candidate URLs: this origin first, then LAN addresses ----
-  const candidates: string[] = []
-  const here = window.location.origin
-  candidates.push(here)
-
-  try {
-    const res = await fetch('/api/remote/host')
-    if (res.ok) {
-      const info = await res.json() as { lan?: string[] }
-      for (const lan of info.lan ?? []) if (!candidates.includes(lan)) candidates.push(lan)
-    }
-  } catch { /* host endpoint unavailable — origin alone is fine */ }
-
-  // localhost as the QR target is useless on a phone — prefer a LAN URL
-  const isLocal = (u: string) => /^(http:\/\/(localhost|127\.0\.0\.1)|https:\/\/(localhost|127\.0\.0\.1))/.test(u)
-  const phoneable = candidates.filter((c) => !isLocal(c))
+  const candidates = await pickRemoteBases()
+  const phoneable = candidates.filter((c) => !isLocalBase(c))
   const pickDefault = phoneable[0] ?? candidates[0]
 
   const renderQr = async (base: string) => {
@@ -128,7 +139,7 @@ export async function openRemoteQR(parent: HTMLElement) {
   }
 
   for (const base of candidates) {
-    const label = isLocal(base) ? `${base} (this computer)` : base
+    const label = isLocalBase(base) ? `${base} (this computer)` : base
     const chip = document.createElement('button')
     chip.type = 'button'
     chip.className = 'pm-btn pm-btn-sm'

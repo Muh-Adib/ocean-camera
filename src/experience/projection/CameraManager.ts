@@ -7,9 +7,11 @@
 //
 // CHAIN RIG: an optional ChainRig pose is applied at READ time —
 // every camera orbits the pivot (the center camera) with the same
-// yaw/pitch/dolly offsets, i.e. the whole chain moves as ONE
-// motion. The stored surface data is never touched, so rig moves
-// stay out of autosaves, sessions and undo history.
+// yaw/pitch/dolly offsets AND translates by the same MOVE XYZ offset
+// (strafe along the center camera's right, world-up lift, dolly along
+// its view), i.e. the whole chain moves as ONE motion. The stored
+// surface data is never touched, so rig moves stay out of autosaves,
+// sessions and undo history.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { ProjectionSurface } from './ProjectionTypes'
@@ -26,6 +28,7 @@ export class CameraManager {
   rig: ChainRig | null = null
   private readonly tmpPos = new THREE.Vector3()
   private readonly tmpAxis = new THREE.Vector3(0, 1, 0)
+  private readonly tmpUp = new THREE.Vector3(0, 1, 0)
 
   constructor(private scene: THREE.Scene) {}
 
@@ -58,10 +61,15 @@ export class CameraManager {
     if (rigPose?.active) {
       effYaw = c.yaw + rigPose.yaw
       effPitch = Math.max(-89, Math.min(89, c.pitch + rigPose.pitch))
-      // orbit the stored position around the pivot (center camera), then dolly
+      // orbit the stored position around the pivot (center camera), then
+      // MOVE XYZ: dolly along the rotated view + one SHARED translation
+      // (strafe along the center camera's right + world-up lift) applied
+      // identically to every camera — relative angles never change
       this.tmpPos.set(ex, ey, ez).sub(rigPose.pivot)
       this.tmpPos.applyAxisAngle(this.tmpAxis, rigPose.yaw * DEG).add(rigPose.pivot)
       this.tmpPos.addScaledVector(rigPose.forward, rigPose.dolly)
+      this.tmpPos.addScaledVector(rigPose.right, rigPose.mx)
+      this.tmpPos.addScaledVector(this.tmpUp, rigPose.my)
       ex = this.tmpPos.x; ey = this.tmpPos.y; ez = this.tmpPos.z
     }
 

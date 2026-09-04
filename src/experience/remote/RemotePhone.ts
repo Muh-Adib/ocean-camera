@@ -426,7 +426,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
       pad.stop()
       setStatus('VIEW PAD READY', '#7fd4ee')
       stage.style.background = 'transparent'
-      legend.innerHTML = 'one motion — every output camera follows · pivot = center camera · 270° linked sweep'
+      legend.innerHTML = 'ORBIT sweeps · MOVE strafes + naik/turun · DOLLY/LIFT sliders · pivot = center camera · 270° linked, never breaks'
       view.start()
     } else {
       pad.stop()

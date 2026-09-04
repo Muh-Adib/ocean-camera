@@ -26,6 +26,10 @@ export interface RemoteCmdView {
   yaw?: number
   pitch?: number
   dolly?: number
+  /** MOVE X — strafe the chain along the center camera's right (meters) */
+  moveX?: number
+  /** MOVE Y — raise / lower the chain (naik-turun kamera, meters) */
+  moveY?: number
   auto?: boolean
   speed?: number
   reset?: boolean
@@ -52,7 +56,7 @@ export interface RemoteHostState {
   /** studio sound muted */
   muted: boolean
   /** camera-chain targets the host is currently showing (VIEW pad sync) */
-  chain?: { yaw: number; pitch: number; dolly: number; auto: boolean }
+  chain?: { yaw: number; pitch: number; dolly: number; auto: boolean; moveX?: number; moveY?: number }
   at: number
 }
 
@@ -108,7 +112,7 @@ class RemoteCmdStore {
   /** studio echoed its toggle state — fan out so the pad badges update */
   setHost(
     room: string,
-    partial: { swim?: boolean; muted?: boolean; chain?: { yaw: number; pitch: number; dolly: number; auto: boolean } },
+    partial: { swim?: boolean; muted?: boolean; chain?: { yaw: number; pitch: number; dolly: number; auto: boolean; moveX?: number; moveY?: number } },
   ): RemoteHostState {
     const r = this.room(room)
     const prev = r.host ?? { swim: false, muted: false, at: 0 }
