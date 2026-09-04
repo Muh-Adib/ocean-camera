@@ -13,11 +13,23 @@
 export type RemoteCmdType =
   | 'feed' | 'burst' | 'shark' | 'turtle' | 'ray' | 'pulse' | 'bubbles' | 'impulse'
   | 'swim' | 'sound' | 'boost'
+  | 'view'
 
 export const REMOTE_CMD_TYPES: ReadonlySet<string> = new Set([
   'feed', 'burst', 'shark', 'turtle', 'ray', 'pulse', 'bubbles', 'impulse',
   'swim', 'sound', 'boost',
+  'view',
 ])
+
+/** camera-chain move (the VIEW pad / studio CHAIN tab) — all optional */
+export interface RemoteCmdView {
+  yaw?: number
+  pitch?: number
+  dolly?: number
+  auto?: boolean
+  speed?: number
+  reset?: boolean
+}
 
 /** one pad action, already validated */
 export interface RemoteCmd {
@@ -29,6 +41,8 @@ export interface RemoteCmd {
   type: RemoteCmdType
   /** press/release for hold buttons (boost); undefined = one-shot */
   on?: boolean
+  /** camera-chain payload for type 'view' */
+  view?: RemoteCmdView
 }
 
 /** what the studio publishes so the pad can badge the toggles */
@@ -37,6 +51,8 @@ export interface RemoteHostState {
   swim: boolean
   /** studio sound muted */
   muted: boolean
+  /** camera-chain targets the host is currently showing (VIEW pad sync) */
+  chain?: { yaw: number; pitch: number; dolly: number; auto: boolean }
   at: number
 }
 
@@ -77,9 +93,9 @@ class RemoteCmdStore {
   }
 
   /** the phone fired a button — record + fan out to every subscriber */
-  push(type: RemoteCmdType, room: string, on?: boolean): RemoteCmd {
+  push(type: RemoteCmdType, room: string, on?: boolean, view?: RemoteCmdView): RemoteCmd {
     const r = this.room(room)
-    const cmd: RemoteCmd = { id: ++r.nextId, room, t: Date.now(), type, on }
+    const cmd: RemoteCmd = { id: ++r.nextId, room, t: Date.now(), type, ...(on === undefined ? {} : { on }), ...(view ? { view } : {}) }
     r.cmds.push(cmd)
     if (r.cmds.length > MAX_CMDS) r.cmds.splice(0, r.cmds.length - MAX_CMDS)
     r.padSeenAt = Date.now()
@@ -90,12 +106,20 @@ class RemoteCmdStore {
   }
 
   /** studio echoed its toggle state — fan out so the pad badges update */
-  setHost(room: string, partial: { swim?: boolean; muted?: boolean }): RemoteHostState {
+  setHost(
+    room: string,
+    partial: { swim?: boolean; muted?: boolean; chain?: { yaw: number; pitch: number; dolly: number; auto: boolean } },
+  ): RemoteHostState {
     const r = this.room(room)
     const prev = r.host ?? { swim: false, muted: false, at: 0 }
     r.host = {
       swim: typeof partial.swim === 'boolean' ? partial.swim : prev.swim,
       muted: typeof partial.muted === 'boolean' ? partial.muted : prev.muted,
+      ...(partial.chain
+        ? { chain: partial.chain }
+        : prev.chain
+          ? { chain: prev.chain }
+          : {}),
       at: Date.now(),
     }
     r.listeners.forEach((l) => {

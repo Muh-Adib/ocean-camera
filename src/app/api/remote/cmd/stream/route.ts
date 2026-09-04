@@ -34,8 +34,14 @@ export async function GET(req: Request) {
       const send = (event: string, data: unknown) => push(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
 
       // catch-up: replay very recent pad presses so a page opened in
-      // the middle of a show still catches the last action
-      for (const cmd of remoteCmdStore.getCmds(room, REPLAY_MS)) send('cmd', cmd)
+      // the middle of a show still catches the last action. Continuous
+      // 'view' (camera-chain) drags are only replayed while fresh — a
+      // page opened later must not lurch to a stale rig target.
+      const now = Date.now()
+      for (const cmd of remoteCmdStore.getCmds(room, REPLAY_MS)) {
+        if (cmd.type === 'view' && now - cmd.t > 1500) continue
+        send('cmd', cmd)
+      }
       const host = remoteCmdStore.getHost(room)
       if (host) send('host', host)
       send('hello', { room, at: Date.now(), padLive: remoteCmdStore.padLive(room) })

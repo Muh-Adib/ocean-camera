@@ -4,9 +4,16 @@
 // see layer 0 (the ocean); editor helpers live on layer 1 so they
 // never leak into a projection. CameraHelper frustums visualize
 // where each slice is looking.
+//
+// CHAIN RIG: an optional ChainRig pose is applied at READ time —
+// every camera orbits the pivot (the center camera) with the same
+// yaw/pitch/dolly offsets, i.e. the whole chain moves as ONE
+// motion. The stored surface data is never touched, so rig moves
+// stay out of autosaves, sessions and undo history.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { ProjectionSurface } from './ProjectionTypes'
+import type { ChainRig } from './ChainRig'
 
 const DEG = Math.PI / 180
 
@@ -15,6 +22,10 @@ export type SnapView = 'front' | 'back' | 'left' | 'right' | 'floor' | 'ceiling'
 export class CameraManager {
   private cameras = new Map<string, THREE.PerspectiveCamera>()
   private helpers = new Map<string, THREE.CameraHelper>()
+  /** when set, every sync renders the chained (rigged) pose */
+  rig: ChainRig | null = null
+  private readonly tmpPos = new THREE.Vector3()
+  private readonly tmpAxis = new THREE.Vector3(0, 1, 0)
 
   constructor(private scene: THREE.Scene) {}
 
@@ -36,11 +47,31 @@ export class CameraManager {
       this.helpers.set(s.id, helper)
     }
     const c = s.camera
-    const posChanged = !cam.position.equals(new THREE.Vector3(...c.position))
-    const rotChanged = cam.rotation.x !== c.pitch * DEG || cam.rotation.y !== c.yaw * DEG
+
+    // ---- effective pose = stored pose (+ chain-rig motion, render-time only)
+    let effYaw = c.yaw
+    let effPitch = c.pitch
+    let ex = c.position[0]
+    let ey = c.position[1]
+    let ez = c.position[2]
+    const rigPose = this.rig?.pose
+    if (rigPose?.active) {
+      effYaw = c.yaw + rigPose.yaw
+      effPitch = Math.max(-89, Math.min(89, c.pitch + rigPose.pitch))
+      // orbit the stored position around the pivot (center camera), then dolly
+      this.tmpPos.set(ex, ey, ez).sub(rigPose.pivot)
+      this.tmpPos.applyAxisAngle(this.tmpAxis, rigPose.yaw * DEG).add(rigPose.pivot)
+      this.tmpPos.addScaledVector(rigPose.forward, rigPose.dolly)
+      ex = this.tmpPos.x; ey = this.tmpPos.y; ez = this.tmpPos.z
+    }
+
+    const posChanged = !cam.position.equals(new THREE.Vector3(ex, ey, ez))
+    const rotChanged = cam.rotation.x !== effPitch * DEG || cam.rotation.y !== effYaw * DEG
 
     // frustum: span-lock derives BOTH fov and aspect from the world angles
     // this surface covers, so neighbouring walls' edges meet exactly.
+    // (spans are RELATIVE — the rig rotates every camera equally, so the
+    // linked edges stay met while the chain moves; nothing breaks.)
     // unlocked keeps the classic behaviour: vertical fov + output-rect aspect.
     const locked = c.span?.lock === true
     const spanH = Math.max(4, c.span?.h ?? c.fov)
@@ -52,10 +83,10 @@ export class CameraManager {
     const projChanged = cam.fov !== wantFov || cam.near !== c.near || cam.far !== c.far ||
       Math.abs(cam.aspect - wantAspect) > 1e-4
 
-    if (posChanged) cam.position.set(c.position[0], c.position[1], c.position[2])
+    if (posChanged) cam.position.set(ex, ey, ez)
     if (rotChanged) {
       cam.rotation.order = 'YXZ'
-      cam.rotation.set(c.pitch * DEG, c.yaw * DEG, 0)
+      cam.rotation.set(effPitch * DEG, effYaw * DEG, 0)
     }
     if (projChanged) {
       cam.fov = wantFov

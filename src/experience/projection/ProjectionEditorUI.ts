@@ -51,7 +51,7 @@ export class ProjectionEditorUI {
           <button id="pm-mode-preview" class="pm-btn pm-btn-active">PREVIEW</button>
           <button id="pm-mode-output" class="pm-btn">OUTPUT</button>
           <button id="pm-open-output" class="pm-btn" title="Open the live /output page — it mirrors every edit in real time (works across browsers & machines)">OPEN OUTPUT ↗</button>
-          <button id="pm-remote-qr" class="pm-btn" title="Show a QR code — a smartphone scans it and controls the ocean with its camera (both hands) or the button pad — real time">REMOTE QR</button>
+          <button id="pm-remote-qr" class="pm-btn" title="Show a QR code — a smartphone scans it and controls the ocean with its camera (both hands), the button pad, or the VIEW pad that moves the camera chain as one motion — real time">REMOTE QR</button>
           <button id="pm-fullscreen" class="pm-btn">⛶ FULLSCREEN</button>
           <button id="pm-exit" class="pm-btn pm-btn-danger">EXIT STUDIO</button>
         </div>
@@ -80,6 +80,7 @@ export class ProjectionEditorUI {
           <button data-tab="output" class="pm-tab pm-tab-active">OUTPUT</button>
           <button data-tab="warp" class="pm-tab">WARP</button>
           <button data-tab="camera" class="pm-tab">CAMERA</button>
+          <button data-tab="chain" class="pm-tab" title="Camera chain — move every output camera as one motion around the center camera">CHAIN</button>
           <button data-tab="blend" class="pm-tab">BLEND</button>
           <button data-tab="calibration" class="pm-tab">CALIBRATION</button>
           <button data-tab="project" class="pm-tab">PROJECT</button>
@@ -224,6 +225,7 @@ export class ProjectionEditorUI {
     this.tabBody.querySelectorAll('.pm-tabpane').forEach((p) => p.remove())
     if (tab === 'warp') this.buildWarpPane()
     else if (tab === 'camera') this.buildCameraPane()
+    else if (tab === 'chain') this.buildChainPane()
     else if (tab === 'blend') this.buildBlendPane()
     else if (tab === 'calibration') this.buildCalibrationPane()
     else if (tab === 'project') this.buildProjectPane()
@@ -319,6 +321,88 @@ export class ProjectionEditorUI {
       cell.dataset.surfaceId = s.id
       this.camGrid.appendChild(cell)
     }
+  }
+
+  // ------------------------------------------------------------ CAMERA CHAIN
+  /** queued view push — sliders fire fast, the relay gets a smooth stream */
+  private chainQueued: Record<string, number | boolean> | null = null
+  private chainQueueTimer = 0
+
+  private queueChainView(v: Record<string, number | boolean>) {
+    this.chainQueued = { ...(this.chainQueued ?? {}), ...v }
+    if (this.chainQueueTimer) return
+    this.chainQueueTimer = window.setTimeout(() => {
+      this.chainQueueTimer = 0
+      const payload = this.chainQueued
+      this.chainQueued = null
+      if (payload) this.pm.pushChainView(payload)
+    }, 120)
+  }
+
+  private buildChainPane() {
+    const { body } = this.pane('CAMERA CHAIN — ONE MOTION, PIVOT = CENTER CAMERA')
+    const chain = this.pm.chain
+
+    // live readout (kept fresh by tick())
+    const readout = document.createElement('div')
+    readout.className = 'pm-row'
+    readout.style.justifyContent = 'space-between'
+    const yawSpan = document.createElement('span')
+    yawSpan.className = 'pm-slider-val'
+    const centerSpan = document.createElement('span')
+    centerSpan.className = 'pm-hint'
+    readout.append(yawSpan, centerSpan)
+    body.appendChild(readout)
+    this.chainReadout = { yaw: yawSpan, center: centerSpan }
+    this.paintChainReadout()
+
+    body.appendChild(this.sliderRow('YAW °', chain.yawT, -chain.range, chain.range, 1, (v) => {
+      this.queueChainView({ yaw: v, auto: false })
+    }))
+    body.appendChild(this.sliderRow('PITCH °', chain.pitchT, -chain.pitchRange, chain.pitchRange, 1, (v) => {
+      this.queueChainView({ pitch: v, auto: false })
+    }))
+    body.appendChild(this.sliderRow('DOLLY M', chain.dollyT, -chain.dollyRange, chain.dollyRange, 0.5, (v) => {
+      this.queueChainView({ dolly: v, auto: false })
+    }))
+
+    // viewpoint chips across the 270° linked sweep
+    const chips = document.createElement('div')
+    chips.className = 'pm-btn-row pm-btn-row-wrap'
+    chips.appendChild(this.labelEl('270° LINKED SWEEP'))
+    for (const deg of [-135, -90, -45, 0, 45, 90, 135]) {
+      chips.appendChild(this.btn(deg > 0 ? `+${deg}°` : `${deg}°`, () => this.pm.pushChainView({ yaw: deg, auto: false }), 'pm-btn-sm'))
+    }
+    body.appendChild(chips)
+
+    const actions = document.createElement('div')
+    actions.className = 'pm-btn-row'
+    const autoBtn = this.btn(chain.auto ? 'AUTO ORBIT ● ON' : 'AUTO ORBIT', () => {
+      this.pm.pushChainView({ auto: !chain.auto })
+      window.setTimeout(() => { if (this.activeTab === 'chain') this.buildChainPane() }, 60)
+    }, 'pm-btn-sm' + (chain.auto ? ' pm-btn-active' : ''))
+    actions.appendChild(autoBtn)
+    actions.appendChild(this.btn('RESET', () => this.pm.pushChainView({ reset: true }), 'pm-btn-sm'))
+    body.appendChild(actions)
+
+    body.appendChild(this.hint(
+      'Every output camera moves as ONE motion around the center camera — the surface whose slice sits in the middle of the canvas. ' +
+      'Relative angles never change, so span-locked walls stay edge-to-edge: the picture sweeps 270° without a single break. ' +
+      'The smartphone remote (REMOTE QR → VIEW tab) drives the same chain in real time.',
+    ))
+  }
+
+  private chainReadout: { yaw: HTMLElement; center: HTMLElement } | null = null
+
+  private paintChainReadout() {
+    if (!this.chainReadout) return
+    const chain = this.pm.chain
+    const sign = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}°`
+    this.chainReadout.yaw.textContent =
+      `YAW ${sign(chain.yaw)} · PITCH ${sign(chain.pitch)} · DOLLY ${sign(chain.dolly)}${chain.auto ? ' · AUTO' : ''}`
+    this.chainReadout.center.textContent = chain.centerName
+      ? `pivot: ${chain.centerName}`
+      : 'pivot: — (no surfaces)'
   }
 
   private buildBlendPane() {
@@ -1048,6 +1132,8 @@ export class ProjectionEditorUI {
         if (s?.enabled) this.pm.renderCameraPreview(s, c as HTMLCanvasElement)
       })
     }
+    // chain readout in the CHAIN tab
+    if (this.activeTab === 'chain') this.paintChainReadout()
   }
 
   private pokeChrome() {

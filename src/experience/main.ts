@@ -336,6 +336,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       case 'boost':
         if (!outputOnly) swim.forwardBoost = cmd.on ? 1 : 0
         break
+      case 'view': {
+        // CAMERA CHAIN — moves the output cameras as ONE motion around the
+        // center camera. Every page renders surfaces, so every page applies
+        // it (studio, /output mirrors, session links — no gating).
+        projection.chain.applyView(cmd.view)
+        // the studio owns the host echo; throttle so 18 Hz drag streams
+        // don't flood the relay (trailing publish keeps the pad honest)
+        if (!outputOnly) publishChainStateSoon()
+        break
+      }
     }
   }
   remoteCmds.onCmd = applyRemoteCmd
@@ -344,12 +354,35 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
    *  with the real thing (phone polls /api/remote/cmd) */
   function publishHostState() {
     if (outputOnly) return
+    const chain = projection.chain
     void fetch('/api/remote/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ room: remoteCmds.room, host: { swim: swim.active, muted: audio.isMuted } }),
+      body: JSON.stringify({
+        room: remoteCmds.room,
+        host: {
+          swim: swim.active,
+          muted: audio.isMuted,
+          chain: {
+            yaw: Math.round(chain.yawT * 10) / 10,
+            pitch: Math.round(chain.pitchT * 10) / 10,
+            dolly: Math.round(chain.dollyT * 100) / 100,
+            auto: chain.auto,
+          },
+        },
+      }),
       keepalive: true,
     }).catch(() => { /* badges are cosmetic */ })
+  }
+
+  // view drags stream at ~18 Hz — echo the chain back at most ~2×/s
+  let chainPublishTimer = 0
+  function publishChainStateSoon() {
+    if (chainPublishTimer) return
+    chainPublishTimer = window.setTimeout(() => {
+      chainPublishTimer = 0
+      publishHostState()
+    }, 550)
   }
 
   // ---------------- feeding ----------------
@@ -527,7 +560,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     if (skipRender) {
       // sim above still ran — just don't draw this tick
     } else if (projection.active) {
-      projection.renderFrame()
+      projection.renderFrame(dt)
     } else {
       sceneMgr.render()
     }
@@ -591,6 +624,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         applyRemoteCmd({ id: -1, room: remoteCmds.room, t: Date.now(), type: type as RemoteCmd['type'], on })
         return true
       },
+    },
+    /** CAMERA CHAIN diagnostics (QA: drive the rig like the phone does) */
+    chain: {
+      state: () => projection.chain.qaState(),
+      /** apply a view payload exactly as a 'view' cmd would land */
+      view: (v: unknown) => {
+        applyRemoteCmd({ id: -1, room: remoteCmds.room, t: Date.now(), type: 'view', view: v as never })
+        return projection.chain.qaState()
+      },
+      reset: () => { projection.chain.reset(); return projection.chain.qaState() },
     },
     /** smartphone remote link diagnostics */
     remote: {

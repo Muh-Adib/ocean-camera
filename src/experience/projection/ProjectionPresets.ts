@@ -113,6 +113,24 @@ export const PRESETS: PresetDef[] = [
     ],
   },
   {
+    id: 'pano-360',
+    label: '360° Linked Ring',
+    hint: 'Four span-locked walls closing a full ring — the chain rig can sweep it endlessly with no seam',
+    build: (W, H) => {
+      // 92° spans on 90° centres → every joint overlaps 2° instead of gapping,
+      // exactly like the 180°/270° presets: adjacent frustum edges meet.
+      const yawPanels: [string, number][] = [
+        ['Front Wall', 0], ['Right Wall', -90], ['Back Wall', 180], ['Left Wall', 90],
+      ]
+      return yawPanels.map(([name, yaw], i) => finish(createSurface({
+        name,
+        output: rect(i / 4, 0.06, 1 / 4, 0.88, W, H),
+        camera: cam(yaw, 0, 92, { h: 92, v: 90 }),
+        gridResolution: RES,
+      })))
+    },
+  },
+  {
     id: 'immersive-room',
     label: 'Immersive Room',
     hint: 'Walls + floor + ceiling wrap the whole space',

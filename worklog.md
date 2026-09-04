@@ -493,3 +493,33 @@ Stage Summary:
 - The phone is now a full remote: CAMERA (both-hand gesture steering) or BUTTONS (one-thumb show control: feed/burst/shark/turtle/ray/pulse + joystick current + swim/sound toggles + hold-boost), both channels realtime over SSE to the studio AND every /output page
 - Multi-sender hands relay is now timestamp-gated — any number of phones/QA sources can coexist safely
 - Show-time safety unchanged: closing the pad stops timers/releases the stick; closing the phone calms the water and falls back to local tracking
+
+---
+Task ID: 19
+Agent: main (Super Z)
+Task: Phone VIEW remote moves the CAMERA CHAIN as one motion (pivot = center camera) + 270° linked viewpoint sweep with zero breaks + 360° Linked Ring preset
+
+Work Log:
+- New ChainRig (projection/ChainRig.ts): yaw/pitch/dolly targets with exponential ease + ping-pong AUTO sweep across the ±135° range (270° linked coverage); pivot = the enabled surface whose output slice center sits nearest the canvas center ("posisi tengah kamera"); forward vector of the rotated center camera drives the dolly; applyView({yaw,pitch,dolly,auto,speed,reset}) is idempotent; pose is exposed read-only
+- Render-time transform: CameraManager.sync now computes the effective pose (stored pose + rig orbit around pivot + dolly along the rotated center-camera forward) — the stored surface data is NEVER mutated, so autosaves, published sessions, portable links and undo history stay clean while the rig swings (verified: qaState storedCam yaw 0 / pos [0,2.2,0] while rig showed 48°)
+- Interconnection guarantee: every camera gets the SAME yaw/pitch offsets around the shared pivot, so relative angles — and therefore span-locked wall edges (62°/90°/92° spans) — stay exactly met during any motion; the picture sweeps 270° with no cut ("tidak patah tampilannya")
+- Relay: new 'view' cmd type with sanitized payload (yaw ±180, pitch ±89, dolly ±20, speed 1–30, auto/reset booleans) through the existing /api/remote/cmd store + SSE stream; stale 'view' cmds (>1.5 s) are excluded from stream replay so a freshly opened page never lurches to an old drag target; RemoteHostState now carries chain {yaw,pitch,dolly,auto} and the studio publishes it (trailing 550 ms throttle against 18 Hz drag streams)
+- main.ts: 'view' case applies on EVERY page (studio + all /output — each renders its own surfaces, no outputOnly gating); publishHostState extended with chain; QA hooks __ocean.chain.{state,view,reset}
+- Phone: new VIEW stage (remote/RemotePhoneView.ts) — orbit drag pad (relative grab, 0.28°/px yaw · 0.14°/px pitch, crosshair feedback, ~18 Hz stream), 7 viewpoint chips (−135…+135 every 45°), YAW/PITCH/DOLLY touch sliders with host-sync guard, AUTO ORBIT toggle + RESET; mode switch is now three-way CAMERA / BUTTONS / VIEW (pads stop the camera; leaving a pad stops its timers + stream)
+- Studio: new CHAIN dock tab — live readout (yaw/pitch/dolly + pivot surface, refreshed by the 140 ms tick), three sliders queued through a 120 ms trailing push (pm.pushChainView = apply locally + POST to the relay so every /output follows), 270° LINKED SWEEP chips, AUTO ORBIT, RESET; /output overlay info shows the live sweep (CHAIN AUTO -46°)
+- New preset 'pano-360' (360° Linked Ring): four span-locked walls (92° spans on 90° centres, 2° overlap joins) closing a full ring the rig can sweep endlessly — completes the linked family 180°/270°/360°
+- Dev-server note: the sandbox reaps tool-call descendants (and OOM killed chrome once) — scripts/start-dev-daemon.py double-forks `bun run dev` so it re-parents to init and survives; a restart was REQUIRED because the old process's globalThis remoteCmdStore singleton (created before the 'view' type existed) silently dropped the 4th push() argument
+
+Verified headless (agent-browser + curl fake phone):
+- Relay: POST view {yaw:120,dolly:-3} → stored intact; host echo carries chain; stale-view replay filter in place
+- Full loop: curl view {yaw:60,pitch:8,dolly:1.5} → studio targets set, rig eased (yaw 16→…→60), engaged, center='Main Screen', stored camera data untouched
+- pano-360: 4 walls span-locked h92/v90; rig yaw→90 with all stored yaws (0/−90/180/90) unchanged; center tie-break = Right Wall (two middle slices tie at 0.125 offset)
+- Phone pad: 3-way tabs render; VIEW tab chip '+90°' → cmd {'yaw':90} stored → studio target.yaw=90; readout + sliders sync from host chain echo (screenshot)
+- Multi-page: one view cmd → /output (yaw −29.3) and studio (yaw 45.5) both easing toward −120 simultaneously — one motion everywhere
+- AUTO ORBIT {auto:true,speed:14} → auto engaged, yaw sweeping; RESET glides targets home; zero console errors (only pre-existing three.js warnings)
+- Screenshots: download/qa-remote-view-pad.png, qa-studio-chain-tab.png, qa-output-chain.png; tsc clean (only pre-existing examples//skills/ errors); eslint clean on all changed files
+
+Stage Summary:
+- The QR remote now primarily controls the CAMERA/SURFACE CHAIN: one motion, pivot at the center camera, 270° of linked viewpoints that interpolate continuously — walls stay seam-joined while the view sweeps
+- Same rig driven from the studio CHAIN tab; both apply at render time so no saved data is ever bent by a show-time move
+- pano-360 completes the span-locked preset family for full-ring rooms

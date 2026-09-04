@@ -12,6 +12,7 @@ import gsap from 'gsap'
 import type { SceneManager } from '../core/SceneManager'
 import { SurfaceManager } from './SurfaceManager'
 import { CameraManager } from './CameraManager'
+import { ChainRig, type ChainViewPayload } from './ChainRig'
 import { BlendManager } from './BlendManager'
 import { CalibrationManager } from './CalibrationManager'
 import { OutputManager } from './OutputManager'
@@ -59,6 +60,13 @@ export class ProjectionManager {
 
   output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced' }
 
+  /**
+   * CAMERA CHAIN RIG — moves every output camera as ONE motion around the
+   * center camera (pivot). Driven by the phone remote (VIEW pad) and the
+   * studio CHAIN tab; applied at render time so saved data stays clean.
+   */
+  readonly chain = new ChainRig()
+
   readonly surfaces = new SurfaceManager()
   private cameras: CameraManager
   private blend = new BlendManager()
@@ -96,6 +104,7 @@ export class ProjectionManager {
 
   constructor(private deps: ProjectionDeps) {
     this.cameras = new CameraManager(deps.sceneMgr.scene)
+    this.cameras.rig = this.chain
     this.outputMgr = new OutputManager(this.blend, this.calib)
     this.outputMgr.maxTexSize = Math.min(deps.sceneMgr.renderer.capabilities.maxTextureSize || 4096, 8192)
     try { this.msaaOK = deps.sceneMgr.renderer.extensions.has('EXT_color_buffer_float') } catch { this.msaaOK = false }
@@ -382,7 +391,7 @@ export class ProjectionManager {
           </select>
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
-        <button class="pm-btn pm-btn-sm" id="pm-out-remote" title="Show a QR code — a smartphone controls the ocean with both hands or the button pad — real time">REMOTE QR</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-remote" title="Show a QR code — a smartphone controls the ocean with both hands, the button pad, or the VIEW pad that moves the camera chain as one motion — real time">REMOTE QR</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
         ${missingSession
           ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'
@@ -441,7 +450,10 @@ export class ProjectionManager {
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
       const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
       const live = this.liveLinked ? (this.liveFresh() ? 'LIVE LINK · ' : 'HOLDING · ') : ''
-      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      const chain = this.chain.engaged
+        ? ` · CHAIN ${this.chain.auto ? 'AUTO ' : ''}${this.chain.yaw >= 0 ? '+' : ''}${Math.round(this.chain.yaw)}°`
+        : ''
+      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}${chain}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
@@ -855,8 +867,10 @@ export class ProjectionManager {
 
   // ------------------------------------------------------------ render pipeline
   /** called from the main loop instead of sceneMgr.render() while active */
-  renderFrame() {
+  renderFrame(dt = 1 / 60) {
     const t0 = performance.now()
+    // chain rig first — the eased offsets feed every camera sync below
+    this.chain.update(dt, this.surfaces.surfaces, this.output.width, this.output.height)
     this.renderFrameInner()
     this.frameCost = performance.now() - t0
     if (this.output.quality === 'auto' && !this.qaFrozen) this.tickAutoQuality(this.frameCost)
@@ -984,6 +998,18 @@ export class ProjectionManager {
     }
   }
 
+  /** studio-side chain move: apply locally AND relay to every /output page */
+  pushChainView(v: ChainViewPayload) {
+    this.chain.applyView(v)
+    if (this.outputOnly) return   // mirrors never originate pushes
+    void fetch('/api/remote/cmd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: 'ocean', cmd: { type: 'view', view: v } }),
+      keepalive: true,
+    }).catch(() => { /* output tabs still follow via BroadcastChannel state */ })
+  }
+
   /** QA: force an immediate full push (BroadcastChannel + relay) */
   qaPush() { this.broadcastNow() }
 
@@ -1001,6 +1027,7 @@ export class ProjectionManager {
       selected: this.surfaces.selected?.name ?? null,
       output: { ...this.output },
       quality: this.qualityLabel(),
+      chain: this.chain.qaState(),
       frameCostMs: Math.round(this.frameCost * 10) / 10,
       rtPerSurface: this.surfaces.surfaces
         .filter((s) => s.enabled)
