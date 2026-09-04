@@ -33,6 +33,8 @@ import { PointerFallback } from './interaction/PointerFallback'
 import { SwimController } from './interaction/SwimController'
 import { RemoteHands } from './remote/RemoteHands'
 import { RemoteCmds, type RemoteCmd } from './remote/RemoteCmds'
+import { RemoteSocket } from './remote/RemoteSocket'
+import { emitRemotePresence } from './remote/remotePresenceBus'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
@@ -121,6 +123,20 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // (feed/burst/shark/… + swim/sound/boost) over a second SSE link
   const remoteCmds = new RemoteCmds()
   remoteCmds.start()
+  // TRUE WEBSOCKET relay (same port, /ws): 30 Hz push both ways —
+  // hands frames and camera-chain deltas arrive steadily instead of
+  // in HTTP/SSE bursts, which is what made the motion "patah-patah".
+  // The SSE/POST links above stay wired as the automatic fallback
+  // while the socket is down.
+  const remoteSocket = new RemoteSocket()
+  remoteSocket.onHands = (frame) => remoteHands.ingest(frame)
+  remoteSocket.onCmd = (cmd) => applyRemoteCmd(cmd as RemoteCmd)
+  remoteSocket.onView = (v) => applyRemoteCmd({
+    id: -1, room: remoteCmds.room, t: Date.now(), type: 'view', view: v as never,
+  })
+  remoteSocket.onSync = () => { if (!outputOnly) publishHostState() }
+  remoteSocket.onPresence = (p) => emitRemotePresence(p)
+  remoteSocket.start()
   const gestureEngine = new GestureEngine(sceneMgr.camera, field, {
     onSwipe: (_dir, strength, point, dirVec) => {
       bursts.trail(point, dirVec, strength)
@@ -340,9 +356,11 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         // CAMERA CHAIN — moves the output cameras as ONE motion around the
         // center camera. Every page renders surfaces, so every page applies
         // it (studio, /output mirrors, session links — no gating).
+        // Deltas (dyaw/dmx/…) nudge the page's OWN live target — no stale-
+        // value lurches; absolutes set targets directly (presets/sliders).
         projection.chain.applyView(cmd.view)
-        // the studio owns the host echo; throttle so 18 Hz drag streams
-        // don't flood the relay (trailing publish keeps the pad honest)
+        // the studio owns the host echo; throttle so 30 Hz drag streams
+        // don't flood the relay (trailing publish keeps clients honest)
         if (!outputOnly) publishChainStateSoon()
         break
       }
@@ -351,33 +369,33 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   remoteCmds.onCmd = applyRemoteCmd
 
   /** echo the studio's toggle state so the pad badges SWIM/SOUND
-   *  with the real thing (phone polls /api/remote/cmd) */
+   *  with the real thing (phone polls /api/remote/cmd) — also pushed
+   *  over the WebSocket relay when it is up */
   function publishHostState() {
     if (outputOnly) return
     const chain = projection.chain
+    const host = {
+      swim: swim.active,
+      muted: audio.isMuted,
+      chain: {
+        yaw: Math.round(chain.yawT * 10) / 10,
+        pitch: Math.round(chain.pitchT * 10) / 10,
+        dolly: Math.round(chain.dollyT * 100) / 100,
+        moveX: Math.round(chain.moveXT * 100) / 100,
+        moveY: Math.round(chain.moveYT * 100) / 100,
+        auto: chain.auto,
+      },
+    }
+    remoteSocket.sendHost(host)
     void fetch('/api/remote/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        room: remoteCmds.room,
-        host: {
-          swim: swim.active,
-          muted: audio.isMuted,
-          chain: {
-            yaw: Math.round(chain.yawT * 10) / 10,
-            pitch: Math.round(chain.pitchT * 10) / 10,
-            dolly: Math.round(chain.dollyT * 100) / 100,
-            moveX: Math.round(chain.moveXT * 100) / 100,
-            moveY: Math.round(chain.moveYT * 100) / 100,
-            auto: chain.auto,
-          },
-        },
-      }),
+      body: JSON.stringify({ room: remoteCmds.room, host }),
       keepalive: true,
     }).catch(() => { /* badges are cosmetic */ })
   }
 
-  // view drags stream at ~18 Hz — echo the chain back at most ~2×/s
+  // view deltas stream at 30 Hz — echo the chain back at most ~2×/s
   let chainPublishTimer = 0
   function publishChainStateSoon() {
     if (chainPublishTimer) return
@@ -386,6 +404,11 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       publishHostState()
     }, 550)
   }
+  // while the chain is engaged, keep late-joining pages converging
+  const chainBeacon = window.setInterval(() => {
+    if (!outputOnly && projection.chain.engaged) publishHostState()
+  }, 3000)
+  disposers.push(() => clearInterval(chainBeacon))
 
   // ---------------- feeding ----------------
   let firstFeed = true
@@ -637,12 +660,23 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       },
       reset: () => { projection.chain.reset(); return projection.chain.qaState() },
     },
+    /** WebSocket relay diagnostics (QA) */
+    ws: {
+      status: () => remoteSocket.status,
+      live: () => remoteSocket.isLive,
+      /** push a view payload through the socket exactly like the phone */
+      sendView: (v: unknown) => remoteSocket.sendView(v as Record<string, unknown>),
+    },
     /** smartphone remote link diagnostics */
     remote: {
       status: () => remoteHands.status,
       fresh: () => remoteHands.isFresh,
       hands: () => remoteHands.hands.length,
       room: () => remoteHands.room,
+      /** last applied frame stamp vs browser clock (QA) */
+      at: () => remoteHands.lastAt,
+      now: () => Date.now(),
+      seq: () => remoteHands.seq,
       /** simulate a phone frame straight into the pipeline (QA, no network) */
       inject: (x: number, y: number, openness: number, second?: { x: number; y: number; openness: number }) => {
         const now = Date.now()
@@ -730,6 +764,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     dispose: () => {
       cancelAnimationFrame(raf)
       document.removeEventListener('visibilitychange', onVis)
+      remoteSocket.stop()
       remoteCmds.stop()
       remoteHands.stop()
       handTracker.stop()

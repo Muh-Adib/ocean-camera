@@ -11,6 +11,7 @@
 // tracking automatically.
 // ---------------------------------------------------------------
 import type { HandSample, Landmark } from '../interaction/HandTracker'
+import type { RemoteHandFrame } from './RemoteSocket'
 
 export type RemoteHandsStatus = 'off' | 'connecting' | 'live' | 'stale'
 
@@ -28,7 +29,8 @@ export class RemoteHands {
   onStatus?: (s: RemoteHandsStatus) => void
 
   private es: EventSource | null = null
-  private seq = -1
+  /** last applied sender seq (QA diagnostics) */
+  seq = -1
   private watchdog = 0
 
   constructor(room?: string) {
@@ -52,39 +54,7 @@ export class RemoteHands {
     })
     es.addEventListener('hands', (ev) => {
       try {
-        const data = JSON.parse((ev as MessageEvent).data) as {
-          seq: number
-          t: number
-          hands?: {
-            x: number; y: number; openness: number; scale: number
-            lm?: number[][]; label?: string
-          }[]
-        }
-        // freshness gate on the SERVER receive stamp (the POST route
-        // overwrites t with server time): replays carry an older t and
-        // are dropped, while frames from ANY number of phones — each
-        // with its own private seq — still interleave safely. Gating
-        // on the sender seq would let a second phone (or a QA inject)
-        // starve the first one forever.
-        if (typeof data.t === 'number' && data.t <= this.lastAt) return
-        this.seq = typeof data.seq === 'number' ? data.seq : this.seq
-        this.lastAt = typeof data.t === 'number' ? data.t : Date.now()
-        const hands: HandSample[] = []
-        const lms: Landmark[][] = []
-        for (const h of (data.hands ?? []).slice(0, 2)) {
-          hands.push({
-            present: true,
-            x: h.x, y: h.y,
-            openness: h.openness, scale: h.scale,
-            t: this.lastAt,
-          })
-          if (h.lm && h.lm.length >= 21) {
-            lms.push(h.lm.map((p) => ({ x: p[0], y: p[1], z: p[2] ?? 0 })))
-          }
-        }
-        this.hands = hands
-        this.landmarks = lms
-        this.setStatus('live')
+        this.ingest(JSON.parse((ev as MessageEvent).data) as RemoteHandFrame)
       } catch { /* malformed frame — ignore, the next one follows in ~40 ms */ }
     })
     es.onerror = () => {
@@ -101,6 +71,38 @@ export class RemoteHands {
         if (this.status === 'stale' && this.isFresh) this.setStatus('live')
       }, 400)
     }
+  }
+
+  /** apply one hands frame from ANY transport (SSE event or the
+   *  WebSocket relay — same shape, same freshness gate). The gate
+   *  runs on the SERVER receive stamp: replays carry an older stamp
+   *  and are dropped, while frames from ANY number of phones — each
+   *  with its own private seq — still interleave safely. Gating on
+   *  the sender seq would let a second phone (or a QA inject)
+   *  starve the first one forever. */
+  ingest(data: RemoteHandFrame) {
+    const stamp = typeof (data as { at?: number }).at === 'number'
+      ? (data as { at: number }).at
+      : typeof data.t === 'number' ? data.t : Date.now()
+    if (stamp <= this.lastAt) return
+    this.seq = typeof data.seq === 'number' ? data.seq : this.seq
+    this.lastAt = stamp
+    const hands: HandSample[] = []
+    const lms: Landmark[][] = []
+    for (const h of (data.hands ?? []).slice(0, 2)) {
+      hands.push({
+        present: true,
+        x: h.x, y: h.y,
+        openness: h.openness, scale: h.scale,
+        t: this.lastAt,
+      })
+      if (h.lm && h.lm.length >= 21) {
+        lms.push(h.lm.map((p) => ({ x: p[0], y: p[1], z: p[2] ?? 0 })))
+      }
+    }
+    this.hands = hands
+    this.landmarks = lms
+    this.setStatus('live')
   }
 
   /** stop the stream (page dispose) */

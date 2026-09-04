@@ -9,8 +9,8 @@
     "url": "git+https://github.com/Muh-Adib/ocean-camera.git"
   },
   "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "dev:https": "next dev -p 3000 --experimental-https 2>&1 | tee dev.log",
+    "dev": "node scripts/dev-server.mjs 2>&1 | tee dev.log",
+    "dev:https": "RUN_HTTPS=1 node scripts/dev-server.mjs 2>&1 | tee dev.log",
     "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
     "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",

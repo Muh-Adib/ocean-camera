@@ -22,7 +22,7 @@ const DEG = Math.PI / 180
 export interface ChainViewPayload {
   /** absolute yaw target, degrees, -135..+135 (the 270° linked sweep) */
   yaw?: number
-  /** absolute pitch target, degrees, -30..+30 */
+  /** absolute pitch target, degrees, -45..+45 */
   pitch?: number
   /** dolly the whole chain along the center camera's view, meters, -8..+8 */
   dolly?: number
@@ -30,9 +30,18 @@ export interface ChainViewPayload {
   moveX?: number
   /** MOVE Y — raise / lower the whole chain (naik-turun kamera), meters, -10..+10 */
   moveY?: number
-  /** hands-free sweep — ping-pongs across the full yaw range */
+  /** DELTAS — joystick/pad streams send small per-tick increments
+   *  instead of absolutes: the receiving page adds them to ITS OWN
+   *  live target, so a laggy/late packet can never make the camera
+   *  LURCH back to a stale base value (that was the "patah" bug). */
+  dyaw?: number
+  dpitch?: number
+  ddolly?: number
+  dmx?: number
+  dmy?: number
+  /** hands-free sweep — sin(ping-pong) across the full yaw range */
   auto?: boolean
-  /** sweep speed while auto (deg/s, 1..30) */
+  /** sweep speed while auto (peak deg/s at screen centre, 1..30) */
   speed?: number
   /** glide everything back to the saved poses */
   reset?: boolean
@@ -54,17 +63,19 @@ export class ChainRig {
   dollyT = 0
   moveXT = 0
   moveYT = 0
-  /** hands-free sweep */
+  /** hands-free sweep — yawT = range·sin(phase), a perfectly smooth
+   *  reversal at both edges (the old linear ping-pong had a corner) */
   auto = false
   autoSpeed = 5
+  private autoPhase = 0
   /** sweep geometry — ±135° yaw = a 270° linked viewpoint range */
   readonly range = 135
-  readonly pitchRange = 30
+  readonly pitchRange = 45
   readonly dollyRange = 8
   /** MOVE XY range — how far the chain can strafe / rise, meters */
   readonly moveRange = 10
   /** exponential ease rate (higher = snappier, still continuous) */
-  ease = 4.2
+  ease = 5
 
   /** name of the center surface (readout/QA) */
   centerName: string | null = null
@@ -97,14 +108,62 @@ export class ChainRig {
       return
     }
     if (finite(v.speed)) this.autoSpeed = clamp(v.speed, 1, 30)
-    if (typeof v.auto === 'boolean') this.auto = v.auto
+    if (typeof v.auto === 'boolean') this.setAuto(v.auto)
+    // deltas first — velocity pads/joysticks stream these at 30 Hz
+    this.applyDelta(v)
     // MOVE XYZ keeps working even while the auto orbit sweeps the view
-    if (finite(v.moveX)) this.moveXT = clamp(v.moveX, -this.moveRange, this.moveRange)
-    if (finite(v.moveY)) this.moveYT = clamp(v.moveY, -this.moveRange, this.moveRange)
+    if (finite(v.moveX)) this.moveXT = this.softEdge(clamp(v.moveX, -this.moveRange * 1.5, this.moveRange * 1.5), this.moveRange)
+    if (finite(v.moveY)) this.moveYT = this.softEdge(clamp(v.moveY, -this.moveRange * 1.5, this.moveRange * 1.5), this.moveRange)
     if (this.auto) return   // the sweep owns the yaw target while auto
-    if (finite(v.yaw)) this.yawT = clamp(v.yaw, -this.range, this.range)
-    if (finite(v.pitch)) this.pitchT = clamp(v.pitch, -this.pitchRange, this.pitchRange)
-    if (finite(v.dolly)) this.dollyT = clamp(v.dolly, -this.dollyRange, this.dollyRange)
+    if (finite(v.yaw)) this.yawT = this.softEdge(v.yaw, this.range)
+    if (finite(v.pitch)) this.pitchT = this.softEdge(v.pitch, this.pitchRange)
+    if (finite(v.dolly)) this.dollyT = this.softEdge(v.dolly, this.dollyRange)
+  }
+
+  /** turn the hands-free sweep on/off, keeping the yaw continuous */
+  setAuto(on: boolean) {
+    if (on === this.auto) return
+    if (on) {
+      // start the sine from wherever the chain is now — no jump
+      const r = clamp(this.yawT / this.range, -1, 1)
+      this.autoPhase = Math.asin(r)
+      this.auto = true
+    } else {
+      this.auto = false
+      this.yawT = this.range * Math.sin(this.autoPhase)
+    }
+  }
+
+  /** add small per-tick increments to the live targets. Deltas NEVER
+   *  jump the camera: they nudge whatever the page is already showing,
+   *  and the soft edge saturates them smoothly at the range walls. */
+  applyDelta(d: {
+    dyaw?: number; dpitch?: number; ddolly?: number; dmx?: number; dmy?: number
+  }) {
+    if (!d) return
+    if (finite(d.dmx)) this.moveXT = this.softEdge(this.moveXT + d.dmx, this.moveRange)
+    if (finite(d.dmy)) this.moveYT = this.softEdge(this.moveYT + d.dmy, this.moveRange)
+    if (finite(d.ddolly)) this.dollyT = this.softEdge(this.dollyT + d.ddolly, this.dollyRange)
+    if (this.auto) return            // sweep owns yaw while auto
+    if (finite(d.dyaw)) this.yawT = this.softEdge(this.yawT + d.dyaw, this.range)
+    if (finite(d.dpitch)) this.pitchT = this.softEdge(this.pitchT + d.dpitch, this.pitchRange)
+  }
+
+  /** SOFT EDGE — the fix for the hard-stop "patah" at the movement
+   *  limits. Inside the 82% cushion the value passes through 1:1;
+   *  beyond it the drag compresses smoothly (tanh) toward the wall,
+   *  so pushing against the limit decelerates instead of jerking,
+   *  and reversing out is continuous because the value never left
+   *  the smooth curve. */
+  private softEdge(v: number, range: number): number {
+    if (!Number.isFinite(v)) return 0
+    const a = Math.abs(v)
+    if (a <= 0) return 0
+    const cushion = range * 0.82
+    if (a <= cushion) return v
+    const k = 1.6
+    const t = Math.tanh(1 + (a - cushion) / (range - cushion) * (k - 1)) / Math.tanh(k)
+    return Math.sign(v) * Math.min(range, cushion + (range - cushion) * t)
   }
 
   /** glide back to the saved camera poses */
@@ -126,15 +185,10 @@ export class ChainRig {
    */
   update(dt: number, surfaces: ProjectionSurface[], canvasW: number, canvasH: number) {
     if (this.auto) {
-      // ping-pong sweep — reverses at the edges, never a jump
-      this.yawT += this.autoSpeed * dt
-      if (this.yawT >= this.range) {
-        this.yawT = this.range
-        this.autoSpeed = -Math.abs(this.autoSpeed)
-      } else if (this.yawT <= -this.range) {
-        this.yawT = -this.range
-        this.autoSpeed = Math.abs(this.autoSpeed)
-      }
+      // sinusoidal sweep — the reversal at ±range is a smooth cosine
+      // curve (C¹), so the auto orbit never shows a corner
+      this.autoPhase += (Math.abs(this.autoSpeed) / this.range) * dt
+      this.yawT = this.range * Math.sin(this.autoPhase)
     }
     const k = 1 - Math.exp(-Math.max(0, dt) * this.ease)
     this.yaw += (this.yawT - this.yaw) * k

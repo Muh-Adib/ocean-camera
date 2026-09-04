@@ -21,7 +21,10 @@ export const REMOTE_CMD_TYPES: ReadonlySet<string> = new Set([
   'view',
 ])
 
-/** camera-chain move (the VIEW pad / studio CHAIN tab) — all optional */
+/** camera-chain move (the VIEW pad / studio CHAIN tab) — all optional.
+ *  d* fields are per-tick DELTAS streamed by velocity joysticks — they
+ *  nudge the receiving page's own live target, so a laggy packet can
+ *  never snap the camera back to a stale absolute value ("patah"). */
 export interface RemoteCmdView {
   yaw?: number
   pitch?: number
@@ -30,6 +33,12 @@ export interface RemoteCmdView {
   moveX?: number
   /** MOVE Y — raise / lower the chain (naik-turun kamera, meters) */
   moveY?: number
+  /** deltas — small increments applied on top of the live target */
+  dyaw?: number
+  dpitch?: number
+  ddolly?: number
+  dmx?: number
+  dmy?: number
   auto?: boolean
   speed?: number
   reset?: boolean

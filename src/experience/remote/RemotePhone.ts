@@ -1,36 +1,33 @@
 // ---------------------------------------------------------------
 // RemotePhone — the smartphone controller behind the /remote route.
 //
-// Scanned from the QR code (or opened directly), it offers THREE
-// controller modes behind a segmented switch:
+// The user asked to strip the phone down to ONE idea:
 //
-//   CAMERA — the phone's FRONT camera (visible preview, mirrored)
-//   tracks up to TWO hands with the same local MediaPipe model the
-//   desktop uses; both hands stream to /api/remote/hands at ~25 Hz.
+//   "control hanya kamera jika menggunakan kamera, dan off jika
+//    tidak dengan kamera" — the controls exist ONLY while the
+//    camera runs; no camera, no controls.
 //
-//   BUTTONS — a touch pad: action grid (feed/burst/shark/turtle/
-//   ray/pulse), SWIM & SOUND toggles with real studio-state badges,
-//   hold-to-BOOST, and a joystick that steers the current by
-//   streaming a synthesized open-palm hand through the same hands
-//   pipeline — see RemotePhonePad.
+// So the phone is now a single screen:
+//   · OFF   — a start card (big START CAMERA button). Nothing else.
+//   · LIVE  — the camera preview with the hand-skeleton overlay
+//     (both hands stream to every ocean page, fish follow) AND the
+//     double joystick floating over the view (RemotePhoneSticks):
+//     LEFT = MOVE X / naik-turun Y, RIGHT = ORBIT yaw/pitch,
+//     PINCH = dolly, ⟲ = reset. Nothing else — no tabs, no grids,
+//     no sliders.
 //
-//   VIEW — the camera-chain remote: drag to orbit the whole output
-//   camera rig as ONE motion around the center camera, snap across
-//   the 270° linked sweep, dolly, auto-orbit or reset — see
-//   RemotePhoneView. What moves is the camera/surface chain the
-//   projector is showing; span-locked walls stay perfectly joined.
-//
-// Every ocean page (studio and /output, any machine on the LAN)
-// picks all three channels up over SSE and reacts in real time.
+// Transport: everything rides the /ws WebSocket relay when it is
+// up (30 Hz push, no per-frame HTTP), and falls back to the old
+// POST + SSE relay automatically while the socket is down.
 // ---------------------------------------------------------------
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import { extractHandSample, mirrorLandmarks } from '../interaction/handMath'
 import type { Landmark } from '../interaction/HandTracker'
-import type { RemoteCmdType } from './RemoteCmds'
-import { buildPadStage, type PadHandle, type PadHandFrame } from './RemotePhonePad'
-import { buildViewStage, type ViewHandle, type ViewPayload } from './RemotePhoneView'
+import { RemoteSocket } from './RemoteSocket'
+import { buildSticksOverlay, type StickDelta } from './RemotePhoneSticks'
 
 const ROOM = new URLSearchParams(window.location.search).get('room') || 'ocean'
+const QA = new URLSearchParams(window.location.search).has('qa')
 const WASM_PATH = '/mediapipe/wasm'
 const MODEL_PATH = '/mediapipe/models/hand_landmarker.task'
 const SEND_INTERVAL_MS = 40       // ≈25 fps upstream
@@ -76,47 +73,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   statusChip.append(dot, statusText)
   header.append(title, statusChip)
 
-  // ---- mode switch (CAMERA / BUTTONS) ----
-  const tabs = document.createElement('div')
-  tabs.setAttribute('role', 'tablist')
-  tabs.style.cssText = [
-    'display:flex', 'gap:4px', 'margin:2px 14px 8px', 'padding:4px', 'flex:none',
-    'border-radius:999px', 'background:rgba(2,16,28,0.75)',
-    'border:1px solid rgba(110,231,255,0.22)',
-  ].join(';')
-  const mkTab = (label: string) => {
-    const b = document.createElement('button')
-    b.type = 'button'
-    b.setAttribute('role', 'tab')
-    b.textContent = label
-    b.style.cssText = [
-      'flex:1', 'appearance:none', 'border:none', 'border-radius:999px',
-      'padding:9px 0', 'font-size:11.5px', 'font-weight:700', 'letter-spacing:0.16em',
-      'color:#8fb9ca', 'background:transparent', 'cursor:pointer', 'min-height:38px',
-      'transition:background 0.15s ease, color 0.15s ease',
-    ].join(';')
-    return b
-  }
-  const camTab = mkTab('CAMERA')
-  const padTab = mkTab('BUTTONS')
-  const viewTab = mkTab('VIEW')
-  tabs.append(camTab, padTab, viewTab)
-
-  const tabBase = [
-    'flex:1', 'appearance:none', 'border:none', 'border-radius:999px',
-    'padding:9px 0', 'font-size:11.5px', 'font-weight:700', 'letter-spacing:0.16em',
-    'cursor:pointer', 'min-height:38px', 'min-width:0',
-    'transition:background 0.15s ease, color 0.15s ease',
-  ]
-  const paintTabs = (mode: 'cam' | 'pad' | 'view') => {
-    const active = ['background:linear-gradient(135deg,#8fe6ff,#5ec8ea)', 'color:#04222f', 'box-shadow:0 4px 14px rgba(94,200,234,0.35)']
-    const idle = ['background:transparent', 'color:#8fb9ca', 'box-shadow:none']
-    camTab.style.cssText = [...tabBase, ...(mode === 'cam' ? active : idle)].join(';')
-    padTab.style.cssText = [...tabBase, ...(mode === 'pad' ? active : idle)].join(';')
-    viewTab.style.cssText = [...tabBase, ...(mode === 'view' ? active : idle)].join(';')
-  }
-
-  // ---- CAMERA stage (unchanged visuals) ----
+  // ---- stage: camera preview + skeleton overlay + double joystick ----
   const stage = document.createElement('div')
   stage.style.cssText = 'position:relative;flex:1;overflow:hidden;background:rgba(1,12,22,0.6);'
   const video = document.createElement('video')
@@ -125,18 +82,20 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   video.playsInline = true
   video.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0;'
   const canvas = document.createElement('canvas')
-  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;'
+  canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;pointer-events:none;'
   stage.append(video, canvas)
 
   const startCard = document.createElement('div')
-  startCard.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(2,16,28,0.55);backdrop-filter:blur(4px);'
+  startCard.style.cssText = 'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;background:rgba(2,16,28,0.55);backdrop-filter:blur(4px);z-index:4;'
   const startTitle = document.createElement('div')
   startTitle.style.cssText = 'font-size:17px;font-weight:600;'
   startTitle.textContent = 'Become the current'
   const startHint = document.createElement('p')
   startHint.style.cssText = 'margin:0;font-size:12.5px;line-height:1.65;color:#a9d3e3;max-width:300px;'
-  startHint.textContent =
-    'Your phone becomes the gesture controller: BOTH hands are tracked and the fish follow them on the big screen, in real time.'
+  startHint.innerHTML =
+    'Start the camera and your phone becomes the controller: BOTH hands steer the fish on the big screen, ' +
+    'while the two joysticks float over the view — <b>MOVE</b> (geser · naik/turun) and <b>ORBIT</b> (sweep · tilt), ' +
+    'pinch to dolly. Controls live only while the camera is on.'
   const startBtn = document.createElement('button')
   startBtn.type = 'button'
   startBtn.textContent = 'START CAMERA'
@@ -153,13 +112,7 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   warn.style.cssText = 'display:none;margin:0;font-size:11.5px;line-height:1.55;padding:10px 12px;border-radius:10px;background:rgba(255,190,90,0.12);border:1px solid rgba(255,190,90,0.4);color:#ffd670;max-width:320px;'
   startCard.append(startTitle, startHint, startBtn, privacy, warn)
   stage.appendChild(startCard)
-
-  // ---- BUTTONS stage ----
-  const legend = document.createElement('div')
-  legend.style.cssText = 'padding:8px 14px 10px;font-size:11px;line-height:1.6;color:#8fb9ca;text-align:center;flex:none;'
-  legend.innerHTML = 'open palm → attract · fist → caution · move both hands like swimming'
-
-  root.append(header, tabs, stage, legend)
+  root.append(header, stage)
   container.appendChild(root)
 
   const setStatus = (text: string, color: string) => {
@@ -169,9 +122,13 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   }
   const buzz = (ms = 12) => { try { navigator.vibrate?.(ms) } catch { /* no haptics */ } }
 
-  // ---------------- shared network helpers ----------------
+  // ---------------- transport: WebSocket first, POST fallback ----------------
+  const socket = new RemoteSocket(ROOM)
+  socket.start()
+
   let seq = 0
-  async function postHands(hands: PadHandFrame[]): Promise<boolean> {
+
+  const postHands = async (hands: unknown[]): Promise<boolean> => {
     try {
       const res = await fetch('/api/remote/hands', {
         method: 'POST',
@@ -184,45 +141,45 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     }
   }
 
-  async function sendCmd(type: RemoteCmdType, on?: boolean, view?: ViewPayload): Promise<boolean> {
-    try {
-      const res = await fetch('/api/remote/cmd', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ room: ROOM, cmd: { type, ...(on === undefined ? {} : { on }), ...(view ? { view } : {}) } }),
-      })
-      return res.ok
-    } catch {
-      return false
+  /** hands: WS when live (30 Hz push, no HTTP overhead), else the
+   *  POST relay — the receiving pages consume either transparently */
+  const sendHands = async (hands: unknown[]): Promise<boolean> => {
+    if (socket.isLive && socket.sendHands(hands, seq++)) {
+      return true
     }
+    return postHands(hands)
   }
 
-  // ---------------- BUTTONS pad ----------------
-  let padStatusRevert = 0
-  const markSent = (text: string, color: string) => {
-    setStatus(text, color)
-    if (padStatusRevert) { clearTimeout(padStatusRevert); padStatusRevert = 0 }
-    if (text.startsWith('SENT')) {
-      padStatusRevert = window.setTimeout(() => setStatus('PAD READY', '#7fd4ee'), 900)
-    }
+  /** camera-chain deltas — same dual path; deltas never yank the view */
+  const sendView = (d: StickDelta): boolean => {
+    if (socket.isLive) return socket.sendView(d)
+    void fetch('/api/remote/cmd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: ROOM, cmd: { type: 'view', view: d } }),
+      keepalive: true,
+    }).catch(() => { /* offline */ })
+    return true
   }
-  const pad = buildPadStage({
-    room: ROOM,
-    sendCmd,
-    postHands,
-    setStatus: markSent,
-    buzz,
-  })
-  stage.appendChild(pad.root)
 
-  // ---------------- VIEW pad (camera-chain remote) ----------------
-  const view = buildViewStage({
-    room: ROOM,
-    sendView: (v) => sendCmd('view', undefined, v),
-    setStatus: markSent,
-    buzz,
-  })
-  stage.appendChild(view.root)
+  const sendReset = () => {
+    buzz(14)
+    setStatus('CHAIN RESET', '#ffd670')
+    if (socket.isLive) socket.sendView({ reset: true })
+    else void fetch('/api/remote/cmd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: ROOM, cmd: { type: 'view', view: { reset: true } } }),
+      keepalive: true,
+    }).catch(() => { /* offline */ })
+  }
+
+  // ---------------- double joystick over the view ----------------
+  const sticks = buildSticksOverlay({ onDelta: sendView, onReset: sendReset })
+  stage.appendChild(sticks.root)
+
+  // pad heartbeat (keeps the QR badge honest on SSE-only pages)
+  let pingTimer = 0
 
   // ---------------- state ----------------
   const ctx = canvas.getContext('2d')!
@@ -230,7 +187,6 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   let stream: MediaStream | null = null
   let running = false
   let disposed = false
-  let mode: 'cam' | 'pad' | 'view' = 'cam'
   let lastVideoTime = -1
   let lastSend = 0
   let lastIdleSend = 0
@@ -242,12 +198,11 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
 
   // insecure origin (plain http over LAN): the phone will block the camera
   const isLocalHost = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname)
-  if (!window.isSecureContext && !isLocalHost) {
+  if (!window.isSecureContext && !isLocalHost && !QA) {
     warn.style.display = 'block'
     warn.textContent =
       'This page is not HTTPS, so the phone will block the camera. ' +
-      'Open it through the app\u2019s HTTPS link, or run the server with `npm run dev:https` and scan that QR. ' +
-      'The BUTTONS pad works on plain http too.'
+      'Open it through the app\u2019s HTTPS link, or run the server with `npm run dev:https` and scan that QR.'
   }
 
   // ---------------- camera sending ----------------
@@ -255,10 +210,15 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     x: number; y: number; openness: number; scale: number
     lm: number[][]; label: string
   }[]) {
-    const ok = await postHands(hands)
+    const ok = await sendHands(hands)
     if (ok) {
       failCount = 0
-      if (running) setStatus(hands.length ? `LIVE · ${hands.length} HAND${hands.length === 1 ? '' : 'S'}${fpsShown ? ` · ${fpsShown} FPS` : ''}` : 'LIVE · SEARCHING', '#7bffb2')
+      if (running) {
+        const via = socket.isLive ? ' · WS' : ''
+        setStatus(hands.length
+          ? `LIVE · ${hands.length} HAND${hands.length === 1 ? '' : 'S'}${fpsShown ? ` · ${fpsShown} FPS` : ''}${via}`
+          : `LIVE · SEARCHING${via}`, '#7bffb2')
+      }
     } else if (++failCount >= 3 && running) {
       setStatus('OFFLINE — server unreachable', '#ff8f8f')
     }
@@ -379,6 +339,20 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
       running = true
       video.style.opacity = '1'
       startCard.style.display = 'none'
+      // THE controls appear ONLY now — camera on = controls on
+      sticks.setVisible(true)
+      sticks.start()
+      if (!pingTimer) {
+        pingTimer = window.setInterval(() => {
+          if (socket.isLive) socket.ping()
+          else void fetch('/api/remote/cmd', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ room: ROOM, ping: true }),
+            keepalive: true,
+          }).catch(() => { /* liveness only */ })
+        }, 2500)
+      }
       setStatus('CONNECTING…', '#ffd670')
       loop()
     } catch (err) {
@@ -395,6 +369,10 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
   function stopCamera() {
     running = false
     lastHands = []
+    // camera off = controls off — the whole point of this design
+    sticks.setVisible(false)
+    sticks.stop()
+    if (pingTimer) { clearInterval(pingTimer); pingTimer = 0 }
     try { landmarker?.close?.() } catch { /* partial landmarker may refuse */ }
     landmarker = null
     stream?.getTracks().forEach((t) => t.stop())
@@ -404,49 +382,25 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     startBtn.disabled = false
     startBtn.textContent = 'START CAMERA'
     startCard.style.display = 'flex'
+    setStatus('IDLE', '#5b7c8d')
   }
 
-  startBtn.addEventListener('click', () => { void start() })
+  startBtn.addEventListener('click', () => { buzz(10); void start() })
 
-  // ---------------- mode switching ----------------
-  function setMode(next: 'cam' | 'pad' | 'view') {
-    if (mode === next || disposed) return
-    mode = next
-    if (next !== 'cam') {
-      // release the camera entirely — pads must not burn battery
-      if (running) { stopCamera(); void postHands([]) }
+  // QA hook: expose the sticks for headless testing (no camera needed).
+  // The start card sits above the stage — hide it so synthetic drags
+  // reach the sticks, exactly like the real camera-on state.
+  if (QA) {
+    startCard.style.display = 'none'
+    sticks.setVisible(true)
+    sticks.start()
+    setStatus('QA · STICKS', '#ffd670')
+    ;(window as unknown as Record<string, unknown>).__oceanPhone = {
+      sticks: sticks.root,
+      sendView,
+      socketStatus: () => socket.status,
     }
-    if (next === 'pad') {
-      view.stop()
-      setStatus('PAD READY', '#7fd4ee')
-      stage.style.background = 'transparent'
-      legend.innerHTML = 'stick steers the fish · buttons fire the show · flick = current'
-      pad.start()
-    } else if (next === 'view') {
-      pad.stop()
-      setStatus('VIEW PAD READY', '#7fd4ee')
-      stage.style.background = 'transparent'
-      legend.innerHTML = 'ORBIT sweeps · MOVE strafes + naik/turun · DOLLY/LIFT sliders · pivot = center camera · 270° linked, never breaks'
-      view.start()
-    } else {
-      pad.stop()
-      view.stop()
-      stage.style.background = 'rgba(1,12,22,0.6)'
-      legend.innerHTML = 'open palm → attract · fist → caution · move both hands like swimming'
-      setStatus('IDLE', '#5b7c8d')
-    }
-    // stage children: video, canvas, startCard, pad.root, view.root — toggle pads only
-    pad.root.style.display = next === 'pad' ? 'flex' : 'none'
-    view.root.style.display = next === 'view' ? 'flex' : 'none'
-    startCard.style.display = next === 'cam' ? (running ? 'none' : 'flex') : 'none'
-    canvas.style.display = next === 'cam' ? 'block' : 'none'
-    video.style.display = next === 'cam' ? 'block' : 'none'
-    paintTabs(next)
   }
-  camTab.addEventListener('click', () => { buzz(8); setMode('cam') })
-  padTab.addEventListener('click', () => { buzz(8); setMode('pad') })
-  viewTab.addEventListener('click', () => { buzz(8); setMode('view') })
-  paintTabs('cam')
 
   // final "hands gone" beat so the fish calm down the moment the tab closes
   const onPageHide = () => {
@@ -463,8 +417,9 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
     dispose() {
       disposed = true
       running = false
-      pad.stop()
-      view.stop()
+      sticks.stop()
+      if (pingTimer) { clearInterval(pingTimer); pingTimer = 0 }
+      socket.stop()
       window.removeEventListener('pagehide', onPageHide)
       try { landmarker?.close?.() } catch { /* partial landmarker may refuse */ }
       landmarker = null

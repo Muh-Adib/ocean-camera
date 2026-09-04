@@ -550,3 +550,35 @@ Verified headless (agent-browser + curl fake phone):
 Stage Summary:
 - The QR remote now moves the camera chain through space, not just around it: ORBIT (yaw/pitch) + MOVE XYZ (strafe X, naik-turun Y, dolly Z) all pivot on the center camera and stay one synchronized motion on the studio and every output screen
 - The output screen sells itself: a small self-hiding QR waits in the corner until a phone joins, then vanishes until it's needed again
+
+---
+Task ID: 21
+Agent: main (Super Z)
+Task: Fix "patah-patah" remote link + camera edge breaks — true WebSocket relay, delta-based soft-edge camera chain, and a minimal camera-only phone controller with a double joystick
+
+Work Log:
+- User feedback: (1) koneksi patah-patah — gunakan WS; (2) kamera patah saat movement mencapai edge; (3) kontrol HP terlalu banyak — hanya kamera saat kamera dipakai, off saat tidak; (4) kontrol berbentuk double joystick dengan gerakan lebih smooth.
+- TRUE WEBSOCKET on the SAME port: scripts/ocean-ws.mjs (dependency-free RFC6455 relay — handshake SHA1 accept, masked client frames, 16/64-bit lengths, ping/pong sweep, rooms, monotonic cmd ids, presence, 'sync' request on join; fragmented frames closed by design) + scripts/dev-server.mjs (Next 16 programmatic custom server: HTTP(S) + /ws upgrade → relay, all other upgrades → app.getUpgradeHandler() so dev HMR keeps working; RUN_HTTPS=1 generates a self-signed cert via openssl into .next/certificates/). package.json: dev/dev:https now run the custom server — the WS shares port 3000 (no mixed content, no extra firewall hole).
+- RemoteSocket.ts (browser client): persistent ws(s)://host/ws?room=…, hello/host role, capped-backoff reconnect (0.4s→5s), callbacks hands/view/cmd/host/presence/sync; sendHands/sendView/sendCmd/sendHost/ping. main.ts wires it on EVERY page: hands → remoteHands.ingest(), view/cmd → applyRemoteCmd, sync → publishHostState, presence → new remotePresenceBus; publishHostState also pushes over WS; 3 s chain beacon while engaged keeps late joiners converging. SSE/POST relays stay wired as automatic fallback.
+- ChainRig (anti-patah): new DELTA API (dyaw/dpitch/ddolly/dmx/dmy) — velocity pads nudge the page's OWN live target so a late packet can never LURCH the camera back to a stale absolute (root cause of the edge breaks); softEdge() = tanh compression beyond 82% of any range (pushing into ±135° yaw / ±45° pitch / ±10 m move / ±8 m dolly decelerates asymptotically instead of hard-stopping; verified 240° of pushed deltas saturate exactly at 135 with no NaN); auto orbit is now SINUSOIDAL (yawT = range·sin(phase), C¹ reversal at the edges, starts from the current yaw via asin); ease 4.2 → 5; pitchRange 30 → 45 (studio CHAIN slider derives from it automatically).
+- Relay payload: RemoteCmdView + route sanitizer carry the five delta fields (SSE fallback parity, clamped ±30/±10, 0.01 rounding).
+- Phone rebuilt (user asked "control hanya kamera, off jika tidak"): /remote is now ONE screen — boot card (START CAMERA) or the live camera view; RemotePhonePad.ts (BUTTONS grid/toggles/boost) and RemotePhoneView.ts (pads/sliders/chips) DELETED.
+- New RemotePhoneSticks.ts: double VELOCITY joystick floating over the camera view — LEFT = MOVE (kanan/kiri = geser X, atas/bawah = naik-turun Y, 6.5/4.5 m·s⁻¹), RIGHT = ORBIT (yaw 80°/s — stick right looks right, pitch 38°/s), smoothstep + 14% deadzone, per-stick pointer capture (multi-touch), knob glow + spring-back, PINCH anywhere = dolly (9 m/pinch), small ⟲ reset button, 30 Hz flush loop streaming rounded deltas; controls exist ONLY while the camera runs. RemotePhone.ts: camera loop unchanged (2 hands, 25 Hz) but sendHands/sendView prefer the WS (POST fallback), status chip shows '· WS', ?qa=1 boots sticks without a camera (start card hidden) for headless tests (__oceanPhone hook).
+- RemoteHands: frame-apply logic extracted into ingest() — WS frames and SSE events share one path with the same server-stamp freshness gate; seq made public for QA. RemoteQrBadge: subscribes to the presence bus — INSTANT hide on phone join / show on leave (1 s hold to stop poll flicker); hands/pad polling kept as fallback; vmin sizing unchanged (follows screen).
+- QA hooks: __ocean.ws.{status,live,sendView}, __ocean.remote.{at,now,seq}, __oceanPhone (phone page).
+- New QA tools: scripts/ws-smoke.mjs (relay protocol test), scripts/ws-fake-phone.mjs (choreographed phone: delta streams, hands, cmds, auto, pings).
+
+Verified headless (agent-browser + node WS clients):
+- Relay: hello/presence/sync/view/cmd/hands fanout ✓ (host receives all, hands stamped with server `at`, cmd ids monotonic); presence {phones} correct on join AND graceful close; host echo fanout ✓.
+- Pages: studio + /output + /remote all report __ocean.ws live; zero page errors (only pre-existing three.js warnings).
+- Deltas end-to-end: fake phone dyaw stream → studio target.yaw 17.5→44.5; dmx → moveX −3.6; /output moveX 0.8; stress 60×4° deltas saturate EXACTLY at +135, NaN-free.
+- Hands: WS burst ingested 1:1 (seq 0→50 monitored in-page), freshness gate intact, SSE path unchanged.
+- Phone sticks: ORBIT drag → studio yaw −86.6 / pitch +17.5 (stick right = look right); MOVE drag → moveX +6.6 / moveY +1.7 (naik); ⟲ reset → studio targets all 0. Fixed during QA: start card (z-index) blocked synthetic drags in ?qa=1 — now hidden.
+- QR badge: visible at boot (opacity 1) → phone joins → fades INSTANTLY via WS presence (0.59 mid-fade sampled) → phone leaves → back to 1. Earlier "stuck hidden" reading traced to zombie sockets of killed test processes — relay 25 s sweep cleans them; graceful close is instant.
+- tsc clean (only pre-existing examples//skills/ errors); eslint clean on all new/modified files; all pages 200 after final edits; WS RELAY OK.
+- Screenshots: download/qa-phone-sticks-final.png (double joystick), qa-output-ws-badge.png, qa-studio-final.png.
+
+Stage Summary:
+- The remote link now rides a real same-port WebSocket: hands, view deltas, commands and presence are steady push — the patah-patah is gone, and SSE/POST remain as silent fallback.
+- The camera chain can no longer break at its edges: velocity deltas + tanh soft limits + sinusoidal auto sweep mean every motion decelerates smoothly into its range and reverses without a jolt; walls stay span-locked through all of it.
+- The phone is one idea: camera on → the view IS the controller (MOVE + ORBIT double joystick, pinch dolly, reset); camera off → controls off. Everything else lives in the studio.

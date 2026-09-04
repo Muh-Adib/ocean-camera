@@ -8,9 +8,15 @@
 // phone streams hands / pings its pad, and comes back by itself
 // when the phone leaves. Tapping it opens the full REMOTE QR
 // modal (URL row, LAN candidates, live connection status).
+//
+// With the WebSocket relay up, presence is INSTANT: the /ws room
+// fanout pushes "phone joined/left" the moment it happens, so the
+// badge hides/shows in real time — the hands/pad polling below is
+// only the fallback for SSE-only phones.
 // ---------------------------------------------------------------
 
 import { pickRemoteBase, remoteModalOpen } from './RemoteQR'
+import { subscribeRemotePresence } from './remotePresenceBus'
 
 const ROOM = new URLSearchParams(window.location.search).get('room') || 'ocean'
 
@@ -85,10 +91,20 @@ export function mountRemoteQrBadge(parent: HTMLElement): RemoteQrBadgeHandle {
     badge.style.pointerEvents = shown ? 'auto' : 'none'
   }
 
+  // WebSocket presence — the fast path (phone joined/left the room)
+  let wsPhones = 0
+  let lastLiveAt = 0
+  const unsubPresence = subscribeRemotePresence((p) => {
+    wsPhones = p.phones
+    if (wsPhones > 0) lastLiveAt = Date.now()
+    setShown(wsPhones === 0 && !remoteModalOpen())
+  })
+
   // a phone counts as connected while it streams hands (camera mode)
-  // OR while its pad pings (buttons / view mode)
+  // OR while its pad pings (buttons / view mode) — polling fallback
   const poll = async () => {
     if (disposed) return
+    if (wsPhones > 0) return   // the socket already knows better
     try {
       const [handsRes, cmdRes] = await Promise.all([
         fetch(`/api/remote/hands?room=${encodeURIComponent(ROOM)}`),
@@ -103,8 +119,11 @@ export function mountRemoteQrBadge(parent: HTMLElement): RemoteQrBadgeHandle {
         const data = await cmdRes.json() as { padLive?: boolean }
         live = !!data.padLive
       }
-      // hidden while the full modal is open (it shows the big QR anyway)
-      setShown(!live && !remoteModalOpen())
+      if (live) lastLiveAt = Date.now()
+      // hidden while the full modal is open (it shows the big QR anyway);
+      // hold the hidden state ~1 s after the last live beat so a poll
+      // gap never makes the badge flicker back mid-show
+      setShown(!live && Date.now() - lastLiveAt > 1000 && !remoteModalOpen())
     } catch { /* server hiccup — keep the last state */ }
   }
   void poll()
@@ -113,6 +132,7 @@ export function mountRemoteQrBadge(parent: HTMLElement): RemoteQrBadgeHandle {
   return {
     dispose() {
       disposed = true
+      unsubPresence()
       window.clearInterval(pollTimer)
       badge.remove()
     },

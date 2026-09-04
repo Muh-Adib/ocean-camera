@@ -32,12 +32,23 @@ function sanitizeView(raw: unknown): RemoteCmdView | undefined {
   const moveX = num(v.moveX, -20, 20)
   const moveY = num(v.moveY, -20, 20)
   const speed = num(v.speed, 1, 30)
+  // per-tick deltas — small by design (velocity·dt), clamped generously
+  const dyaw = num(v.dyaw, -30, 30)
+  const dpitch = num(v.dpitch, -30, 30)
+  const ddolly = num(v.ddolly, -10, 10)
+  const dmx = num(v.dmx, -10, 10)
+  const dmy = num(v.dmy, -10, 10)
   if (yaw !== undefined) out.yaw = Math.round(yaw * 10) / 10
   if (pitch !== undefined) out.pitch = Math.round(pitch * 10) / 10
   if (dolly !== undefined) out.dolly = Math.round(dolly * 100) / 100
   if (moveX !== undefined) out.moveX = Math.round(moveX * 100) / 100
   if (moveY !== undefined) out.moveY = Math.round(moveY * 100) / 100
   if (speed !== undefined) out.speed = Math.round(speed * 10) / 10
+  if (dyaw !== undefined) out.dyaw = Math.round(dyaw * 100) / 100
+  if (dpitch !== undefined) out.dpitch = Math.round(dpitch * 100) / 100
+  if (ddolly !== undefined) out.ddolly = Math.round(ddolly * 100) / 100
+  if (dmx !== undefined) out.dmx = Math.round(dmx * 100) / 100
+  if (dmy !== undefined) out.dmy = Math.round(dmy * 100) / 100
   if (typeof v.auto === 'boolean') out.auto = v.auto
   if (typeof v.reset === 'boolean') out.reset = v.reset
   return Object.keys(out).length ? out : undefined
