@@ -154,6 +154,8 @@ export interface ProjectionProject {
   version: number
   output: ProjectionOutput
   surfaces: ProjectionSurface[]
+  /** which surface carries the phone-connection QR — 'auto' = largest enabled surface */
+  qr?: { host: string }
 }
 
 export const PROJECT_VERSION = 2

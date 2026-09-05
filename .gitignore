@@ -61,3 +61,4 @@ server.log
 /tool-results/
 /scripts/
 upload/
+.fish-tank.json

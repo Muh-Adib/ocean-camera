@@ -22,6 +22,7 @@ import { gridFromCorners } from './ProjectionMath'
 import { RemoteRig } from '../remote/RemoteRig'
 import { ScreenLink, type HandFrame } from '../remote/RemoteLink'
 import { QrOverlay } from '../remote/QrOverlay'
+import { WallQr } from '../remote/WallQr'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
@@ -102,6 +103,14 @@ export class ProjectionManager {
   remoteRig = new RemoteRig()
   private remoteLink: ScreenLink | null = null
   private qr: QrOverlay | null = null
+  /** QR rendered INTO the surface render target — sticks to the wall */
+  wallQr = new WallQr()
+  /** which surface carries the wall QR ('auto' = largest enabled) */
+  qrHost = 'auto'
+  /** operator dismissed the wall QR for this session */
+  private qrDismissed = false
+  /** painted-fish sync client — assigned by main.ts (studio edits, all pages follow) */
+  fishTank: import('../fish/FishTank').FishTank | null = null
   /** phone-camera hand signals forwarded to the ocean (set by main.ts) */
   onPhoneHand: ((h: HandFrame | null) => void) | null = null
   phoneOn = false
@@ -112,10 +121,15 @@ export class ProjectionManager {
     this.outputMgr.maxTexSize = Math.min(deps.sceneMgr.renderer.capabilities.maxTextureSize || 4096, 8192)
     try { this.msaaOK = deps.sceneMgr.renderer.extensions.has('EXT_color_buffer_float') } catch { this.msaaOK = false }
     this.mainCamera = deps.sceneMgr.camera
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- captured for the live qrHost getter below
+    const self = this
     this.project = new ProjectManager({
       surfaces: this.surfaces,
       output: this.output,
       setOutput: (o) => { Object.assign(this.output, o); this.ui?.refreshAll() },
+      // live getter — a snapshot value would go stale the moment the host changes
+      get qrHost() { return self.qrHost },
+      setQrHost: (h) => { self.setQrHost(h, { silent: true }) },
     })
     // studio side: every persisted save is also pushed to /output tabs live
     if (deps.outputOnly) this.outputOnly = true
@@ -164,19 +178,42 @@ export class ProjectionManager {
         this.remoteRig.enabled = false
         this.onPhoneHand?.(null)
       }
+      this.wallQr.phoneOn = on
       if (this.qr) this.qr.phoneOn = on
       this.syncOutputOverlay()
     }
+    this.wallQr.getSurfaces = () => this.surfaces.surfaces
     if (this.outputOnly) this.buildQr()
   }
 
-  /** buildQr keeps live output-size via provider — update call sites stay simple */
+  /** buildQr keeps live output-size via provider — update call sites stay simple.
+   *  The DOM card is now only a FALLBACK for rooms with no enabled surface:
+   *  normally the QR is drawn INTO the wall picture itself (WallQr). */
   private buildQr() {
     if (this.qr) return
     this.qr = new QrOverlay(this.deps.container)
     this.qr.getSurfaces = () => this.surfaces.surfaces
     this.qr.getOutputSize = () => ({ w: this.output.width, h: this.output.height })
+    this.qr.hasWallHost = () => this.wallQr.info().hostName !== null
     this.qr.phoneOn = this.phoneOn
+  }
+
+  /** operator toggle from the output overlay / editor */
+  dismissQr() {
+    this.qrDismissed = true
+    this.wallQr.dismissed = true
+    if (this.qr) this.qr.dismissed = true
+  }
+
+  /** studio setting: which surface carries the phone-connection QR */
+  setQrHost(host: string, opts: { silent?: boolean } = {}) {
+    this.qrHost = host
+    this.wallQr.host = host
+    if (!opts.silent) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.ui?.refreshAll()
+    }
   }
 
   /** per-frame remote pump — control smoothing + hand forwarding */
@@ -212,15 +249,15 @@ export class ProjectionManager {
     Object.assign(this.remoteRig.cur, v)
   }
 
-  /** QA: QR overlay geometry */
-  qrInfo(): { present: boolean; visible: boolean; x: number; y: number } {
-    if (!this.qr) return { present: false, visible: false, x: 0, y: 0 }
+  /** QA: QR overlay geometry — the wall QR (in-projection) plus the DOM fallback */
+  qrInfo(): { present: boolean; visible: boolean; x: number; y: number; wall: ReturnType<WallQr['info']> } {
     const card = this.qrRoot()?.querySelector('.pm-qr-card') as HTMLElement | null
     return {
       present: true,
-      visible: this.qrVisible(),
+      visible: this.wallQr.info().visible || this.qrVisible(),
       x: card ? Math.round(parseFloat(card.style.left || '0')) : 0,
       y: card ? Math.round(parseFloat(card.style.top || '0')) : 0,
+      wall: this.wallQr.info(),
     }
   }
 
@@ -963,6 +1000,9 @@ export class ProjectionManager {
     const dt = this.lastFrameAt ? Math.min(0.05, (now - this.lastFrameAt) / 1000) : 1 / 60
     this.lastFrameAt = now
     this.updateRemote(dt)
+    // wall QR: only while the composite is what people see (live output /
+    // /output page), never in the editor viewport previews
+    this.wallQr.update(dt, this.outputLive && !this.phoneOn && !this.qrDismissed)
     const t0 = performance.now()
     this.renderFrameInner()
     this.frameCost = performance.now() - t0
@@ -988,6 +1028,9 @@ export class ProjectionManager {
         const rt = this.outputMgr.ensureRT(entry, s.output.width, s.output.height, q.renderScale, q.rtCap, msaa)
         r.setRenderTarget(rt)
         r.render(scene, cam)
+        // the phone-connection QR rides ON the wall picture — same warp,
+        // same morph, so it is undistorted on the physical wall
+        this.wallQr.overlaySurface(r, s)
       }
       r.setRenderTarget(null)
     }
@@ -1134,6 +1177,7 @@ export class ProjectionManager {
     this.remoteLink = null
     this.qr?.dispose()
     this.qr = null
+    this.wallQr.dispose()
     this.cameras.rig = null
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)

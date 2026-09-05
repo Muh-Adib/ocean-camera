@@ -29,9 +29,9 @@ export type SpeciesKey =
   | 'tropical' | 'angelfish' | 'butterflyfish' | 'clownfish' | 'tang' | 'pufferfish'
   | 'moorish' | 'squirrel' | 'minnow' | 'patin'
 
-const WHITE_UV = 0.965
+export const WHITE_UV = 0.965
 
-function setUniformUV(geo: THREE.BufferGeometry) {
+export function setUniformUV(geo: THREE.BufferGeometry) {
   const uv = geo.attributes.uv as THREE.BufferAttribute
   for (let i = 0; i < uv.count; i++) uv.setXY(i, WHITE_UV, WHITE_UV)
 }
@@ -371,7 +371,7 @@ function fishBumpTexture(): THREE.CanvasTexture {
 }
 
 // ------------------------- parts builders -------------------------
-interface BodySpec {
+export interface BodySpec {
   profile: number[]       // control radii, tail → nose
   w: number; h: number; len: number
 }
@@ -391,7 +391,7 @@ export interface Hull {
  * 44 radial verts, indexed with a welded seam → perfectly smooth
  * normals everywhere.
  */
-function makeHull(spec: BodySpec): Hull {
+export function makeHull(spec: BodySpec): Hull {
   const RINGS = 34, RAD = 44
   const smooth = resampleProfile(spec.profile, RINGS)
   const L = spec.len, H = spec.h, W = spec.w
@@ -491,7 +491,7 @@ function makeHull(spec: BodySpec): Hull {
  * profile, scalloped trailing edge, darker ray columns and a
  * membrane that fades toward translucent white at the edge.
  */
-function makeTailFan(len: number, spread: number, fork: number, color: THREE.Color): THREE.BufferGeometry {
+export function makeTailFan(len: number, spread: number, fork: number, color: THREE.Color): THREE.BufferGeometry {
   const RAYS = 13
   const ROWS = [0, 0.45, 0.78, 1]
   const rng = mulberry32(5)
@@ -540,7 +540,7 @@ function makeTailFan(len: number, spread: number, fork: number, color: THREE.Col
  * edge is scalloped, ray columns darker, tips fade to membrane.
  * dir +1 = along the back, -1 = along the belly.
  */
-function makeRayFin(
+export function makeRayFin(
   base: [number, number][],
   color: THREE.Color,
   radiusAt: (z: number) => number,
@@ -598,7 +598,7 @@ function makeRayFin(
  * cup (curled backward), darker ray columns, translucent tip.
  * Grows from the origin along +x, then placed with rotations.
  */
-function makePectoralFan(size: number, color: THREE.Color, rays = 6): THREE.BufferGeometry {
+export function makePectoralFan(size: number, color: THREE.Color, rays = 6): THREE.BufferGeometry {
   const ROWS = [0, 0.4, 0.75, 1]
   const L = size * 1.3
   const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.5)
@@ -665,7 +665,7 @@ function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number
  * Offsets below are in units of r relative to the sclera centre
  * (outward = ±x, up = +y, forward = +z).
  */
-function makeEyeParts(side: 1 | -1, sx: number, y: number, z: number, r: number, iris: string): THREE.BufferGeometry[] {
+export function makeEyeParts(side: 1 | -1, sx: number, y: number, z: number, r: number, iris: string): THREE.BufferGeometry[] {
   const out: THREE.BufferGeometry[] = []
   const push = (radius: number, dx: number, dy: number, dz: number, col: string, wSeg: number, hSeg: number) => {
     const g = new THREE.SphereGeometry(radius, wSeg, hSeg)

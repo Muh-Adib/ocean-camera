@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { School, type FieldCtx, type SchoolParams } from './Boids'
 import { buildFish, makeFishMaterial, updateFishMaterialTime, SPECIES_TINTS, type SpeciesKey } from './FishGeometryFactory'
+import { buildCustomFish, makeCustomFishMaterial } from './CustomFish'
 import type { Obstacle } from '../environment/Rocks'
 import type { Pellet } from './Feeding'
 import { BOUNDS, rand } from '../utils/math'
@@ -200,6 +201,79 @@ export class FishManager {
 
   count(): number {
     return this.schools.reduce((a, s) => a + s.fish.length, 0)
+  }
+
+  // ------------------------------------------------------------ custom painted fish
+  /** one small school per imported painting, keyed by design id */
+  private custom = new Map<string, { entry: Entry; mat: THREE.MeshStandardMaterial; texture: THREE.Texture }>()
+
+  /** how many painted designs are swimming right now */
+  get customCount(): number {
+    return this.custom.size
+  }
+
+  customIds(): string[] {
+    return [...this.custom.keys()]
+  }
+
+  hasCustomDesign(id: string): boolean {
+    return this.custom.has(id)
+  }
+
+  /**
+   * Add (or replace) a painted fish design: one school of ~6 swimmers
+   * mid-water near the reef front, gently curious like the wanderers.
+   */
+  addCustomDesign(id: string, texture: THREE.Texture, count = 6) {
+    this.removeCustomDesign(id)
+
+    const { geometry } = buildCustomFish()
+    const mat = makeCustomFishMaterial(texture)
+    const n = Math.max(2, count)
+
+    const anchor = new THREE.Vector3(rand(-6, 8), rand(0.5, 4), -18 + rand(-6, 4))
+    const school = new School(
+      'tropical', n, anchor, 4,
+      { ...BASE, maxSpeed: 2.7, cohW: 1.0, aliW: 0.8, wanderW: 2.4, curiosity: 0.7 },
+      [1.0, 1.3],
+      ['#ffffff'],        // white tint — the painting IS the colour
+      1.05,
+    )
+    this.schools.push(school)
+
+    const phaseAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1)
+    phaseAttr.setUsage(THREE.DynamicDrawUsage)
+    geometry.setAttribute('aPhase', phaseAttr)
+
+    const mesh = new THREE.InstancedMesh(geometry, mat, n)
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+    mesh.frustumCulled = false
+    for (let i = 0; i < n; i++) mesh.setColorAt(i, new THREE.Color('#ffffff'))
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
+    this.group.add(mesh)
+
+    const entry: Entry = { school, mesh, phaseAttr, puffAttr: null, dummy: new THREE.Object3D() }
+    this.entries.push(entry)
+    this.custom.set(id, { entry, mat, texture })
+  }
+
+  /** remove a painted design (and its school) from the water */
+  removeCustomDesign(id: string) {
+    const rec = this.custom.get(id)
+    if (!rec) return
+    this.custom.delete(id)
+    const ei = this.entries.indexOf(rec.entry)
+    if (ei >= 0) this.entries.splice(ei, 1)
+    const si = this.schools.indexOf(rec.entry.school)
+    if (si >= 0) this.schools.splice(si, 1)
+    this.group.remove(rec.entry.mesh)
+    rec.entry.mesh.geometry.dispose()
+    rec.mat.dispose()
+  }
+
+  /** painted designs currently swimming (QA) */
+  customInfo(): { id: string; fish: number }[] {
+    return [...this.custom.entries()].map(([id, rec]) => ({ id, fish: rec.entry.school.fish.length }))
   }
 
   /** nearest fish position to a point (used by curiosity feedback) */

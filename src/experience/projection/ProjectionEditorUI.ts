@@ -12,6 +12,8 @@ import { OutputNodeEditor } from './OutputNodeEditor'
 import { CameraManager } from './CameraManager'
 import { PRESETS } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
+import { downloadFishTemplate } from '../fish/FishTemplate'
+import { processFishImage } from '../fish/FishScan'
 
 const AIM_TARGET: [number, number, number] = [0, 1.4, -8]
 
@@ -82,6 +84,7 @@ export class ProjectionEditorUI {
           <button data-tab="blend" class="pm-tab">BLEND</button>
           <button data-tab="calibration" class="pm-tab">CALIBRATION</button>
           <button data-tab="project" class="pm-tab">PROJECT</button>
+          <button data-tab="fish" class="pm-tab">FISH</button>
         </div>
         <div class="pm-tab-body" id="pm-tab-body"></div>
       </div>`
@@ -222,6 +225,7 @@ export class ProjectionEditorUI {
     else if (tab === 'blend') this.buildBlendPane()
     else if (tab === 'calibration') this.buildCalibrationPane()
     else if (tab === 'project') this.buildProjectPane()
+    else if (tab === 'fish') this.buildFishPane()
     gsap.fromTo(this.tabBody, { opacity: 0.35 }, { opacity: 1, duration: 0.25, ease: 'power1.out' })
     this.refreshAll()
   }
@@ -604,6 +608,177 @@ export class ProjectionEditorUI {
       body.appendChild(list)
       body.appendChild(this.hint('COPY LINK puts the projector URL on the clipboard. LOAD restores the session here so you can keep editing it — publish again with the same name to refresh its link.'))
     }
+
+    // ---- phone QR on the wall — which surface carries the invitation ----
+    body.appendChild(this.sepEl())
+    body.appendChild(this.labelEl('PHONE QR ON WALL'))
+    const qrSel = document.createElement('select')
+    qrSel.className = 'pm-select'
+    const fillQr = () => {
+      qrSel.innerHTML = ''
+      const auto = document.createElement('option')
+      auto.value = 'auto'
+      auto.textContent = 'AUTO — LARGEST ENABLED SURFACE'
+      qrSel.appendChild(auto)
+      for (const s of this.pm.surfaces.surfaces) {
+        const o = document.createElement('option')
+        o.value = s.id
+        o.textContent = s.name.toUpperCase() + (s.enabled ? '' : ' (OFF)')
+        qrSel.appendChild(o)
+      }
+      qrSel.value = this.pm.qrHost === 'auto' || this.pm.surfaces.surfaces.some((s) => s.id === this.pm.qrHost)
+        ? this.pm.qrHost
+        : 'auto'
+    }
+    fillQr()
+    qrSel.addEventListener('change', () => this.pm.setQrHost(qrSel.value))
+    body.appendChild(qrSel)
+    body.appendChild(this.hint('While no phone is connected, a live QR rides ON this surface\u2019s picture — warped with the wall, so it reads perfectly straight on the physical wall and follows every move, morph and preset. It vanishes the moment a phone links and returns when the phone leaves.'))
+  }
+
+  // ------------------------------------------------------------ FISH tab — painted fish import
+  private fishDesigns: { id: string; name: string; url: string }[] = []
+  private fishBusy = false
+
+  private async loadFishDesigns() {
+    try {
+      const res = await fetch('/api/fish?full=1', { cache: 'no-store' })
+      if (!res.ok) return
+      const data = await res.json() as { designs?: { id: string; name: string; url: string }[] }
+      this.fishDesigns = Array.isArray(data.designs) ? data.designs : []
+    } catch { /* tank unreachable — keep what we had */ }
+  }
+
+  private async postFish(body: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch('/api/fish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const data = await res.json() as { ok?: boolean; error?: string }
+      if (!data.ok) this.pm.depsToast(data.error || 'Fish tank refused the design', 3200)
+      return !!data.ok
+    } catch {
+      this.pm.depsToast('Fish tank unreachable — is the server running?', 3200)
+      return false
+    }
+  }
+
+  private buildFishPane() {
+    const { body } = this.pane('FISH STUDIO — COLOUR A FISH, IT SWIMS IN THE OCEAN')
+
+    // ---- step 1: template ----
+    const tplRow = document.createElement('div')
+    tplRow.className = 'pm-btn-row'
+    tplRow.appendChild(this.btn('DOWNLOAD TEMPLATE', async () => {
+      const ok = await downloadFishTemplate()
+      this.pm.depsToast(ok ? 'Template saved — print it, colour it, snap a photo' : 'Template could not be generated', 3600)
+    }, 'pm-btn-sm'))
+    body.appendChild(tplRow)
+    body.appendChild(this.hint('1 · DOWNLOAD TEMPLATE prints the blank fish outline (nose left, tail right). Colour it with crayons, markers or paint — bold, bright colours read best on the reef.'))
+
+    // ---- step 2: import ----
+    const importRow = document.createElement('div')
+    importRow.className = 'pm-btn-row'
+
+    const photoInput = document.createElement('input')
+    photoInput.type = 'file'
+    photoInput.accept = 'image/*'
+    photoInput.multiple = true
+    photoInput.style.display = 'none'
+    const folderInput = document.createElement('input')
+    folderInput.type = 'file'
+    folderInput.accept = 'image/*'
+    folderInput.multiple = true
+    folderInput.setAttribute('webkitdirectory', '')
+    folderInput.setAttribute('directory', '')
+    folderInput.style.display = 'none'
+
+    const status = document.createElement('span')
+    status.className = 'pm-readout'
+    status.style.display = 'block'
+    status.textContent = ''
+
+    const handleFiles = async (files: FileList | null) => {
+      if (!files || !files.length || this.fishBusy) return
+      const images = [...files].filter((f) => f.type.startsWith('image/'))
+      if (!images.length) {
+        this.pm.depsToast('No images in that selection', 2600)
+        return
+      }
+      this.fishBusy = true
+      let ok = 0
+      for (let i = 0; i < images.length; i++) {
+        const file = images[i]
+        status.textContent = `Scanning ${i + 1}/${images.length} — ${file.name}`
+        try {
+          const design = await processFishImage(file)
+          if (await this.postFish({ action: 'add', design })) ok++
+        } catch {
+          this.pm.depsToast(`Could not read ${file.name}`, 2600)
+        }
+      }
+      this.fishBusy = false
+      status.textContent = ''
+      if (ok) {
+        this.pm.depsToast(`${ok} fish released into the ocean — they swim in on every screen`, 3800)
+        this.pm.fishTank?.poke()
+      }
+      await this.loadFishDesigns()
+      this.showTab('fish')
+    }
+    photoInput.addEventListener('change', () => void handleFiles(photoInput.files))
+    folderInput.addEventListener('change', () => void handleFiles(folderInput.files))
+
+    importRow.appendChild(this.btn('IMPORT PHOTO / SCAN', () => photoInput.click(), 'pm-btn-sm'))
+    importRow.appendChild(this.btn('IMPORT FOLDER', () => folderInput.click(), 'pm-btn-sm'))
+    importRow.append(photoInput, folderInput)
+    body.appendChild(importRow)
+    body.appendChild(status)
+    body.appendChild(this.hint('2 · IMPORT PHOTO picks one or more photos; IMPORT FOLDER scans a whole local folder and releases every image it finds. Lay the sheet flat, shoot straight on in good light — the drawing is found automatically.'))
+
+    // ---- step 3: the tank ----
+    body.appendChild(this.sepEl())
+    body.appendChild(this.labelEl('IN THE TANK'))
+    const grid = document.createElement('div')
+    grid.className = 'pm-fish-grid'
+    for (const d of this.fishDesigns) {
+      const cell = document.createElement('div')
+      cell.className = 'pm-fish-cell'
+      const img = document.createElement('img')
+      img.src = d.url
+      img.alt = d.name
+      img.loading = 'lazy'
+      const name = document.createElement('span')
+      name.className = 'pm-fish-name'
+      name.textContent = d.name
+      name.title = d.name
+      const del = document.createElement('button')
+      del.className = 'pm-fish-del'
+      del.textContent = '×'
+      del.title = 'Release this design from the tank'
+      del.addEventListener('click', async () => {
+        if (await this.postFish({ action: 'remove', id: d.id })) {
+          this.pm.fishTank?.poke()
+          await this.loadFishDesigns()
+          this.showTab('fish')
+        }
+      })
+      cell.append(img, name, del)
+      grid.appendChild(cell)
+    }
+    body.appendChild(grid)
+    if (!this.fishDesigns.length) {
+      body.appendChild(this.hint('The tank is empty — imported fish appear here and instantly start swimming on the main ocean and every output screen.'))
+    } else {
+      body.appendChild(this.hint(`${this.fishDesigns.length} design${this.fishDesigns.length === 1 ? '' : 's'} · a small school of each swims on every screen of the show. Remove one and it disappears everywhere too.`))
+    }
+
+    void this.loadFishDesigns().then(() => {
+      // repaint the grid once the full list arrives (first open)
+      if (grid.isConnected && !grid.childElementCount && this.fishDesigns.length) this.showTab('fish')
+    })
   }
 
   // ------------------------------------------------------------ surfaces list

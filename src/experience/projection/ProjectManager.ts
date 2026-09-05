@@ -16,6 +16,9 @@ export interface ProjectHost {
   surfaces: SurfaceManager
   output: ProjectionOutput
   setOutput(o: ProjectionOutput): void
+  /** which surface carries the phone QR ('auto' = largest enabled) */
+  qrHost: string
+  setQrHost(host: string): void
 }
 
 /** one published output session — a full project snapshot under a stable id */
@@ -190,6 +193,7 @@ export class ProjectManager {
       version: PROJECT_VERSION,
       output: { ...this.host.output },
       surfaces: this.host.surfaces.serialize(),
+      qr: { host: this.host.qrHost },
     }
   }
 
@@ -217,6 +221,9 @@ export class ProjectManager {
       quality,
     })
     this.host.surfaces.replaceAll(surfaces)
+    // QR host setting — 'auto' or a surface id (fall back to auto when stale)
+    const qh = typeof p.qr?.host === 'string' ? p.qr.host : 'auto'
+    this.host.setQrHost(qh === 'auto' || surfaces.some((s) => s.id === qh) ? qh : 'auto')
     return true
   }
 

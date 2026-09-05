@@ -626,3 +626,34 @@ Verified: tsc clean; /output boots (QR at wall centroid, WS open), /control-mobi
 
 Stage Summary:
 - One canonical smartphone link now exists (WebSocket), the stuttering SSE remote is gone, and the good two-hand gesture work from the old branch rides on the new stack
+
+---
+Task ID: 22
+Agent: main (Super Z)
+Task: QR menempel di wall (in-projection WallQr + host setting) + fitur baru "ikan warna" — colouring-sheet → texture → 3D fish, dengan folder import di console control
+
+Work Log:
+- User feedback: (1) posisi QR sudah ada tapi belum mengikuti surface & terdistorsi karena tidak sesuai wall → QR harus MENEMPEL di wall dan hilang saat ada koneksi; (2) fitur baru: user mewarnai template ikan kosong, foto/scan, texture ikannya diambil dari gambar user (seperti contoh Template Ikan.png) lalu ikannya berenang di ocean; harus muncul sesuai session di semua layar; input gambar ada di console control + bisa impor otomatis dari folder lokal.
+- WALL QR (remote/WallQr.ts): QR dirender KE DALAM render target tiap surface (render kedua tanpa clear, material toneMapped:false + pre-boost 1.35, depthTest off) — sehingga melewati warp/mesh/morph pipeline yang sama dengan picture: menempel di wall, ikut segala move/warp/preset, dan di dinding fisik tampil LURUS (pre-distorted otomatis di output space). Kartu QR (576×720): QR + "OCEAN REMOTE" + "scan — your phone is the controller" digambar via qrcode.toCanvas ke CanvasTexture; alpha fade (ease 5.5/s) via MeshBasicMaterial.opacity; ukuran konstan (94% tinggi view) di posisi sedikit atas. QA verified: QR muncul di composite /output, ikut moveSurface(+320,+90) EXACT, ikut warpCorner(keystone), alpha→0 saat phone hadir & kembali saat pergi.
+- QR HOST SETTING: ProjectionProject.qr.host ('auto' = enabled surface terluas | surface id) — ProjectManager.serialize/load membawanya (sanitasi id); UI: pane PROJECT dapat section "PHONE QR ON WALL" (select AUTO + nama surface → pm.setQrHost → broadcast + autosave). BUGFIX: qrHost awalnya di-pass sebagai snapshot value ke ProjectHost → serialize selalu 'auto'; diganti live getter (const self + eslint-disable no-this-alias). Verified: studio select → autosave {host:'surf-…'} → /output boot menghormati host tsb.
+- QrOverlay (DOM) jadi FALLBACK saja: disembunyikan saat WallQr punya host (hasWallHost provider), center saat tak ada surface. qrInfo() QA kini melaporkan {wall:{alpha,host,hostName,visible,url}}.
+- ZOMBIE PHONE FIX (root cause lama "QR tidak muncul"): ditemukan 3 socket phone zombie di hub (tab QA lama masih hidup) → presence 'on' selamanya → QR tak pernah tampil. server.js: ws.lastSeen + sweep 5 s; phone idle >22 s (tanpa frame apa pun) di-terminate → announce. PhoneLink kini kirim heartbeat {t:'hb'} tiap 5 s agar phone hidup tapi diam tak di-expires.
+- FISH TEMPLATE (fish/FishTemplate.ts): layout kontrak FISH_SHEET (BODY wrap 0.055–0.80, TAIL, DORSAL, ANAL, PECTORAL, PELVIC rect, WHITE_UV 0.965) + drawFishTemplate() — mewarnai outline ala contoh user (nose kiri, ekor kanan, sirip punggung/samping/perut, mata, insang, frame + corner bracket registrasi); downloadFishTemplate() → PNG 1600².
+- CUSTOM FISH (fish/CustomFish.ts): buildCustomFish() — hull makeHull + UV wrap (s=1-t sepanjang badan, v=(cy+1)/2 lingkar) memetakan lukisan melingkar ke badan; tiap sirip (makeTailFan/makeRayFin/makePectoralFan) di-remap bbox → rect-nya masing-masing (uMode zFront/radial, vMode up/down/span) + vertex colors putih; mata 3D asli sampling WHITE_UV (direserve putih di processor). makeCustomFishMaterial() = makeFishMaterial + bumpScale 0.16. FishGeometryFactory: export makeHull/makeTailFan/makeRayFin/makePectoralFan/makeEyeParts/setUniformUV/WHITE_UV/BodySpec.
+- FISH SCAN (fish/FishScan.ts): decode → downscale 1024 → estimasi kertas (median border luminance) → mask ink (sat>34 || lum<paper-62) di grid kasar → largest 4-connected component (= ikan, mengabaikan frame tipis) → bbox + pad → fit kanvas 768² putih margin 6% + filter saturate/contrast → reserveWhiteTexel → JPEG ≤480 KB (quality walk). Fallback whole-image utk close-up scan.
+- FISHMANAGER: addCustomDesign/removeCustomDesign/customInfo — 1 school (6 ekor, tint putih, curiosity 0.7, anchor acak [−6..8, 0.5..4, −24..−14]) per design, geometry+material+texture didispose saat remove.
+- TANK API (app/api/fish/route.ts): globalThis store + mirror .fish-tank.json (gitignored); GET (items ringan) / GET ?full=1 (dengan url) / POST add-remove-clear; cap 12 design × 480 KB, evict oldest.
+- FISHTANK (fish/FishTank.ts): poll versi (4 s; 1.2 s setelah poke), pull full saat berubah, diff add/remove → FishManager — jalan di SEMUA page (main + /output mesin lain) sehingga ikan baru berenang di semua layar tanpa reload. info() utk QA (__ocean.projection.fish()).
+- CONSOLE UI: tab FISH baru di ProjectionEditorUI — DOWNLOAD TEMPLATE, IMPORT PHOTO / SCAN (input multiple), IMPORT FOLDER (webkitdirectory), status scan, grid "IN THE TANK" (thumbnail + nama + DEL). projection.css: .pm-fish-grid/.pm-fish-cell/.pm-fish-name/.pm-fish-del.
+
+Verified headless (agent-browser, server restart bersih):
+- /output boot: WallQr alpha→0.99, hostName "Main Screen", QR tampil DI picture (bukan DOM); moveSurface +320/+90 → QR pindah EXACT mengikuti; warpCorner → QR keystone mengikuti wall; phone WS connect → alpha 0.68→0.09 (fade, lambat hanya krn RAF headless) → close → alpha naik lagi; host eksplisit via PROJECT select → /output boot memakai surface tsb.
+- Fish E2E: template berwarna (dibuat dr line art user + flood-fill interior) di-upload via tab FISH → FishScan memotong ikan → POST tank → studio fishCount 236→242 (1 design × 6) → /output ikut 242 tanpa reload; screenshot menampilkan ikan rainbow berenang; remove → 236 kembali.
+- server.js: zombie phones ter-expire ≤22 s (lebih dulu: ditemukan 3 zombie nyata dari sesi lama yang membuat QR tak muncul — persis keluhan user).
+- tsc clean (kecuali examples//skills/ pre-existing); eslint clean di semua file berubah (server.js CommonJS require = style lama file itu); semua page 200; zero page errors.
+- Screenshots: download/qa-wall-qr-output.png (QR di wall), qa-wall-qr-moved.png (ikut pindah), qa-wall-qr-warped.png (ikut keystone), qa-painted-fish.png (ikan warna), qa-fish-tab.png (tab FISH), qa-project-qr.png (QR host select).
+
+Stage Summary:
+- QR kini MENEMPEL di wall: dirender ke dalam picture, mengikuti move/warp/morph, tampil lurus di dinding fisik, hilang saat phone connect, kembali saat phone pergi, dan host-nya bisa dipilih per surface di console (AUTO = wall terluas).
+- Akar masalah "QR tidak muncul" (socket phone zombie di hub) dibasmi dengan idle-expiry + heartbeat.
+- Fitur "ikan warna": template kosong bisa diunduh dari console, user mewarnai & memotret/scan, gambar otomatis dipotong jadi texture — ikan 3D-nya langsung berenang di semua layar; impor bisa per foto atau seluruh folder lokal; setiap design membentuk school kecil dan bisa dihapus lagi.

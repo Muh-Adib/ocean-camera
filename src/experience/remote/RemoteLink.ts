@@ -151,12 +151,16 @@ export class ScreenLink extends WsBase {
 // ---------------------------------------------------------------
 export class PhoneLink extends WsBase {
   onState?: (live: boolean) => void
+  private hbTimer = 0
 
   constructor() {
     super('phone')
     this.onOpen = () => this.onState?.(true)
     this.onClose = () => this.onState?.(false)
     this.connect()
+    // idle heartbeat: proves the phone is alive even when no sticks move.
+    // Without it, the hub's idle sweep would drop a quiet-but-open phone.
+    this.hbTimer = window.setInterval(() => this.send({ t: 'hb' }), 5000)
   }
 
   /** stick velocities — called at the phone's 30 Hz cadence while live */
@@ -169,4 +173,10 @@ export class PhoneLink extends WsBase {
   }
 
   sendCam(on: boolean) { this.send({ t: 'cam', on }) }
+
+  dispose() {
+    window.clearInterval(this.hbTimer)
+    this.hbTimer = 0
+    super.dispose()
+  }
 }

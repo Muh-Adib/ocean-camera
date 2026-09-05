@@ -17,14 +17,22 @@ const TICK_MS = 120          // reposition cadence while visible (cheap math onl
 const MIN_QR_OUT = 130       // clamp: smallest QR in output px
 const MAX_QR_OUT = 250
 
+/**
+ * DOM fallback card. Since WallQr renders the QR INTO the wall picture
+ * (warped with it, straight on the physical wall), this DOM card only
+ * shows when the room has NO enabled surface to host it — then it parks
+ * centered on the output canvas instead of following a wall centroid.
+ */
 export class QrOverlay {
   private root: HTMLElement | null = null
   private canvas: HTMLCanvasElement | null = null
   private hint: HTMLElement | null = null
   /** operator closed it for this page session */
-  private dismissed = false
+  dismissed = false
   /** phone currently linked (driven by ScreenLink presence) */
   phoneOn = false
+  /** set by ProjectionManager — true while the wall QR has a host surface */
+  hasWallHost: (() => boolean) | null = null
   private timer = 0
   private visible = false
 
@@ -71,22 +79,30 @@ export class QrOverlay {
   /** recompute position/size from the current surfaces (called on a timer) */
   tick() {
     if (!this.root) return
-    const wantVisible = !this.dismissed && !this.phoneOn
+    // the wall QR (in-projection) owns the show whenever it has a host;
+    // this DOM card is only the no-surface fallback, centered
+    const wallOwns = this.hasWallHost?.() ?? false
+    const wantVisible = !wallOwns && !this.dismissed && !this.phoneOn
     this.show(wantVisible)
     if (!wantVisible) return
 
     const { cx, cy, size } = this.wallCentroid()
-    if (cx < -1e6) { this.root.style.opacity = '0'; return }
-
-    // output space → screen space (same letterbox fit as the composite)
     const W = window.innerWidth, H = window.innerHeight
-    const out = this.getOutputSize?.()
-    const ow = out?.w ?? 1920, oh = out?.h ?? 1080
-    if (ow <= 0 || oh <= 0) return
-    const scale = Math.min(W / ow, H / oh)
-    const sx = W / 2 + (cx - ow / 2) * scale
-    const sy = H / 2 + (cy - oh / 2) * scale
-    const px = Math.max(64, Math.min(Math.min(W, H) * 0.42, size * scale))
+    let sx: number, sy: number, px: number
+    if (cx < -1e6) {
+      // no surfaces at all — park centered
+      sx = W / 2; sy = H / 2
+      px = Math.min(W, H) * 0.3
+    } else {
+      // output space → screen space (same letterbox fit as the composite)
+      const out = this.getOutputSize?.()
+      const ow = out?.w ?? 1920, oh = out?.h ?? 1080
+      if (ow <= 0 || oh <= 0) return
+      const scale = Math.min(W / ow, H / oh)
+      sx = W / 2 + (cx - ow / 2) * scale
+      sy = H / 2 + (cy - oh / 2) * scale
+      px = Math.max(64, Math.min(Math.min(W, H) * 0.42, size * scale))
+    }
 
     this.root.style.opacity = '1'
     const card = this.root.querySelector('.pm-qr-card') as HTMLElement | null

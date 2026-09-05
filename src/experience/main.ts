@@ -25,6 +25,7 @@ import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
 import { SpecialCreatures } from './fish/SpecialCreatures'
 import { Feeding } from './fish/Feeding'
+import { FishTank } from './fish/FishTank'
 import { InteractionField } from './interaction/InteractionField'
 import { HandTracker } from './interaction/HandTracker'
 import { GestureEngine } from './interaction/GestureEngine'
@@ -212,6 +213,15 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     outputOnly,
   })
   if (outputOnly) projection.enterOutputOnly()
+
+  // ---------------- painted fish tank (colouring-book imports) ----------------
+  // The studio console (FISH tab) imports coloured sheets; every page — this
+  // one, the studio tab and each /output projector machine — keeps its own
+  // schools in sync through the tank API. New fish just swim in, everywhere.
+  const fishTank = new FishTank(fish)
+  projection.fishTank = fishTank
+  fishTank.start()
+  disposers.push(() => fishTank.stop())
 
   // phone-camera hand signals (WebSocket from /control-mobile) drive the
   // ocean the same way the local camera does — only when the local camera
@@ -504,6 +514,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */
       qrInfo: () => projection.qrInfo(),
+      fish: () => fishTank.info(),
       /** force an immediate full push to every open /output */
       pushNow: () => projection.qaPush(),
       freeze: (on: boolean) => { projection.qaFrozen = on },

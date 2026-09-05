@@ -13,9 +13,13 @@
 //   phone → hub → screens: {t:'ctl', mx,my,ox,oy,dz}   stick velocities (−1..1)
 //                          {t:'hand', p,x,y,o,n}       hand metrics (p=present)
 //                          {t:'cam', on}               camera mode toggled
+//                          {t:'hb'}                    idle heartbeat (keep-alive)
 //   hub → screens: {t:'phone', on}                     phone presence
 //   hub → phone:   nothing (fire-and-forget upstream)
-// Every socket gets ping/pong liveness + a 2.5 s idle-timeout sweep.
+// Every socket gets ping/pong liveness + a 15 s sweep; phones also
+// expire after 22 s of TOTAL silence (crashed tabs / half-open Wi-Fi
+// sockets would otherwise be counted as connected forever and the
+// wall QR would never come back).
 // ---------------------------------------------------------------
 const { createServer } = require('http')
 const next = require('next')
@@ -47,9 +51,11 @@ app.prepare().then(() => {
   wss.on('connection', (ws, req) => {
     ws.role = null
     ws.alive = true
+    ws.lastSeen = Date.now()
     ws.on('pong', () => { ws.alive = true })
 
     ws.on('message', (raw) => {
+      ws.lastSeen = Date.now()          // any frame proves the phone is alive
       let msg
       try { msg = JSON.parse(String(raw)) } catch { return }
       if (!msg || typeof msg.t !== 'string') return
@@ -86,14 +92,23 @@ app.prepare().then(() => {
     }
   })
 
-  // liveness sweep — drop sockets the OS lost silently (projector sleep etc.)
+  // liveness sweep — drop sockets the OS lost silently (projector sleep,
+  // phone walked out of Wi-Fi, crashed tab). Pong-based for everyone, plus
+  // a hard idle expiry for PHONES: a silent phone is a GONE phone — if it
+  // were counted forever, the wall QR would never come back on its own.
   const beat = setInterval(() => {
+    const now = Date.now()
     for (const ws of wss.clients) {
+      const idleFor = now - (ws.lastSeen || now)
+      if (ws.role === 'phone' && idleFor > 22000) {
+        try { ws.terminate() } catch { /* close follows */ }
+        continue
+      }
       if (!ws.alive) { try { ws.terminate() } catch { /* noop */ } continue }
       ws.alive = false
       try { ws.ping() } catch { /* noop */ }
     }
-  }, 15000)
+  }, 5000)
   beat.unref()
 
   server.listen(port, '0.0.0.0', () => {
