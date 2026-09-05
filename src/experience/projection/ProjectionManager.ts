@@ -19,6 +19,9 @@ import { ProjectManager, encodeProjectPayload, decodeProjectPayload, PORTABLE_LI
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
+import { RemoteRig } from '../remote/RemoteRig'
+import { ScreenLink, type HandFrame } from '../remote/RemoteLink'
+import { QrOverlay } from '../remote/QrOverlay'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
@@ -94,6 +97,15 @@ export class ProjectionManager {
   /** MSAA render targets need float-buffer rendering support (already required by the HalfFloat RTs) */
   private msaaOK = true
 
+  // ---- phone remote (WebSocket) ----
+  /** smoothed rigid camera transform shared by every surface camera */
+  remoteRig = new RemoteRig()
+  private remoteLink: ScreenLink | null = null
+  private qr: QrOverlay | null = null
+  /** phone-camera hand signals forwarded to the ocean (set by main.ts) */
+  onPhoneHand: ((h: HandFrame | null) => void) | null = null
+  phoneOn = false
+
   constructor(private deps: ProjectionDeps) {
     this.cameras = new CameraManager(deps.sceneMgr.scene)
     this.outputMgr = new OutputManager(this.blend, this.calib)
@@ -128,6 +140,98 @@ export class ProjectionManager {
     window.addEventListener('keydown', this.onKeyDown)
   }
 
+  // ------------------------------------------------------------ phone remote (WebSocket)
+  /**
+   * WebSocket link to the phone remote — the hub lives in server.js at
+   * /ws/control. Phones send stick velocities + hand signals; screens
+   * receive them, feed the smoothed RemoteRig and show/hide the QR.
+   * The socket auto-reconnects, so projector sleep / network blips heal
+   * themselves without anyone touching the room.
+   */
+  private ensureRemote() {
+    if (this.remoteLink) return
+    this.cameras.rig = this.remoteRig
+    const link = new ScreenLink()
+    this.remoteLink = link
+    link.onPresence = (on) => {
+      this.phoneOn = on
+      if (on) {
+        this.remoteRig.enabled = true
+        this.deps.toast('Phone connected — remote control live', 2400)
+      } else {
+        // phone gone: drop input instantly, glide the view home
+        this.remoteRig.release()
+        this.remoteRig.enabled = false
+        this.onPhoneHand?.(null)
+      }
+      if (this.qr) this.qr.phoneOn = on
+      this.syncOutputOverlay()
+    }
+    if (this.outputOnly) this.buildQr()
+  }
+
+  /** buildQr keeps live output-size via provider — update call sites stay simple */
+  private buildQr() {
+    if (this.qr) return
+    this.qr = new QrOverlay(this.deps.container)
+    this.qr.getSurfaces = () => this.surfaces.surfaces
+    this.qr.getOutputSize = () => ({ w: this.output.width, h: this.output.height })
+    this.qr.phoneOn = this.phoneOn
+  }
+
+  /** per-frame remote pump — control smoothing + hand forwarding */
+  private updateRemote(dt: number) {
+    const link = this.remoteLink
+    if (!link) return
+    // stale-input handling: fresh packets drive the rig directly; when the
+    // phone goes quiet (tab hidden, Wi-Fi hiccup) the last velocity BLEEDS
+    // out smoothly — the view coasts to a stop, never drifts, never freezes
+    if (link.ctlAge() < 350) {
+      const c = link.ctl
+      if (c) this.remoteRig.apply(c)
+    } else if (this.remoteRig.hasInput()) {
+      this.remoteRig.decayInput(dt)
+    }
+    this.remoteRig.update(dt)
+    this.onPhoneHand?.(link.freshHand())
+  }
+
+  /** QA / operator diagnostics for the phone link */
+  remoteInfo() {
+    const link = this.remoteLink
+    return {
+      ws: link ? (link.live ? 'open' : 'reconnecting') : 'idle',
+      phoneOn: this.phoneOn,
+      rig: { ...this.remoteRig.cur },
+      ctlAgeMs: link ? (Number.isFinite(link.ctlAge()) ? Math.round(link.ctlAge()) : null) : null,
+    }
+  }
+
+  /** QA: nudge the rig directly (headless tests) */
+  qaRigSet(v: { yaw?: number; pitch?: number; dolly?: number; strafe?: number; lift?: number }) {
+    Object.assign(this.remoteRig.cur, v)
+  }
+
+  /** QA: QR overlay geometry */
+  qrInfo(): { present: boolean; visible: boolean; x: number; y: number } {
+    if (!this.qr) return { present: false, visible: false, x: 0, y: 0 }
+    const card = this.qrRoot()?.querySelector('.pm-qr-card') as HTMLElement | null
+    return {
+      present: true,
+      visible: this.qrVisible(),
+      x: card ? Math.round(parseFloat(card.style.left || '0')) : 0,
+      y: card ? Math.round(parseFloat(card.style.top || '0')) : 0,
+    }
+  }
+
+  private qrRoot(): HTMLElement | null {
+    return document.getElementById('pm-qr')
+  }
+
+  private qrVisible(): boolean {
+    return !!this.qrRoot()?.classList.contains('pm-qr-on')
+  }
+
   // ------------------------------------------------------------ lifecycle
   enter() {
     if (this.active) return
@@ -135,6 +239,7 @@ export class ProjectionManager {
     this.mainCamera.layers.enable(1)   // editor viewport sees camera frustums
     this.wireSyncChannel()
     this.startRelayHeartbeat()
+    this.ensureRemote()
 
     let restored = false
     if (this.surfaces.surfaces.length === 0) {
@@ -195,6 +300,7 @@ export class ProjectionManager {
     if (this.active) return
     this.active = true
     this.outputOnly = true
+    this.ensureRemote()
 
     const params = new URLSearchParams(window.location.search)
     const sid = params.get('s')
@@ -850,8 +956,13 @@ export class ProjectionManager {
   }
 
   // ------------------------------------------------------------ render pipeline
+  private lastFrameAt = 0
   /** called from the main loop instead of sceneMgr.render() while active */
   renderFrame() {
+    const now = performance.now()
+    const dt = this.lastFrameAt ? Math.min(0.05, (now - this.lastFrameAt) / 1000) : 1 / 60
+    this.lastFrameAt = now
+    this.updateRemote(dt)
     const t0 = performance.now()
     this.renderFrameInner()
     this.frameCost = performance.now() - t0
@@ -863,6 +974,9 @@ export class ProjectionManager {
     const scene = this.deps.sceneMgr.scene
     const q = resolveQuality(this.output)
     const msaa = this.msaaOK ? q.msaa : 0
+
+    // the rig constellation recomputes from base surface data once per frame
+    this.cameras.beginFrame(this.surfaces.surfaces)
 
     // 1) shared world → every enabled surface camera → its own RT
     if (!this.qaFrozen) {
@@ -1016,6 +1130,11 @@ export class ProjectionManager {
     window.clearInterval(this.hbTimer)
     this.relayES?.close()
     this.relayES = null
+    this.remoteLink?.dispose()
+    this.remoteLink = null
+    this.qr?.dispose()
+    this.qr = null
+    this.cameras.rig = null
     window.removeEventListener('resize', this.onResize)
     window.removeEventListener('keydown', this.onKeyDown)
     this.unsubs.forEach((u) => u())

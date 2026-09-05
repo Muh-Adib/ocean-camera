@@ -213,6 +213,20 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   })
   if (outputOnly) projection.enterOutputOnly()
 
+  // phone-camera hand signals (WebSocket from /control-mobile) drive the
+  // ocean the same way the local camera does — only when the local camera
+  // is not already running, so the two never fight over the field
+  projection.onPhoneHand = (h) => {
+    if (handTracker.isRunning) return
+    if (h && h.p) {
+      const p = new THREE.Vector3((h.x - 0.5) * 70, 2 + (0.5 - h.y) * 22, -18)
+      field.setHandActive(true)
+      field.setTarget(p, undefined, 0.15 + h.o * 0.55, 'current')
+    } else {
+      field.setHandActive(false)
+    }
+  }
+
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
       ui.setStatus('LOADING HAND MODEL…', 'loading')
@@ -482,6 +496,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       fsEdit: (on?: boolean) => projection.setFullscreenEditor(on !== false),
       /** live-sync transport diagnostics (BroadcastChannel + server relay) */
       relay: () => projection.relayInfo(),
+      /** phone remote diagnostics (WebSocket link, rig pose, QR) */
+      remote: () => projection.remoteInfo(),
+      /** QA: force the remote rig offsets (headless tests) */
+      rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
+      /** QA: QR overlay geometry on /output */
+      qrInfo: () => projection.qrInfo(),
       /** force an immediate full push to every open /output */
       pushNow: () => projection.qaPush(),
       freeze: (on: boolean) => { projection.qaFrozen = on },

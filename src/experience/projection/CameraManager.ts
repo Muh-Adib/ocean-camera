@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { ProjectionSurface } from './ProjectionTypes'
+import type { RemoteRig } from '../remote/RemoteRig'
 
 const DEG = Math.PI / 180
 
@@ -16,7 +17,53 @@ export class CameraManager {
   private cameras = new Map<string, THREE.PerspectiveCamera>()
   private helpers = new Map<string, THREE.CameraHelper>()
 
+  /** phone-remote rigid constellation transform (null → cameras pose plainly) */
+  rig: RemoteRig | null = null
+  /** per-frame constellation cache — computed from BASE surface data, never
+   *  from the (already rig-offset) THREE cameras, or offsets would compound */
+  private frameId = 0
+  private frameSurfaces: ProjectionSurface[] = []
+  private cPivot = new THREE.Vector3()
+  private cFwd = new THREE.Vector3()
+  private cRight = new THREE.Vector3()
+  private cReady = false
+
   constructor(private scene: THREE.Scene) {}
+
+  /** start a new render frame — constellation recomputes lazily on first sync */
+  beginFrame(surfaces: ProjectionSurface[]) {
+    this.frameId++
+    this.frameSurfaces = surfaces
+    this.cReady = false
+  }
+
+  /** pivot = centroid of every enabled camera's base position; fwd/right =
+   *  their mean view axes. One rigid frame of reference for the whole show. */
+  private ensureConstellation() {
+    if (this.cReady) return
+    this.cReady = true
+    let px = 0, py = 0, pz = 0
+    let fx = 0, fy = 0, fz = 0
+    let n = 0
+    for (const s of this.frameSurfaces) {
+      if (!s.enabled) continue
+      const c = s.camera
+      px += c.position[0]; py += c.position[1]; pz += c.position[2]
+      const yaw = c.yaw * DEG, pitch = c.pitch * DEG
+      // camera forward for YXZ euler (0,0,0 looks down −Z)
+      fx += -Math.sin(yaw) * Math.cos(pitch)
+      fy += Math.sin(pitch)
+      fz += -Math.cos(yaw) * Math.cos(pitch)
+      n++
+    }
+    if (n === 0) { this.cPivot.set(0, 2, 0); this.cFwd.set(0, 0, -1); this.cRight.set(1, 0, 0); return }
+    this.cPivot.set(px / n, py / n, pz / n)
+    this.cFwd.set(fx / n, fy / n, fz / n).normalize()
+    // right = fwd × up (normalized; degenerate straight-down views fall back)
+    this.cRight.set(this.cFwd.z, 0, -this.cFwd.x)
+    if (this.cRight.lengthSq() < 1e-6) this.cRight.set(1, 0, 0)
+    this.cRight.normalize()
+  }
 
   /** create-or-update the camera for a surface; returns it */
   sync(s: ProjectionSurface): THREE.PerspectiveCamera {
@@ -66,8 +113,21 @@ export class CameraManager {
     }
     const helper = this.helpers.get(s.id)
     if (helper && (projChanged || posChanged || rotChanged)) helper.update()
+
+    // phone-remote rigid constellation — applied AFTER the base pose so it
+    // composes onto fresh surface data every frame (no compounding)
+    if (this.rig) {
+      this.ensureConstellation()
+      this.basePos.set(c.position[0], c.position[1], c.position[2])
+      this.baseQuat.setFromEuler(this.baseEuler.set(c.pitch * DEG, c.yaw * DEG, 0, 'YXZ'))
+      this.rig.applyTo(cam, this.basePos, this.baseQuat, this.cPivot, this.cFwd, this.cRight)
+    }
     return cam
   }
+
+  private basePos = new THREE.Vector3()
+  private baseQuat = new THREE.Quaternion()
+  private baseEuler = new THREE.Euler()
 
   get(id: string): THREE.PerspectiveCamera | undefined {
     return this.cameras.get(id)

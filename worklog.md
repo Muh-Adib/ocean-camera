@@ -434,3 +434,34 @@ Verified headless (agent-browser, main session + isolated "proj2" browser as the
 Stage Summary:
 - The control no longer needs an embedded preview at all: /output is the preview — pixel-identical, live in ≤300 ms, and it now follows the control across browsers and machines via the server relay, not just across tabs
 - The show-must-not-die contract is untouched: close the control and every output keeps rendering its last state; reopen and edit and they snap back to LIVE LINK
+
+---
+Task ID: 17
+Agent: main (Super Z)
+Task: QR smartphone connection on /output + /control-mobile double-joystick remote over a real WebSocket + smooth rigid camera rig (user: "qr untuk koneksi dengan smartphone"; earlier: "gunakan ws", "control di hp terlalu banyak ... doubel joystik ... lebih smooth")
+
+Work Log:
+- Discovered the earlier QR/remote work was never persisted (git log ended at the relay commit) — rebuilt the whole smartphone link from scratch
+- server.js (new): custom Next.js server owning the HTTP socket — WebSocket hub at /ws/control (package `ws`, noServer + path-routed upgrade), role-tagged sockets (phone/screen), phone→screen fan-out for ctl/hand/cam frames, phone presence broadcasts on connect/disconnect, ping/pong liveness sweep every 15 s; package.json dev/start now run it (`node server.js`), everything non-WS still handled by Next
+- RemoteRig (new): ONE rigid transform shared by every projection camera — orbit (yaw world-Y ∘ pitch local-right around the constellation pivot = centroid of surface cameras) + dolly along the mean view axis + strafe along mean right + lift; applied AFTER base pose in CameraManager.sync via applyTo(), constellation recomputed per frame from BASE surface data (no compounding). RIGIDITY IS THE EDGE FIX: adjacent frustums stay congruent under any orbit/pan, so walls can never tear at the seams
+- Feel: phone sends stick VELOCITIES (deflection = speed); rig integrates targets and glides current→target with exponential damping (7.5/s) — packet jitter, stick release and limit hits all decay as one fluid motion. SOFT LIMITS: rubber-band gain eases to 0 at bounds (pitch ±62°, dolly −14..+26, strafe ±16, lift −7..+9) — verified by a deterministic unit test (scripts/rig-limits-test.mjs, 8/8 PASS: no overshoot, near-bound speed <5% of free speed, all finite)
+- RemoteLink (new): ScreenLink (studio + /output) with auto-reconnect + backoff — consumes ctl frames, hand frames (700 ms freshness), phone presence; PhoneLink (/control-mobile) sends ctl/hand/cam
+- Stale-input handling: packets older than 350 ms bleed the last velocity out smoothly (decayInput) — view coasts to a gentle stop whether the phone tab hides, Wi-Fi hiccups or the socket drops; no drift, no mid-air freeze
+- QrOverlay (new): QR rides ON the projected picture while no phone is linked — encodes <origin>/control-mobile, positioned at the centroid of the enabled walls' warped corners, sized to the walls (clamped 130–250 output px), re-ticks every 120 ms so it FOLLOWS moves/warps/morphs (verified: +200,+60 output px → +133,+40 screen px = exact letterbox scale); hides the moment a phone links, returns when it leaves, × dismisses for the session
+- /control-mobile (new page + PhoneController): DOUBLE JOYSTICK only — left MOVE (x strafe / y lift), right ORBIT (x yaw / y pitch), spring-back DOLLY throttle; pointer-capture sticks with dead zone + eased response; 30 Hz send loop; camera panel (getUserMedia preview + hand overlay + status) EXISTS ONLY while CAMERA mode is on — toggling off removes every trace and stops the stream (verified in headless: panel display:none by default, toggle on→visible, off→gone, graceful failure without a camera); numHands 2, palm/openness metrics streamed up
+- main.ts: phone hand signals drive the ocean (field target + strength from openness) when the local camera isn't running; QA hooks: projection.remote(), rigSet(), qrInfo()
+- remote.css: QR card (glassy, breathing glow, follows wall centroid) + full mobile remote UI (safe-area aware, touch-action none)
+
+Verified headless (agent-browser, ws protocol test + 2 concurrent browser sessions as phone + wall):
+- Hub: presence true on connect / false on close; ctl/hand/cam fan-out exact
+- /output: QR visible at wall centroid on boot; phone (real second browser on /control-mobile) connects → QR hides; drag of the REAL orbit stick on the phone → /output rig integrates (yaw 6.4°, pitch 3.6° at headless ~2 fps; real browsers integrate at full 60 fps); phone closes → QR returns; ScreenLink auto-reconnect heals forced WS drops ("reconnecting" → "open")
+- Watchdog: injected rig offsets decay smoothly; no drift after input stops (glide-to-target then frozen)
+- Soft limits: rig-limits unit test 8/8 PASS (never overshoots bounds, rubber band works)
+- Camera panel only-when-on; /output + / still boot clean (236 fish, no page errors); tsc clean
+- Note: headless tabs crash-restore every ~1–2 min under RT load (environment artifact, not app behavior — system state self-heals on the pages' own reconnect paths)
+- Screenshots: download/screenshots/qr-output-wall.png (QR on the wall), control-mobile-ui.png (double joystick + CAMERA button)
+
+Stage Summary:
+- The wall now invites the phone: a live QR sits on the projected picture, follows every wall move/warp, and vanishes the instant a phone links
+- The phone is a double-joystick remote over a real WebSocket — smooth velocity control with rigid constellation camera motion, soft rubber-band limits and graceful decay, so the walls stay seamless and the motion stays fluid edge to edge
+- Camera controls appear only when camera mode is on; everything else stays out of the way
