@@ -3,17 +3,14 @@
 // texture sheet for a custom 3D fish.
 //
 // Pipeline: decode → downscale → estimate the paper background →
-// ink mask (saturated or dark pixels) → detect & remove the SHEET
-// FRAME (the printed border must never be mistaken for the fish —
-// that made whole-sheet textures and ghost-white fish) → largest
-// remaining connected component (= the painted fish) → crop to its
-// bounding box → letterbox onto the TEMPLATE'S OWN ASPECT (so the
-// FishTemplate layout contract holds for ANY photo) → gentle
-// saturation/contrast lift → reserve the white texel the 3D eyes
-// sample → JPEG data URL.
-//
-// Robust by design: pencil-only drawings, coloured backgrounds,
-// slightly tilted photos and close-up scans all degrade gracefully.
+// per-pixel ink mask (saturated or darker-than-paper) → detect &
+// erase the printed SHEET FRAME → largest connected component (= the
+// painted fish, dilated 2px so pale crayon gaps don't shatter it) →
+// TIGHT crop at the fish's own bounding box → everything OUTSIDE the
+// fish silhouette is erased (the background can never tint the 3D
+// fish) → the fish-only crop is STRETCHED to fill the whole UV
+// window (no letterbox bands — the painting covers the model edge to
+// edge at full size) → gentle saturation/contrast lift → JPEG.
 // ---------------------------------------------------------------
 import { reserveWhiteTexel } from './CustomFish'
 import { SHEET_CONTRACT } from './FishTemplate'
@@ -27,15 +24,11 @@ const WORK_MAX = 1024        // analysis resolution cap
 const SHEET = 768            // final texture sheet size
 const MAX_DATAURL = 480_000  // transport cap — enforced by the tank API too
 
-/**
- * The official template's fish-bbox aspect (w/h), traced from the
- * user's sheet (950 × 604 px). Every scan is letterboxed onto a
- * canvas of this aspect before it lands on the texture sheet, so
- * the fish bbox always fills SHEET_CONTRACT's UV window.
- */
-const TPL_ASPECT = SHEET_CONTRACT.aspect
-const CONTRACT_W = 676                                  // 768 × 0.88
-const CONTRACT_H = Math.round(CONTRACT_W / TPL_ASPECT)  // ≈ 430
+/** the UV window (on the square sheet) the fish crop is stretched into */
+const WIN_X = Math.round(SHEET_CONTRACT.u0 * SHEET)          // 46
+const WIN_Y = Math.round((1 - SHEET_CONTRACT.v1) * SHEET)    // 169
+const WIN_W = Math.round((SHEET_CONTRACT.u1 - SHEET_CONTRACT.u0) * SHEET)  // 676
+const WIN_H = Math.round((SHEET_CONTRACT.v1 - SHEET_CONTRACT.v0) * SHEET)  // 430
 
 async function decodeImage(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === 'function') {
@@ -71,21 +64,19 @@ function toWorkCanvas(src: ImageBitmap | HTMLImageElement) {
   return { canvas, ctx, W, H }
 }
 
-interface Blob2D { minX: number; minY: number; maxX: number; maxY: number; size: number }
+interface FishMask {
+  mask: Uint8Array<ArrayBufferLike>          // per-pixel, W*H, 1 = fish
+  x0: number; y0: number; x1: number; y1: number   // tight bbox
+  area: number
+}
 
 /**
- * Ink mask + largest connected component on a coarse grid.
- * A printed sheet FRAME (long straight ink lines near the borders)
- * is detected and erased first — the frame is the biggest stroke on
- * the sheet and would otherwise win the "largest component" vote.
- * Returns the fish bbox in work-canvas pixel coordinates.
+ * Per-pixel fish mask: ink (saturated colour or clearly darker than the
+ * paper) → printed sheet FRAME detection & erasure → 1px dilation →
+ * largest 4-connected component → 2px dilation (pale strokes join) →
+ * tight bounding box. Returns null when nothing fish-sized was found.
  */
-function findFishBBox(ctx: CanvasRenderingContext2D, W: number, H: number): Blob2D | null {
-  // coarse grid — component search is O(cells) and precision is not needed
-  const G = Math.min(220, Math.max(64, Math.round(Math.max(W, H) / 4)))
-  const cell = Math.max(1, Math.ceil(Math.max(W, H) / G))
-  const cols = Math.ceil(W / cell)
-  const rows = Math.ceil(H / cell)
+function fineFishMask(ctx: CanvasRenderingContext2D, W: number, H: number): FishMask | null {
   const img = ctx.getImageData(0, 0, W, H).data
 
   // paper estimate: median border luminance
@@ -94,155 +85,113 @@ function findFishBBox(ctx: CanvasRenderingContext2D, W: number, H: number): Blob
     const i = (y * W + x) * 4
     return 0.32 * img[i] + 0.58 * img[i + 1] + 0.1 * img[i + 2]
   }
-  for (let x = 0; x < W; x += Math.max(1, W >> 6)) {
-    borderLums.push(lumAt(x, 1), lumAt(x, H - 2))
-  }
-  for (let y = 0; y < H; y += Math.max(1, H >> 6)) {
-    borderLums.push(lumAt(1, y), lumAt(W - 2, y))
-  }
+  for (let x = 0; x < W; x += Math.max(1, W >> 6)) borderLums.push(lumAt(x, 1), lumAt(x, H - 2))
+  for (let y = 0; y < H; y += Math.max(1, H >> 6)) borderLums.push(lumAt(1, y), lumAt(W - 2, y))
   borderLums.sort((a, b) => a - b)
   const paper = borderLums[Math.floor(borderLums.length / 2)] ?? 255
 
-  // ink = saturated colour OR clearly darker than the paper.
-  // MAX-POOLED per cell (4 sub-samples): thin 4-6 px pen strokes must not
-  // slip between cell centres — a dashed mask shatters the fish into
-  // fragments and the "largest component" becomes a mere piece of it.
-  const mask = new Uint8Array(cols * rows)
-  const sub = Math.max(1, cell >> 2)
-  const offs = [0, -sub, sub]
-  for (let gy = 0; gy < rows; gy++) {
-    for (let gxx = 0; gxx < cols; gxx++) {
-      let hit = false
-      for (const dy of offs) {
-        for (const dx of offs) {
-          const x = Math.min(W - 1, Math.max(0, gxx * cell + (cell >> 1) + dx))
-          const y = Math.min(H - 1, Math.max(0, gy * cell + (cell >> 1) + dy))
-          const i = (y * W + x) * 4
-          const r = img[i], g = img[i + 1], b = img[i + 2]
-          const mx = Math.max(r, g, b), mn = Math.min(r, g, b)
-          const sat = mx - mn
-          const lum = 0.32 * r + 0.58 * g + 0.1 * b
-          const a = img[i + 3]
-          if (a < 40) continue                                   // transparent
-          if (sat > 34 || lum < paper - 62) { hit = true; break }
-        }
-        if (hit) break
-      }
-      if (hit) mask[gy * cols + gxx] = 1
+  let mask: Uint8Array<ArrayBufferLike> = new Uint8Array(W * H)
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4
+      const a = img[i + 3]
+      if (a < 40) continue
+      const r = img[i], g = img[i + 1], b = img[i + 2]
+      const mx = Math.max(r, g, b), mn = Math.min(r, g, b)
+      const lum = 0.32 * r + 0.58 * g + 0.1 * b
+      if (mx - mn > 34 || lum < paper - 62) mask[y * W + x] = 1
     }
   }
 
-  // ---- sheet-frame detection: a long straight ink line near each border ----
-  // (run on the raw mask, BEFORE dilation — dilation would thicken the
-  // frame and could bridge it to the fish)
-  const lineAt = {
-    top: -1, bottom: -1, left: -1, right: -1,
-  }
-  const ROW_FRAC = 0.55
-  const searchBands = Math.max(2, Math.round(rows * 0.12))
-  const searchCols = Math.max(2, Math.round(cols * 0.12))
-  const rowFrac = (gy: number) => {
-    let n = 0
-    for (let gx = 0; gx < cols; gx++) n += mask[gy * cols + gx]
-    return n / cols
-  }
-  const colFrac = (gx: number) => {
-    let n = 0
-    for (let gy = 0; gy < rows; gy++) n += mask[gy * cols + gx]
-    return n / rows
-  }
-  for (let d = 0; d < searchBands; d++) {
-    if (lineAt.top < 0 && rowFrac(d) > ROW_FRAC) lineAt.top = d
-    if (lineAt.bottom < 0 && rowFrac(rows - 1 - d) > ROW_FRAC) lineAt.bottom = rows - 1 - d
-  }
-  for (let d = 0; d < searchCols; d++) {
-    if (lineAt.left < 0 && colFrac(d) > ROW_FRAC) lineAt.left = d
-    if (lineAt.right < 0 && colFrac(cols - 1 - d) > ROW_FRAC) lineAt.right = cols - 1 - d
-  }
-  // erase everything outside the frame lines (and the lines themselves —
-  // they are up to 2 coarse cells thick, so cut 2 cells inward per side)
-  const cut = { top: 0, bottom: rows - 1, left: 0, right: cols - 1 }
-  let framed = false
-  if (lineAt.top >= 0) { cut.top = lineAt.top + 2; framed = true }
-  if (lineAt.bottom >= 0) { cut.bottom = lineAt.bottom - 2; framed = true }
-  if (lineAt.left >= 0) { cut.left = lineAt.left + 2; framed = true }
-  if (lineAt.right >= 0) { cut.right = lineAt.right - 2; framed = true }
-  if (framed) {
-    for (let gy = 0; gy < rows; gy++) {
-      for (let gxx = 0; gxx < cols; gxx++) {
-        if (gy < cut.top || gy > cut.bottom || gxx < cut.left || gxx > cut.right) {
-          mask[gy * cols + gxx] = 0
+  // ---- dilate 1px (8-neighbourhood) so anti-aliased strokes are solid ----
+  // (the old printed-frame erase ran here; the border-touch rejection below
+  // supersedes it — a printed frame never touches the photo's border either)
+  const dil = (src: Uint8Array<ArrayBufferLike>, it: number): Uint8Array<ArrayBufferLike> => {
+    let cur = src
+    for (let p = 0; p < it; p++) {
+      const out = new Uint8Array(W * H)
+      for (let y = 0; y < H; y++) {
+        const y0 = y > 0 ? y - 1 : 0, y1 = y < H - 1 ? y + 1 : H - 1
+        for (let x = 0; x < W; x++) {
+          if (!cur[y * W + x]) continue
+          const x0 = x > 0 ? x - 1 : 0, x1 = x < W - 1 ? x + 1 : W - 1
+          for (let yy = y0; yy <= y1; yy++) {
+            const row = yy * W
+            for (let xx = x0; xx <= x1; xx++) out[row + xx] = 1
+          }
         }
       }
+      cur = out
     }
+    return cur
   }
+  mask = dil(mask, 1)
 
-  // ---- dilate 2 cells (8-neighbourhood) so the drawing is ONE component ----
-  // colouring sheets are thin outlines; canvas downscaling thins them further,
-  // and the ring breaks at narrow junctions (mouth sliver, tail peduncle).
-  // Two coarse cells (~10 px) bridge those gaps without merging the (already
-  // cut) frame back in — the frame remnant stays far smaller than the fish.
-  let dil = new Uint8Array(cols * rows)
-  dil.set(mask)
-  for (let pass = 0; pass < 2; pass++) {
-    const src = dil
-    const out = new Uint8Array(cols * rows)
-    out.set(src)
-    for (let gy = 0; gy < rows; gy++) {
-      const y0 = gy > 0 ? gy - 1 : 0
-      const y1 = gy < rows - 1 ? gy + 1 : rows - 1
-      for (let gxx = 0; gxx < cols; gxx++) {
-        if (!src[gy * cols + gxx]) continue
-        const x0 = gxx > 0 ? gxx - 1 : 0
-        const x1 = gxx < cols - 1 ? gxx + 1 : cols - 1
-        for (let yy = y0; yy <= y1; yy++) {
-          for (let xx = x0; xx <= x1; xx++) out[yy * cols + xx] = 1
-        }
-      }
-    }
-    dil = out
-  }
-
-  // largest 4-connected component (on the dilated mask)
-  const seen = new Uint8Array(cols * rows)
-  let best: Blob2D | null = null
+  // ---- largest 4-connected component that does NOT touch the image border ----
+  // (a photo's background always reaches the border; the painted fish on its
+  // sheet never does — white paper margins surround it)
+  const seen = new Uint8Array(W * H)
+  const labels = new Int32Array(W * H)
+  const sizes: number[] = []
+  const touches: boolean[] = []
+  let cur = 0
   const stack: number[] = []
-  for (let start = 0; start < cols * rows; start++) {
-    if (!dil[start] || seen[start]) continue
+  for (let s = 0; s < W * H; s++) {
+    if (!mask[s] || seen[s]) continue
+    cur++
     stack.length = 0
-    stack.push(start)
-    seen[start] = 1
-    let minX = cols, minY = rows, maxX = 0, maxY = 0, size = 0
+    stack.push(s)
+    seen[s] = 1
+    labels[s] = cur
+    let size = 0
+    let border = false
     while (stack.length) {
       const idx = stack.pop()!
-      const cy = (idx / cols) | 0
-      const cx = idx - cy * cols
       size++
-      if (cx < minX) minX = cx
-      if (cx > maxX) maxX = cx
-      if (cy < minY) minY = cy
-      if (cy > maxY) maxY = cy
-      for (const n of [idx - 1, idx + 1, idx - cols, idx + cols]) {
-        if (n < 0 || n >= cols * rows || seen[n] || !dil[n]) continue
-        // no wrap across row edges
-        if ((n === idx - 1 && cx === 0) || (n === idx + 1 && cx === cols - 1)) continue
-        seen[n] = 1
-        stack.push(n)
-      }
+      const y = (idx / W) | 0
+      const x = idx - y * W
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) border = true
+      if (x > 0 && !seen[idx - 1] && mask[idx - 1]) { seen[idx - 1] = 1; labels[idx - 1] = cur; stack.push(idx - 1) }
+      if (x < W - 1 && !seen[idx + 1] && mask[idx + 1]) { seen[idx + 1] = 1; labels[idx + 1] = cur; stack.push(idx + 1) }
+      if (y > 0 && !seen[idx - W] && mask[idx - W]) { seen[idx - W] = 1; labels[idx - W] = cur; stack.push(idx - W) }
+      if (y < H - 1 && !seen[idx + W] && mask[idx + W]) { seen[idx + W] = 1; labels[idx + W] = cur; stack.push(idx + W) }
     }
-    if (!best || size > best.size) best = { minX, minY, maxX, maxY, size }
+    sizes[cur] = size
+    touches[cur] = border
   }
-  if (!best || best.size < 12) return null
+  let bestId = 0
+  let best = 0
+  for (let id = 1; id <= cur; id++) {
+    if (touches[id] || sizes[id] < W * H * 0.008) continue
+    if (sizes[id] > best) { best = sizes[id]; bestId = id }
+  }
+  if (!bestId) {
+    // everything touches the border (extreme close-up) — take the largest overall
+    for (let id = 1; id <= cur; id++) {
+      if (sizes[id] > best) { best = sizes[id]; bestId = id }
+    }
+  }
+  if (!bestId || best < W * H * 0.008) return null
 
-  // grid → pixels with padding
-  const pad = Math.round(Math.max(4, Math.min(W, H) * 0.015))
-  return {
-    minX: Math.max(0, best.minX * cell - pad),
-    minY: Math.max(0, best.minY * cell - pad),
-    maxX: Math.min(W - 1, (best.maxX + 1) * cell + pad),
-    maxY: Math.min(H - 1, (best.maxY + 1) * cell + pad),
-    size: best.size,
+  let fish: Uint8Array<ArrayBufferLike> = new Uint8Array(W * H)
+  let x0 = W, y0 = H, x1 = 0, y1 = 0
+  for (let i = 0; i < W * H; i++) {
+    if (labels[i] === bestId) {
+      fish[i] = 1
+      const y = (i / W) | 0
+      const x = i - y * W
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+      if (y < y0) y0 = y
+      if (y > y1) y1 = y
+    }
   }
+  // 2px dilation of the component only (keep pale colour just outside the strokes)
+  fish = dil(fish, 2)
+  // re-tighten the bbox after dilation, clamped
+  x0 = Math.max(0, x0 - 2); y0 = Math.max(0, y0 - 2)
+  x1 = Math.min(W - 1, x1 + 2); y1 = Math.min(H - 1, y1 + 2)
+  return { mask: fish, x0, y0, x1, y1, area: best }
 }
 
 /** tidy file name: extension off, separators spaced, clamped */
@@ -254,42 +203,54 @@ function nameFromFile(file: File): string {
 /**
  * Photo/scan of a coloured template → texture sheet (JPEG data URL).
  *
- * The fish crop is letterboxed onto a CONTRACT_W × CONTRACT_H canvas
- * (the official template's aspect) which is drawn centred on the
- * square sheet — exactly where SHEET_CONTRACT's UV window expects the
- * fish to be, whatever the photo's own aspect was.
- * Throws with a friendly message when nothing fish-like was found.
+ * The fish is cropped EXACTLY at its own bounding box, the background
+ * is erased, and the fish-only image is stretched to fill the entire
+ * UV window — so however much background the photo had, the drawing
+ * covers the 3D fish fully, at full size.
  */
 export async function processFishImage(file: File): Promise<ProcessedFish> {
   const src = await decodeImage(file)
   const { ctx, W, H } = toWorkCanvas(src)
   if ('close' in src && typeof src.close === 'function') src.close()
 
-  const bbox = findFishBBox(ctx, W, H)
-  const bw = bbox ? bbox.maxX - bbox.minX : W
-  const bh = bbox ? bbox.maxY - bbox.minY : H
-  // degenerate detection → fall back to the whole picture (close-up scans)
-  const use = !bbox || bw * bh < W * H * 0.04 ? { minX: 0, minY: 0, maxX: W - 1, maxY: H - 1 } : bbox
+  const found = fineFishMask(ctx, W, H)
 
-  const cw = use.maxX - use.minX
-  const ch = use.maxY - use.minY
+  // fish-only crop (background erased) — or the whole picture as fallback
+  let crop: HTMLCanvasElement
+  if (found) {
+    const cw = found.x1 - found.x0 + 1
+    const ch = found.y1 - found.y0 + 1
+    crop = document.createElement('canvas')
+    crop.width = cw
+    crop.height = ch
+    const cctx = crop.getContext('2d')!
+    cctx.drawImage(ctx.canvas, found.x0, found.y0, cw, ch, 0, 0, cw, ch)
+    // erase everything outside the fish silhouette
+    const mcv = document.createElement('canvas')
+    mcv.width = cw
+    mcv.height = ch
+    const mctx = mcv.getContext('2d')!
+    const md = mctx.createImageData(cw, ch)
+    for (let y = 0; y < ch; y++) {
+      for (let x = 0; x < cw; x++) {
+        const on = found.mask[(found.y0 + y) * W + (found.x0 + x)]
+        const i = (y * cw + x) * 4
+        md.data[i] = 255; md.data[i + 1] = 255; md.data[i + 2] = 255
+        md.data[i + 3] = on ? 255 : 0
+      }
+    }
+    mctx.putImageData(md, 0, 0)
+    cctx.globalCompositeOperation = 'destination-in'
+    cctx.drawImage(mcv, 0, 0)
+    cctx.globalCompositeOperation = 'source-over'
+  } else {
+    crop = document.createElement('canvas')
+    crop.width = W
+    crop.height = H
+    crop.getContext('2d')!.drawImage(ctx.canvas, 0, 0)
+  }
 
-  // 1) letterbox the fish crop onto the template-aspect contract canvas
-  const inter = document.createElement('canvas')
-  inter.width = CONTRACT_W
-  inter.height = CONTRACT_H
-  const ictx = inter.getContext('2d')!
-  ictx.fillStyle = '#ffffff'
-  ictx.fillRect(0, 0, CONTRACT_W, CONTRACT_H)
-  const fitC = Math.min(CONTRACT_W / cw, CONTRACT_H / ch)
-  const dw = cw * fitC
-  const dh = ch * fitC
-  try { ictx.filter = 'saturate(1.16) contrast(1.07) brightness(1.02)' } catch { /* old browsers */ }
-  ictx.imageSmoothingQuality = 'high'
-  ictx.drawImage(ctx.canvas, use.minX, use.minY, cw, ch, (CONTRACT_W - dw) / 2, (CONTRACT_H - dh) / 2, dw, dh)
-  try { ictx.filter = 'none' } catch { /* noop */ }
-
-  // 2) the contract canvas lands centred on the sheet — margin 6% each side
+  // sheet: the fish-only crop stretched to fill the whole UV window
   const sheet = document.createElement('canvas')
   sheet.width = SHEET
   sheet.height = SHEET
@@ -297,7 +258,9 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
   sctx.fillStyle = '#ffffff'
   sctx.fillRect(0, 0, SHEET, SHEET)
   sctx.imageSmoothingQuality = 'high'
-  sctx.drawImage(inter, (SHEET - CONTRACT_W) / 2, (SHEET - CONTRACT_H) / 2, CONTRACT_W, CONTRACT_H)
+  try { sctx.filter = 'saturate(1.16) contrast(1.07) brightness(1.02)' } catch { /* old browsers */ }
+  sctx.drawImage(crop, WIN_X, WIN_Y, WIN_W, WIN_H)
+  try { sctx.filter = 'none' } catch { /* noop */ }
   reserveWhiteTexel(sctx, SHEET)
 
   let dataUrl = sheet.toDataURL('image/jpeg', 0.86)

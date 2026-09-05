@@ -208,20 +208,21 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   parts.push(finShell(ANAL))
 
   // paired fins — the drawing shows one of each; the 3D fish wears
-  // a mirrored pair so it reads as a real fish from every side
-  const pecBase: [number, number] = [0.395, 0.868]
-  const pelBase: [number, number] = [0.37, 0.9]
+  // a mirrored pair so it reads as a real fish from every side.
+  // Each fin rotates around its own DRAWN base arc, and the flare is
+  // kept gentle so the side view stays identical to the drawing.
+  const pecBase: [number, number] = [0.272, 0.672]   // drawn base arc centre
+  const pelBase: [number, number] = [0.345, 0.885]   // drawn pelvic root on the belly
   for (const side of [1, -1] as const) {
     const pec = finShell(PECTORAL)
-    // flare outward around the drawn base, keeping the side view identical
     pec.translate(-wz(pecBase[0]), -wy(pecBase[1]), 0)
-    pec.rotateY(side * -0.9)
-    pec.translate(wz(pecBase[0]), wy(pecBase[1]), side * 0.028)
+    pec.rotateY(side * -0.55)
+    pec.translate(wz(pecBase[0]), wy(pecBase[1]), side * 0.03)
     parts.push(pec)
 
     const pel = finShell(PELVIC)
     pel.translate(-wz(pelBase[0]), -wy(pelBase[1]), 0)
-    pel.rotateY(side * -0.32)
+    pel.rotateY(side * -0.26)
     pel.translate(wz(pelBase[0]), wy(pelBase[1]), side * 0.05)
     parts.push(pel)
   }

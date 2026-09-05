@@ -699,3 +699,21 @@ Verified headless (agent-browser):
 Stage Summary:
 - Model ikan 3D kini ADALAH gambar user: siluet, sirip, mata semuanya di-trace dari PNG miliknya, dan warna tumpah 1:1 ke model — sirip simetris, tanpa background.
 - Satu gambar = 1-3 ikan; saat ikan buatan berenang, ikan reguler mundur; QR output tinggal seperempat layar dan bersih.
+
+---
+Task ID: 25
+Agent: main (Super Z)
+Task: "bentuk ikannya masih belum sesuai ... sirip belakang bentuknya tidak sesuai, pewarnaan texture tidak full mewarnai ikan ada bagian yang belum tercover, gambar berbackground membuat pewarnaan ikan kecil — crop persis di bentuk ikan abaikan background, kalibrasi ulang polygon terutama sirip dada/sirip bawah"
+
+Work Log:
+- AUDIT overlay per-sirip menyingkap akar masalah: PECTORAL yang terbentuk ternyata SALAH TOTAL (auto-trace mengambil garis perut+sirip pelvic, bukan kipas sirip dada; basis ditempatkan di (0.40,0.87) padahal kipas asli mengakar di (0.28,0.67)); basis DORSAL garis lurus (harusnya melengkung mengikuti goresan punggung); basis TAIL di tempat salah; PELVIC poligon kasar.
+- TRACE DEFINITIF (scripts/trace4-*): kontur marching-squares (skimage) → dipotong di 8 notch cekung; GARIS BASIS tiap sirip dibaca dari BATAS KANTONG KERTAS (tepi kantong punggung = goresan punggung yang digambar; tepi kantong badan = goresan perut) — basis didorong 3% KE DALAM badan sehingga akar sirip 3D tersembunyi di hull dan tak pernah ada sliver kertas; PECTORAL didigitasi manual terhadap grid berlabel (kipas 16 titik + akar 4 titik); profil badan = tepi kantong badan (bukan bezier tebakan) + inset 1.2% (siluet 3D selalu di dalam goresan outline → tepi ikan = garis gelap gambar, bukan kertas putih); winding basis ANAL/PELVIC dibalik (menghilangkan self-intersection → white wedge hilang).
+- FULL COVERAGE terverifikasi render software: seluruh badan terwarnai (kepala oranye + mata/insang/mulut, badan biru, dorsal kuning mulus menyatu, ekor bercabang, anal+pelvic pink dengan jari-jari) — nol area telanjang (scripts/fish-side-render.png).
+- FishScan DITULIS ULANG: mask per-piksel (bukan grid kasar) → komponen terbesar yang TIDAK menyentuh tepi foto (background foto selalu menyentuh tepi — ikan di atas kertas tidak; frame-erase lama DIHAPUS karena justru mematahkan heuristik ini) → crop KETAT di bbox ikan → background di-erase (destination-in) → ikan-only di-STRETCH mengisi penuh jendela UV (tanpa letterbox) → foto ber-background sekalipun mewarnai ikan penuh ukuran penuh.
+- E2E background ramai (green + 60 lingkaran warna + lembar miring 4°): sheet hasil = ikan persis, background hilang, fill penuh (scripts/qa-processed-sheet4.png). Upload via tab FISH asli → 3 ikan berenang, guestsHidden, /output sync.
+- Verifikasi: geometry test 11/11 PASS; tsc + eslint bersih; tank dibersihkan kembali ke 3 desain milik user.
+- Screenshots: download/screenshots/qa-final-output.png (QR 1/4 + ikan custom), qa-final-fish-zoom.png (school ikan custom).
+
+Stage Summary:
+- Polygon kini persis gambar: sirip dada = kipas yang sebenarnya diakar di belakang insang; sirip bawah melengkung sesuai sickle gambar; semua basis sirip mengikuti goresan asli dan menancap 3% ke dalam badan; seluruh permukaan ikan terwarnai penuh.
+- Gambar ber-background apa pun kini ter-crop tepat di bentuk ikan dan mewarnai model sampai penuh tepi-ke-tepi.
