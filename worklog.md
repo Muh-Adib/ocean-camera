@@ -717,3 +717,20 @@ Work Log:
 Stage Summary:
 - Polygon kini persis gambar: sirip dada = kipas yang sebenarnya diakar di belakang insang; sirip bawah melengkung sesuai sickle gambar; semua basis sirip mengikuti goresan asli dan menancap 3% ke dalam badan; seluruh permukaan ikan terwarnai penuh.
 - Gambar ber-background apa pun kini ter-crop tepat di bentuk ikan dan mewarnai model sampai penuh tepi-ke-tepi.
+
+---
+Task ID: 26
+Agent: main (Super Z)
+Task: "model nya sudah sesuai namun gambarnya yang di jadikan textur belum ter crop dengan baik sehingga ada bagian yang putih di ikannya, perbaiki croping gambar untuk ikannya sesuai dengan pola — jangan include backgroundnya di gambar scan"
+
+Work Log:
+- DIAGNOSIS (4 akar masalah, semua di FishScan): (1) FRAME cetakan template = ring raksasa tak menyentuh tepi foto → "largest non-border component" memilih FRAME → bbox = seluruh lembar → tekstur berisi kertas + background (penyebab utama ikan putih); (2) krayon PALE (kuning muda, pink) + kertas tak diwarnai di DALAM outline bukan "ink" → jadi lubang mask → destination-in MENGHAPUSnya → patch putih persis di tempat user mewarnai; (3) detail interior terpisah (pupil, insang, jari-jari sirip) = komponen sendiri → dibuang; (4) erase alpha keras → fringe putih di tepi.
+- FISHSCAN DITULIS ULANG: deteksi FRAME (hollow box ≥55%×55% foto, fill <50%, ≥2 sisi lurus ≥70% bbox) → ikan di-pick ulang dari area kertas DALAM frame (inner = holes(frame), search = dilate 3, cut = 6px band luar agar ikan yang menempel frame pun lepas); guard kandidat di atas kertas terang (onSheet sampling) untuk buang mainan/objek meja; HOLE-FILL 2x (silhouette solid — apa pun yang diapit outline = ikan, tidak pernah dihapus); satelit interior (pupil/insang/jari sirip, <50% ukuran badan, ≥55% di dalam siluet) digabung; threshold ink diturunkan (sat>26, lum<paper−50) + paper = persentil-88 seluruh frame (tahan foto yang tepinya meja).
+- ERASE → INPAINT: destination-in DIHAPUS. Diganti BFS nearest-colour + 14 pass Jacobi diffusion — semua piksel di luar siluet mengambil warna ikan terdekat (gradasi halus): background foto TIDAK PERNAH masuk tekstur (bukan putih, bukan meja, bukan bayangan), dan celah tak diwarnai DI DALAM ikan ikut terwarnai otomatis.
+- DUA BUG HALUS DITEMUKAN VIA DEBUG HOOK (__fishScanDebug/__fishScanCrop, kini dihapus): (a) mask terdilasi 2px menangkap KERTAS PUTIH di luar outline tipis → seed BFS putih → seluruh luar ter-propagasi PUTIH (0.45 fraksi putih) → mask seed kini UNDILATED (bbox tetap dari dilatasi); (b) kantong kertas putih interior (hole-fill) menang balap nearest-colour dan membanjiri putih ke luar → piksel near-white (lum>242, chroma<14) TIDAK boleh jadi seed → di-inpaint dari warna ikan sekitarnya.
+- VERIFIKASI (foto uji sintetis scripts/make-failphoto.py: sheet berframe di atas meja hijau + bayangan + tilt 2.5°, patch pale mx-mn≈30 & ≈23, pupil ring terpisah, jari-jari ekor, mainan merah+oranye): fraksi putih jendela UV 0.4517 → 0.073 (sisa = gradasi jauh di luar siluet; badan ikan ~0%); meja/mainan = 0 piksel; patch pale SELAMAT; pupil & jari-jari utuh; frame hilang total. Port BFS verbatim Python (scripts/bfs-port.py) membuktikan akar bug seed putih.
+- E2E tab FISH asli (agent-browser): upload → tank v26 → 3 desain user berenang 7 ekor (1-3/desain), guestsHidden=true, /output sync tanpa reload (designs 3, 0 page error). Tank dibersihkan kembali ke 3 desain milik user; qa-fish-photo.jpg dikeluarkan dari public/.
+- tsc + eslint bersih. Screenshot: download/screenshots/qa-custom-fish-texture.png, qa-custom-fish-zoom.png (ikan custom penuh warna berenang, ikan reguler mundur).
+
+Stage Summary:
+- Texture ikan hasil scan kini = GAMBAR IKANNYA SAJA: frame, meja, background, dan bayangan dipotong total; bagian tak diwarnai di dalam ikan otomatis terwarnai dari warna sekitarnya; pupil/insang/jari-jari dipertahankan; tidak ada lagi bagian putih pada ikan — gambar mewarnai model penuh tepi-ke-tepi.
