@@ -22,14 +22,21 @@ import { FISH_SHEET, type SheetRect } from './FishTemplate'
 
 const WHITE = new THREE.Color('#ffffff')
 
-/** friendly, slightly chunky reef fish silhouette (tail → nose radii) */
+/**
+ * Silhouette matched to THE USER'S TEMPLATE (the official sheet):
+ * a sleek colouring-book oval — blunt rounded head, deepest just
+ * behind the gill, long clean back/belly lines, a clear caudal
+ * peduncle at ~77% of the body, then the forked tail. Radii are
+ * hull units (y = cy · r · h), tail → nose, measured from the
+ * sheet's outline (body 381 px tall over 745 px long → h/l ≈ 0.51).
+ */
 const CUSTOM_BODY: BodySpec = {
-  profile: [0.02, 0.075, 0.14, 0.19, 0.21, 0.17, 0.105, 0.045, 0.012],
-  w: 0.47, h: 1.05, len: 0.6,
+  profile: [0.065, 0.14, 0.195, 0.21, 0.21, 0.21, 0.21, 0.195, 0.17, 0.12, 0.06, 0.025],
+  w: 0.44, h: 1.05, len: 0.85,
 }
-const TAIL_SPEC = { len: 0.22, spread: 0.16, fork: 0.6 }
-const DORSAL_SPEC: [number, number][] = [[0.16, 0.07], [0.0, 0.12], [-0.18, 0.05]]
-const ANAL_SPEC: [number, number][] = [[0.02, 0.06], [-0.2, 0.05]]
+const TAIL_SPEC = { len: 0.25, spread: 0.21, fork: 0.62 }
+const DORSAL_SPEC: [number, number][] = [[0.14, 0.04], [0.06, 0.13], [-0.04, 0.16], [-0.14, 0.14], [-0.24, 0.08], [-0.32, 0.03]]
+const ANAL_SPEC: [number, number][] = [[-0.12, 0.045], [-0.24, 0.08], [-0.35, 0.025]]
 
 /** force a part's vertex colors to white so the painting shows untinted */
 function whiteColors(geo: THREE.BufferGeometry) {
@@ -123,10 +130,10 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   const pecZ = CUSTOM_BODY.len * 0.1
   const pecW = widthAt(pecZ) * CUSTOM_BODY.w
   const pecY = -radiusAt(pecZ) * CUSTOM_BODY.h * 0.12
-  const pelZ = CUSTOM_BODY.len * 0.08
+  const pelZ = CUSTOM_BODY.len * 0.12
   const pelY = -radiusAt(pelZ) * CUSTOM_BODY.h * 0.62
   for (const side of [1, -1] as const) {
-    const pec = makePectoralFan(0.15, WHITE, 6)
+    const pec = makePectoralFan(0.17, WHITE, 6)
     mapFinUV(pec, FISH_SHEET.PECTORAL, 'radial', 'down')
     whiteColors(pec)
     pec.rotateY(side * -0.9)
@@ -134,7 +141,7 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
     pec.translate(side * pecW * 0.74, pecY, pecZ)
     parts.push(pec)
 
-    const pel = makePectoralFan(0.135, WHITE, 5)
+    const pel = makePectoralFan(0.15, WHITE, 5)
     mapFinUV(pel, FISH_SHEET.PELVIC, 'radial', 'down')
     whiteColors(pel)
     pel.rotateY(side * -0.5)
@@ -143,11 +150,12 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
     parts.push(pel)
   }
 
-  // --- real 3D eyes sampling the reserved white texel ---
-  const eyeZ = CUSTOM_BODY.len * 0.28
-  const eyeY = radiusAt(eyeZ) * CUSTOM_BODY.h * 0.38
+  // --- real 3D eyes seated where the sheet draws the eye ---
+  // (pupil measured at 32% back from the nose, just above mid-height)
+  const eyeZ = CUSTOM_BODY.len * 0.32
+  const eyeY = radiusAt(eyeZ) * CUSTOM_BODY.h * 0.16
   const skinX = surfaceXAt(eyeZ, eyeY)
-  const eyeR = Math.min(0.048, skinX * 0.85)
+  const eyeR = Math.min(0.046, skinX * 0.85)
   parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, '#2a2014'))
   parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, '#2a2014'))
 

@@ -657,3 +657,21 @@ Stage Summary:
 - QR kini MENEMPEL di wall: dirender ke dalam picture, mengikuti move/warp/morph, tampil lurus di dinding fisik, hilang saat phone connect, kembali saat phone pergi, dan host-nya bisa dipilih per surface di console (AUTO = wall terluas).
 - Akar masalah "QR tidak muncul" (socket phone zombie di hub) dibasmi dengan idle-expiry + heartbeat.
 - Fitur "ikan warna": template kosong bisa diunduh dari console, user mewarnai & memotret/scan, gambar otomatis dipotong jadi texture — ikan 3D-nya langsung berenang di semua layar; impor bisa per foto atau seluruh folder lokal; setiap design membentuk school kecil dan bisa dihapus lagi.
+
+---
+Task ID: 23
+Agent: main (Super Z)
+Task: "templatenya menggunakan ikan yang saya kirim png nya bukan buatkan mu ... ikannya sudah saya coba kirim namun belum muncul ... pastikan ikannya 3D sesuai dengan gambar yang saya kirim lengkap dengan mata kepala dan sirip nya namun di buat 3d"
+
+Work Log:
+- ROOT CAUSE 1 (frame = ikan): template PNG milik user punya FRAME bingkai; FishScan lama memilih komponen terbesar = frame → tekstur = seluruh lembar (mayoritas putih) → ikan 3D hampir putih semua → "belum muncul". Tank server memang berisi 2 upload "Template Ikan" user (POST sukses) — kegagalannya murni di tekstur.
+- ROOT CAUSE 2 (bug traversal): saat mengubah pencarian komponen ke mask hasil DILASI, seed memeriksa `dil[start]` tetapi tetangga masih memeriksa `!mask[n]` (mask mentah) → jembatan dilasi tak terlihat → outline ikan (garis tipis, terputus-putus) tetap terfragmentasi; komponen terbesar = arc perut saja (196 sel vs 4901). Ditemukan via instrumentasi bertingkat (__fishScanDebug/Inner/Alpha) + port verbatim di eval; fix: neighbor check → `!dil[n]`.
+- FishScan diperkuat: max-pool 9 sub-sampel/sel (garis 4-6px tak lagi lolos antar pusat sel), deteksi & potong FRAME (garis lurus panjang dekat tepi, dipotong 2 sel ke dalam), dilasi 2 sel (menyambung mulut/peduncle), normalisasi aspek ke 961/615 (canvas kontrak 676×433 → kontrak zona SELALU pas untuk foto apa pun), fallback whole-image tetap ada.
+- TEMPLATE MILIK USER: public/fish/template-ikan.png (disederhanakan: PNG asli user, 1492×1054, RGBA). FishTemplate.ts: FISH_SHEET baru DIUKUR dari PNG user (bbox ikan 961×615; zona badan/ekor/punggung/anal/perut/dada + posisi mata) — drawFishTemplate prosedural DIHAPUS; downloadFishTemplate() = fetch PNG asli; tab FISH menampilkan PREVIEW template asli (.pm-fish-tpl).
+- CustomFish disesuaikan siluet template user: hull profile 12 titik (kepala tumpul, terdalam di belakang insang, peduncle jelas di ~77% badan, h/l ≈ 0.51), len 0.85; TAIL 0.25/0.21/fork 0.62; DORSAL 6 titik (punggung bergelombang); ANAL 3 titik; pectoral 0.17 @ len·0.1; pelvic 0.15 @ len·0.12; mata 3D 5-layer di posisi mata gambar (eyeZ len·0.32, cy 0.16, r ≤0.046) — sampel WHITE_UV.
+- E2E headless (upload lewat input file asli tab FISH): template kosong user → tekstur ikan UTUH (u 0.10..0.90, v 0.25..0.76; mata/kepala/sirip lengkap, frame hilang); lembar berwarna (dibuat dr template user, diwarnai per zona) → zona sample: BODY oranye, TAIL lobes merah, DORSAL kuning, PECTORAL cyan ✓. Tank live: desain user ("Gemini Generated Image", di-upload user saat live test) berenang 6 ekor/desain; /output sync (v naik, 0 page error).
+- Membersihkan entri uji dari tank (menyisakan 2 desain milik user); tsc + eslint bersih.
+
+Stage Summary:
+- Ikan warna kini benar-benar bekerja: unduh = template ASLI milik user, scan = tahan frame/garis tipis/foto, tekstur = ikan utuh sesuai kontrak, ikan 3D = siluet template user dengan mata/kepala/sirip 3D, muncul di semua layar.
+- Akar "belum muncul" dibasmi dua lapis: frame-vs-ikan dan bug neighbor-check (mask vs dil) pada pencarian komponen.

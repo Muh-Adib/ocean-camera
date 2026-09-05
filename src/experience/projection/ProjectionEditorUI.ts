@@ -12,7 +12,7 @@ import { OutputNodeEditor } from './OutputNodeEditor'
 import { CameraManager } from './CameraManager'
 import { PRESETS } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
-import { downloadFishTemplate } from '../fish/FishTemplate'
+import { downloadFishTemplate, TEMPLATE_URL } from '../fish/FishTemplate'
 import { processFishImage } from '../fish/FishScan'
 
 const AIM_TARGET: [number, number, number] = [0, 1.4, -8]
@@ -673,10 +673,15 @@ export class ProjectionEditorUI {
     tplRow.className = 'pm-btn-row'
     tplRow.appendChild(this.btn('DOWNLOAD TEMPLATE', async () => {
       const ok = await downloadFishTemplate()
-      this.pm.depsToast(ok ? 'Template saved — print it, colour it, snap a photo' : 'Template could not be generated', 3600)
+      this.pm.depsToast(ok ? 'Template saved — print it, colour it, snap a photo' : 'Template could not be loaded', 3600)
     }, 'pm-btn-sm'))
     body.appendChild(tplRow)
-    body.appendChild(this.hint('1 · DOWNLOAD TEMPLATE prints the blank fish outline (nose left, tail right). Colour it with crayons, markers or paint — bold, bright colours read best on the reef.'))
+    const tplPrev = document.createElement('img')
+    tplPrev.src = TEMPLATE_URL
+    tplPrev.alt = 'The official fish template'
+    tplPrev.className = 'pm-fish-tpl'
+    body.appendChild(tplPrev)
+    body.appendChild(this.hint('1 · DOWNLOAD TEMPLATE gives you the official fish sheet (nose left, tail right). Print it, colour it with crayons, markers or paint — bold, bright colours read best on the reef.'))
 
     // ---- step 2: import ----
     const importRow = document.createElement('div')
