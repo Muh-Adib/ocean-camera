@@ -675,3 +675,27 @@ Work Log:
 Stage Summary:
 - Ikan warna kini benar-benar bekerja: unduh = template ASLI milik user, scan = tahan frame/garis tipis/foto, tekstur = ikan utuh sesuai kontrak, ikan 3D = siluet template user dengan mata/kepala/sirip 3D, muncul di semua layar.
 - Akar "belum muncul" dibasmi dua lapis: frame-vs-ikan dan bug neighbor-check (mask vs dil) pada pencarian komponen.
+
+---
+Task ID: 24
+Agent: main (Super Z)
+Task: "kalibrasi bentuk ikannya ... siripnya besar sebelah dan tidak sesuai dengan gambar yang saya berikan model 3dnya, hanya buat 1 model khusus untuk gambar ikan yang di upload dan hanya gambar ikannya saja tanpa backgroundnya, hidden ikan lainnya ..., qr scan di output terlalu besar buat ukuran 1/4 layar dan clean saja, satu gambar 1-3 ikan saja"
+
+Work Log:
+- TEMPLATE DIDIGITASI (scripts/trace-*.py): siluet ikan diekstrak dari PNG milik user (public/fish/template-ikan.png) — siluet penuh = area yang tidak terjangkau flood-fill dari luar (strokes + kertas terkurung; trik: garis insang/punggung memecah interior jadi 9 region sehingga "largest component" saja salah). Diukur: bbox 950x604 (aspect 1.5728), profil punggung/perut 24 stasiun (dijembatani kuadratik di rentang sirip), polygon DORSAL (34pt, puncak bergelombang persis gambar), TAIL (43pt, ekor bercabang), ANAL, PELVIC, PECTORAL (komponen di dalam badan), posisi+radius pupil.
+- CustomFish.ts DITULIS ULANG: SATU model khusus untuk semua gambar upload — hull dilofts lewat garis punggung/perut hasil trace (40 ring x 48, seam diweld, cap peduncle), sirip = shell pipih dari polygon hasil trace yang duduk PERSIS di tempatnya digambar (ShapeGeometry shape-x → model Z via rotateY(-90°)), sirip pasangan (pectoral/pelvic) dicerminkan dua sisi — SIMETRIS (fix "siripnya besar sebelah"), mata 3D 5-layer duduk di pupil gambar (surfaceXAt dari hull baru). Edge polygon di-resample 0.028 agar sirip ikut menekuk halus saat berenang.
+- TEKSTUR 1:1 PLANAR: setiap vertex sampling sheet di (fx,fy) asalnya (window SHEET_CONTRACT u 0.06..0.94 / v 0.22..0.78) — gambar mewarnai model PERSIS di tempat ia digambar: ekor merah = sirip ekor merah, garis insang jatuh di insang, tanpa background (FishScan crop ke ikan saja). FISH_SHEET zone-rect lama DIGANTI kontrak window (FishTemplate.SHEET_CONTRACT, FishScan ikut).
+- VERIFIKASI MAPPING: template diwarnai otomatis per region (kepala oranye, badan biru, dorsal kuning, sirip bawah pink) lalu di-render software side-view dari geometri asli → warna jatuh tepat: mata/gill/mulut di kepala oranye, dorsal kuning bergelombang dengan garis jari-jari, ekor dengan jari-jari (scripts/fish-side-render.png). Test geometri node (scripts/fish-geom-test.ts): 11/11 PASS — UV semua di dalam window, aspect samping = 1.5728, hull simetris, mata di pupil, sirip di zona benar.
+- 1 GAMBAR = 1-3 IKAN: addCustomDesign count default = 1 + (hash id % 3) — stabil per desain di semua layar.
+- HIDE IKAN LAIN: saat >=1 desain hasil scan berenang, seluruh sekolah reguler disembunyikan (mesh.visible=false, refreshGuests) dan muncul lagi otomatis saat tank kosong; QA hook fish() kini membawa mode {designs, swimming, guestsHidden}.
+- QR 1/4 LAYAR + CLEAN: WallQr digambar ulang — kartu putih rounded-square sisi 0.25 dari tinggi output (sizeFrac di info()), hanya QR + kaption kecil "SCAN — PHONE REMOTE", tanpa kartu besar/judul; tetap menempel wall, fade saat phone connect.
+
+Verified headless (agent-browser):
+- Upload template BERWARNA lewat input asli tab FISH → FishScan → tank v5 → desain baru berenang 1 ekor (rentang 1-3), guestsHidden=true, /output ikut sync tanpa reload (8 ikan custom, 0 ikan reguler terlihat di screenshot).
+- /output: QR alpha 1 di centroid Main Screen, terukur ~1/3 tinggi layar pada komposit 4:3 (≈ 1/4 layar), clean.
+- tsc bersih (termasuk scripts QA), eslint bersih, geometry test 11/11.
+- Screenshots: download/screenshots/qa-custom-fish-main.png, qa-custom-zoom.png (ikan custom warna sesuai gambar), qa-output-qr.png (QR 1/4 + ikan custom sendirian).
+
+Stage Summary:
+- Model ikan 3D kini ADALAH gambar user: siluet, sirip, mata semuanya di-trace dari PNG miliknya, dan warna tumpah 1:1 ke model — sirip simetris, tanpa background.
+- Satu gambar = 1-3 ikan; saat ikan buatan berenang, ikan reguler mundur; QR output tinggal seperempat layar dan bersih.

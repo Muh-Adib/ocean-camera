@@ -80,6 +80,16 @@ interface Entry {
   dummy: THREE.Object3D
 }
 
+/** stable little hash → 1-3 swimmers per painting, same on every screen */
+function hashId(id: string): number {
+  let h = 2166136261
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
 export class FishManager {
   group = new THREE.Group()
   schools: School[] = []
@@ -221,15 +231,20 @@ export class FishManager {
   }
 
   /**
-   * Add (or replace) a painted fish design: one school of ~6 swimmers
+   * Add (or replace) a painted fish design: a tiny school — ONE to
+   * THREE swimmers per picture ("satu gambar 1-3 ikan saja") —
    * mid-water near the reef front, gently curious like the wanderers.
+   * The count is stable per design id, so every screen spawns the
+   * same number for the same painting.
+   * While ANY painted design swims, the regular reef fish hide so
+   * the child's own fish are the stars of the tank.
    */
-  addCustomDesign(id: string, texture: THREE.Texture, count = 6) {
+  addCustomDesign(id: string, texture: THREE.Texture, count?: number) {
     this.removeCustomDesign(id)
 
     const { geometry } = buildCustomFish()
     const mat = makeCustomFishMaterial(texture)
-    const n = Math.max(2, count)
+    const n = Math.max(1, count ?? 1 + (hashId(id) % 3))   // 1..3
 
     const anchor = new THREE.Vector3(rand(-6, 8), rand(0.5, 4), -18 + rand(-6, 4))
     const school = new School(
@@ -255,6 +270,7 @@ export class FishManager {
     const entry: Entry = { school, mesh, phaseAttr, puffAttr: null, dummy: new THREE.Object3D() }
     this.entries.push(entry)
     this.custom.set(id, { entry, mat, texture })
+    this.refreshGuests()
   }
 
   /** remove a painted design (and its school) from the water */
@@ -269,11 +285,40 @@ export class FishManager {
     this.group.remove(rec.entry.mesh)
     rec.entry.mesh.geometry.dispose()
     rec.mat.dispose()
+    this.refreshGuests()
+  }
+
+  /** while painted fish swim, the regular reef fish stay hidden */
+  private guestsHidden = false
+
+  private refreshGuests() {
+    const hide = this.custom.size > 0
+    if (hide === this.guestsHidden) return
+    this.guestsHidden = hide
+    const customEntries = new Set([...this.custom.values()].map((r) => r.entry))
+    for (const e of this.entries) {
+      e.mesh.visible = customEntries.has(e) ? true : !hide
+    }
+  }
+
+  /** true while the regular reef fish are hidden for the painted ones */
+  get guestsHiddenForPainted(): boolean {
+    return this.guestsHidden
   }
 
   /** painted designs currently swimming (QA) */
   customInfo(): { id: string; fish: number }[] {
     return [...this.custom.entries()].map(([id, rec]) => ({ id, fish: rec.entry.school.fish.length }))
+  }
+
+  /** QA: painted-only mode state */
+  customModeInfo() {
+    return {
+      designs: this.custom.size,
+      swimming: this.customInfo().reduce((a, d) => a + d.fish, 0),
+      guestsHidden: this.guestsHidden,
+      totalFish: this.count(),
+    }
   }
 
   /** nearest fish position to a point (used by curiosity feedback) */

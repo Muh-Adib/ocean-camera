@@ -514,7 +514,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */
       qrInfo: () => projection.qrInfo(),
-      fish: () => fishTank.info(),
+      fish: () => ({ ...fishTank.info(), mode: fish.customModeInfo() }),
       /** force an immediate full push to every open /output */
       pushNow: () => projection.qaPush(),
       freeze: (on: boolean) => { projection.qaFrozen = on },

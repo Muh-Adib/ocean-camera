@@ -16,7 +16,7 @@
 // slightly tilted photos and close-up scans all degrade gracefully.
 // ---------------------------------------------------------------
 import { reserveWhiteTexel } from './CustomFish'
-import { FISH_SHEET } from './FishTemplate'
+import { SHEET_CONTRACT } from './FishTemplate'
 
 export interface ProcessedFish {
   dataUrl: string
@@ -28,14 +28,14 @@ const SHEET = 768            // final texture sheet size
 const MAX_DATAURL = 480_000  // transport cap — enforced by the tank API too
 
 /**
- * The official template's fish-bbox aspect (w/h), measured from the
- * user's sheet (961 × 615 px). Every scan is letterboxed onto a
+ * The official template's fish-bbox aspect (w/h), traced from the
+ * user's sheet (950 × 604 px). Every scan is letterboxed onto a
  * canvas of this aspect before it lands on the texture sheet, so
- * the part rects in FISH_SHEET always line up with the drawing.
+ * the fish bbox always fills SHEET_CONTRACT's UV window.
  */
-const TPL_ASPECT = 961 / 615
+const TPL_ASPECT = SHEET_CONTRACT.aspect
 const CONTRACT_W = 676                                  // 768 × 0.88
-const CONTRACT_H = Math.round(CONTRACT_W / TPL_ASPECT)  // ≈ 432
+const CONTRACT_H = Math.round(CONTRACT_W / TPL_ASPECT)  // ≈ 430
 
 async function decodeImage(file: Blob): Promise<ImageBitmap | HTMLImageElement> {
   if (typeof createImageBitmap === 'function') {
@@ -256,8 +256,8 @@ function nameFromFile(file: File): string {
  *
  * The fish crop is letterboxed onto a CONTRACT_W × CONTRACT_H canvas
  * (the official template's aspect) which is drawn centred on the
- * square sheet — exactly where FISH_SHEET's part rects expect each
- * body part to be, whatever the photo's own aspect was.
+ * square sheet — exactly where SHEET_CONTRACT's UV window expects the
+ * fish to be, whatever the photo's own aspect was.
  * Throws with a friendly message when nothing fish-like was found.
  */
 export async function processFishImage(file: File): Promise<ProcessedFish> {

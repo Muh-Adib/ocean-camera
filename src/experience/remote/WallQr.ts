@@ -10,16 +10,19 @@
 // wall it appears perfectly straight and undistorted, "stuck" to
 // the wallpaper like a poster.
 //
-// The moment a phone connects (WebSocket presence) it fades out;
-// it returns when the phone leaves. The host surface is a project
+// SIZE & LOOK: a clean square — about ONE QUARTER of the screen
+// height — white card, hairline border, the code and one small
+// caption. Nothing else. It fades out the moment a phone connects
+// and returns when the phone leaves. The host surface is a project
 // setting (auto = largest enabled surface, or a specific one).
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import QRCode from 'qrcode'
 import type { ProjectionSurface } from '../projection/ProjectionTypes'
 
-const CARD_W = 576
-const CARD_H = 720
+/** card side as a fraction of the output viewport height (¼ of the screen) */
+const SIZE_FRAC = 0.25
+const CARD = 512
 
 export class WallQr {
   /** which surface carries the QR: 'auto' (largest enabled) or a surface id */
@@ -44,8 +47,8 @@ export class WallQr {
   constructor() {
     this.cam.position.z = 5
     this.canvas = document.createElement('canvas')
-    this.canvas.width = CARD_W
-    this.canvas.height = CARD_H
+    this.canvas.width = CARD
+    this.canvas.height = CARD
     this.mat = new THREE.MeshBasicMaterial({
       transparent: true,
       depthTest: false,
@@ -55,59 +58,61 @@ export class WallQr {
     })
     // pre-boost so the post-ACES composite still lands near paper-white
     this.mat.color.setRGB(1.35, 1.35, 1.35)
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.94, 0.94 * (CARD_H / CARD_W)), this.mat)
-    this.mesh.position.set(0, 0.09, 0)
+    const side = SIZE_FRAC * 2           // frustum is 2 units tall
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(side, side), this.mat)
     this.mesh.renderOrder = 999
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
     this.redraw()
   }
 
-  /** (re)draw the QR card for the current URL */
+  /** (re)draw the clean quarter-screen QR card for the current URL */
   private redraw() {
     this.url = `${location.origin}/control-mobile`
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
-    // card
-    ctx.fillStyle = '#f2fbff'
-    ctx.fillRect(0, 0, CARD_W, CARD_H)
-    ctx.strokeStyle = '#0b3a4c'
-    ctx.lineWidth = 6
-    ctx.strokeRect(5, 5, CARD_W - 10, CARD_H - 10)
 
-    // labels — drawn immediately; the QR pastes itself over the top area when ready
-    ctx.textAlign = 'center'
-    ctx.fillStyle = '#04222e'
-    ctx.font = 'bold 44px system-ui, sans-serif'
-    ctx.fillText('OCEAN REMOTE', CARD_W / 2, 612)
-    ctx.font = '26px system-ui, sans-serif'
-    ctx.fillStyle = '#2e6478'
-    ctx.fillText('scan — your phone is the controller', CARD_W / 2, 664)
+    // white rounded card + hairline border
+    const r = 36
+    ctx.clearRect(0, 0, CARD, CARD)
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath()
+    ctx.roundRect(4, 4, CARD - 8, CARD - 8, r)
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(10, 48, 62, 0.55)'
+    ctx.lineWidth = 3
+    ctx.stroke()
 
-    // QR
+    // the code
     const tmp = document.createElement('canvas')
     QRCode.toCanvas(tmp, this.url, {
-      width: 496,
-      margin: 2,
+      width: 420,
+      margin: 0,
       errorCorrectionLevel: 'M',
-      color: { dark: '#04222e', light: '#ffffff' },
+      color: { dark: '#0a303e', light: '#ffffff' },
     })
       .then(() => {
-        ctx.drawImage(tmp, (CARD_W - 496) / 2, 36, 496, 496)
+        ctx.drawImage(tmp, (CARD - 420) / 2, 26, 420, 420)
         this.commit()
       })
       .catch(() => {
         // QR lib failed — show the URL as text so the link is never lost
-        ctx.fillStyle = '#04222e'
-        ctx.font = 'bold 34px system-ui, sans-serif'
+        ctx.fillStyle = '#0a303e'
+        ctx.font = 'bold 30px system-ui, sans-serif'
         ctx.textAlign = 'center'
-        ctx.fillText('OPEN IN BROWSER:', CARD_W / 2, 240)
-        ctx.font = '26px system-ui, sans-serif'
+        ctx.fillText('OPEN IN BROWSER:', CARD / 2, 170)
+        ctx.font = '24px system-ui, sans-serif'
         const words = this.url.split('/')
         const lines = [`//${words.slice(2).join('/')}`]
-        lines.forEach((l, i) => ctx.fillText(l, CARD_W / 2, 300 + i * 40))
+        lines.forEach((l, i) => ctx.fillText(l, CARD / 2, 230 + i * 36))
         this.commit()
       })
+
+    // one small caption
+    ctx.textAlign = 'center'
+    ctx.fillStyle = '#0a303e'
+    ctx.font = '600 30px system-ui, sans-serif'
+    ctx.fillText('SCAN — PHONE REMOTE', CARD / 2, 486)
 
     this.commit()
   }
@@ -166,6 +171,8 @@ export class WallQr {
       hostName: this.resolved?.name ?? null,
       visible: this.alpha > 0.5,
       url: this.url,
+      /** side as a fraction of the output height (¼ = 0.25) */
+      sizeFrac: SIZE_FRAC,
     }
   }
 

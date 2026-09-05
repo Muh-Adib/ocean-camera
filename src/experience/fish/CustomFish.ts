@@ -1,163 +1,238 @@
 // ---------------------------------------------------------------
-// CustomFish — the 3D fish whose skin is a CHILD'S PAINTING.
+// CustomFish — ONE dedicated 3D fish for every uploaded painting.
 //
-// The geometry is built with the same swept-hull + ray-fin anatomy
-// as the reef species, but every UV is remapped onto the colouring
-// sheet layout (FishTemplate.FISH_SHEET):
-//   • the hull WRAPS the painting around its circumference — each
-//     flank shows the full side view, nose → tail;
-//   • each fin samples the sheet region where that fin is DRAWN
-//     (tail fork, dorsal, anal, pelvic, pectoral) — so a stroke of
-//     red on the printed tail really turns the 3D tail red;
-//   • the eyes stay real 3D eyeballs sampling a reserved white
-//     texel, so the fish keeps its lively look whatever was drawn.
+// The geometry is TRACED FROM THE USER'S OWN TEMPLATE
+// (FishSheetData — measured from public/fish/template-ikan.png):
+//   • the hull is lofted through the drawn back/belly lines, so the
+//     side view of the 3D fish IS the drawing's silhouette;
+//   • dorsal / tail / anal / pelvic are thin shells whose outlines
+//     are the drawn fin outlines, seated exactly where they are
+//     drawn (paired fins mirrored — perfectly symmetric);
+//   • pectorals flare out of the flanks at the drawn position;
+//   • real 3D eyeballs sit where the pupil was drawn.
+//
+// TEXTURING IS A 1:1 PLANAR MAP: every vertex samples the sheet at
+// the (fx, fy) it came from (SHEET_CONTRACT window). The painting
+// therefore colours the model EXACTLY where it was painted on
+// paper — a red drawn tail turns the 3D tail red, gill strokes
+// land on the gill, background never leaks in because FishScan
+// crops to the fish only.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { makeEyeParts, makeFishMaterial } from './FishGeometryFactory'
+import { SHEET_CONTRACT } from './FishTemplate'
 import {
-  WHITE_UV, makeHull, makeTailFan, makeRayFin, makePectoralFan, makeEyeParts,
-  makeFishMaterial, type BodySpec,
-} from './FishGeometryFactory'
-import { FISH_SHEET, type SheetRect } from './FishTemplate'
+  SHEET_ASPECT, PED_X, BODY_TOP, BODY_BOT,
+  DORSAL, TAIL, ANAL, PELVIC, PECTORAL, EYE,
+} from './FishSheetData'
 
-const WHITE = new THREE.Color('#ffffff')
+/** model length in world units (nose → tail tip) */
+const LEN = 0.92
+const ASP = SHEET_ASPECT
+
+// sheet fractions → model space (nose +Z, tail −Z, v up on the sheet)
+const wx = (fx: number) => (fx - 0.5) * LEN
+const wy = (fy: number) => (0.5 - fy) * (LEN / ASP)
+const wz = (fx: number) => (0.5 - fx) * LEN
 
 /**
- * Silhouette matched to THE USER'S TEMPLATE (the official sheet):
- * a sleek colouring-book oval — blunt rounded head, deepest just
- * behind the gill, long clean back/belly lines, a clear caudal
- * peduncle at ~77% of the body, then the forked tail. Radii are
- * hull units (y = cy · r · h), tail → nose, measured from the
- * sheet's outline (body 381 px tall over 745 px long → h/l ≈ 0.51).
+ * Planar UV from MODEL coordinates (body: length along Z, height along Y)
+ * — the heart of "the painting colours the model perfectly".
  */
-const CUSTOM_BODY: BodySpec = {
-  profile: [0.065, 0.14, 0.195, 0.21, 0.21, 0.21, 0.21, 0.195, 0.17, 0.12, 0.06, 0.025],
-  w: 0.44, h: 1.05, len: 0.85,
+function planarUV(geo: THREE.BufferGeometry) {
+  const uv = geo.attributes.uv as THREE.BufferAttribute
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  for (let i = 0; i < uv.count; i++) {
+    const fx = 0.5 - pos.getZ(i) / LEN
+    const fy = 0.5 - (pos.getY(i) * ASP) / LEN
+    setSheetUV(uv, i, fx, fy)
+  }
+  uv.needsUpdate = true
 }
-const TAIL_SPEC = { len: 0.25, spread: 0.21, fork: 0.62 }
-const DORSAL_SPEC: [number, number][] = [[0.14, 0.04], [0.06, 0.13], [-0.04, 0.16], [-0.14, 0.14], [-0.24, 0.08], [-0.32, 0.03]]
-const ANAL_SPEC: [number, number][] = [[-0.12, 0.045], [-0.24, 0.08], [-0.35, 0.025]]
 
-/** force a part's vertex colors to white so the painting shows untinted */
+/** planar UV from FIN-SHAPE coordinates (pre-rotation: x = length, y = height) */
+function finUV(geo: THREE.BufferGeometry) {
+  const uv = geo.attributes.uv as THREE.BufferAttribute
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  for (let i = 0; i < uv.count; i++) {
+    const fx = 0.5 - pos.getX(i) / LEN
+    const fy = 0.5 - (pos.getY(i) * ASP) / LEN
+    setSheetUV(uv, i, fx, fy)
+  }
+  uv.needsUpdate = true
+}
+
+function setSheetUV(uv: THREE.BufferAttribute, i: number, fx: number, fy: number) {
+  uv.setXY(
+    i,
+    SHEET_CONTRACT.u0 + (SHEET_CONTRACT.u1 - SHEET_CONTRACT.u0) * fx,
+    SHEET_CONTRACT.v1 - (SHEET_CONTRACT.v1 - SHEET_CONTRACT.v0) * fy,
+  )
+}
+
 function whiteColors(geo: THREE.BufferGeometry) {
   const n = geo.attributes.position.count
   geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3))
 }
 
-const lerp = (a: number, b: number, f: number) => a + (b - a) * f
-
-/**
- * Remap a fin's UVs onto its sheet region.
- * uMode: 'zFront' → head-side edge of the fin = rect left (tail/dorsal/anal);
- *        'radial' → fan grows along +x, root = rect left (pectoral/pelvic).
- * vMode: 'up'     → base at rect bottom, tip at top (dorsal);
- *        'down'   → base at rect top, tip hangs to bottom (anal/pelvic);
- *        'span'   → full vertical extent (tail fork).
- */
-function mapFinUV(
-  geo: THREE.BufferGeometry,
-  rect: SheetRect,
-  uMode: 'zFront' | 'radial',
-  vMode: 'up' | 'down' | 'span',
-) {
-  geo.computeBoundingBox()
-  const bb = geo.boundingBox!
-  const pos = geo.attributes.position as THREE.BufferAttribute
-  const uv = geo.attributes.uv as THREE.BufferAttribute
-  const zSpan = Math.max(1e-5, bb.max.z - bb.min.z)
-  const xSpan = Math.max(1e-5, bb.max.x - bb.min.x)
-  const ySpan = Math.max(1e-5, bb.max.y - bb.min.y)
-  for (let i = 0; i < uv.count; i++) {
-    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i)
-    let fu: number
-    if (uMode === 'zFront') fu = (bb.max.z - z) / zSpan          // front → rect left
-    else fu = (x - bb.min.x) / xSpan                             // root → rect left
-    fu = Math.min(1, Math.max(0, fu))
-    let fv: number
-    if (vMode === 'up') fv = (y - bb.min.y) / ySpan              // base → rect bottom
-    else if (vMode === 'down') fv = (bb.max.y - y) / ySpan       // base → rect top
-    else fv = (y - bb.min.y) / ySpan                             // span: top lobe → rect top
-    fv = Math.min(1, Math.max(0, fv))
-    const u = lerp(rect.x0, rect.x1, fu)
-    const v = vMode === 'down' ? lerp(rect.y1, rect.y0, fv) : lerp(rect.y0, rect.y1, fv)
-    uv.setXY(i, u, v)
+// ---------------- traced body lookup ----------------
+const statAt = (fx: number) => {
+  const f = Math.min(PED_X, Math.max(0, fx)) * (BODY_TOP.length - 1) / PED_X
+  const i = Math.min(BODY_TOP.length - 2, Math.floor(f))
+  const fr = f - i
+  return {
+    top: BODY_TOP[i][1] + (BODY_TOP[i + 1][1] - BODY_TOP[i][1]) * fr,
+    bot: BODY_BOT[i][1] + (BODY_BOT[i + 1][1] - BODY_BOT[i][1]) * fr,
   }
-  uv.needsUpdate = true
 }
 
-/** wrap the sheet's BODY zone around the hull circumference */
-function mapBodyUV(geo: THREE.BufferGeometry) {
-  const B = FISH_SHEET.BODY
-  const uv = geo.attributes.uv as THREE.BufferAttribute
-  for (let i = 0; i < uv.count; i++) {
-    const u = uv.getX(i)                    // 0..1 around (0 = belly seam)
-    const t = uv.getY(i)                    // 0 tail → 1 nose
-    const cy = -Math.cos(u * Math.PI * 2)   // -1 belly → +1 back
-    const s = 1 - t                         // 0 nose → 1 tail root
-    const nv = (cy + 1) / 2
-    uv.setXY(i, lerp(B.x0, B.x1, s), lerp(B.y0, B.y1, nv))
+/** lateral half-width factor — deep-bodied fish, widest just behind the gill */
+const widthFactor = (fx: number) => {
+  const t = Math.min(1, Math.max(0, fx / PED_X))
+  return 0.21 + 0.16 * Math.sin(Math.PI * Math.pow(t, 0.85))
+}
+
+const halfWidthAt = (fx: number, hT: number, hB: number) =>
+  Math.min(hT, hB) * widthFactor(fx) * 2
+
+/** flank surface |x| at (fx, y world) — for seating eyes ON the skin */
+function surfaceXAt(fx: number, y: number): number {
+  const { top, bot } = statAt(fx)
+  const yTop = wy(top), yBot = wy(bot)
+  const cy0 = (yTop + yBot) / 2
+  const half = y > cy0 ? yTop - cy0 : cy0 - yBot
+  const cy = Math.min(0.96, Math.max(-0.96, (y - cy0) / Math.max(1e-5, half)))
+  return Math.sin(Math.acos(cy)) * halfWidthAt(fx, yTop - cy0, cy0 - yBot)
+}
+
+/**
+ * Lofted hull through the traced back/belly lines.
+ * Rings of RAD vertices; asymmetric top/bottom radii; welded seam.
+ */
+function buildBody(): THREE.BufferGeometry {
+  const RINGS = 40, RAD = 48
+  const pos: number[] = [], uv: number[] = [], idx: number[] = []
+  for (let i = 0; i < RINGS; i++) {
+    const fx = (PED_X * i) / (RINGS - 1)
+    const { top, bot } = statAt(fx)
+    const yTop = wy(top), yBot = wy(bot)
+    const cy = (yTop + yBot) / 2
+    const hT = Math.max(1e-4, yTop - cy)
+    const hB = Math.max(1e-4, cy - yBot)
+    const hw = halfWidthAt(fx, hT, hB)
+    const z = wz(fx)
+    for (let j = 0; j <= RAD; j++) {
+      const a = (j / RAD) * Math.PI * 2          // 0 = belly seam, π = back
+      const c = Math.cos(a), s = Math.sin(a)
+      const y = cy + (c >= 0 ? c * hT : c * hB)
+      const x = s * hw
+      pos.push(x, y, z)
+      uv.push(0, 0)                               // replaced by planarUV
+    }
   }
-  uv.needsUpdate = true
+  for (let i = 0; i < RINGS - 1; i++) {
+    for (let j = 0; j < RAD; j++) {
+      const a0 = i * (RAD + 1) + j
+      const b0 = a0 + 1
+      const a1 = (i + 1) * (RAD + 1) + j
+      const b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
+  geo.setIndex(idx)
+  geo.computeVertexNormals()
+  // weld the belly seam normals
+  const n = geo.attributes.normal as THREE.BufferAttribute
+  for (let i = 0; i < RINGS; i++) {
+    const a = i * (RAD + 1), b = a + RAD
+    const nx = n.getX(a) + n.getX(b)
+    const ny = n.getY(a) + n.getY(b)
+    const nz = n.getZ(a) + n.getZ(b)
+    const l = Math.hypot(nx, ny, nz) || 1
+    n.setXYZ(a, nx / l, ny / l, nz / l)
+    n.setXYZ(b, nx / l, ny / l, nz / l)
+  }
+  // close the peduncle with a fan cap (hidden inside the tail root)
+  const { top: pTop, bot: pBot } = statAt(PED_X)
+  const cyC = (wy(pTop) + wy(pBot)) / 2
+  const centerIdx = pos.length / 3
+  pos.push(0, cyC, wz(PED_X) - 0.012)
+  uv.push(0, 0)
+  for (let j = 0; j < RAD; j++) idx.push((RINGS - 1) * (RAD + 1) + j, (RINGS - 1) * (RAD + 1) + j + 1, centerIdx)
+  planarUV(geo)
+  whiteColors(geo)
+  return geo
+}
+
+/**
+ * A fin shell from a traced outline. The polygon lives in the sheet
+ * plane (length × height); it becomes a ShapeGeometry whose local X
+ * is the model's Z axis, then rotates into place — so the fin IS the
+ * drawn fin, seated exactly where it is drawn, sampling the drawing
+ * 1:1 by position. Edges are resampled so the shell bends smoothly
+ * with the swim shader instead of flapping as one stiff triangle fan.
+ */
+function finShell(poly: [number, number][]): THREE.BufferGeometry {
+  const dense: [number, number][] = []
+  const MAX_SEG = 0.028
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i]
+    const [bx, by] = poly[(i + 1) % poly.length]
+    dense.push([ax, ay])
+    const d = Math.hypot(bx - ax, by - ay)
+    const steps = Math.floor(d / MAX_SEG)
+    for (let s = 1; s < steps; s++) {
+      const f = s / steps
+      dense.push([ax + (bx - ax) * f, ay + (by - ay) * f])
+    }
+  }
+  const shape = new THREE.Shape(dense.map(([fx, fy]) => new THREE.Vector2(wz(fx), wy(fy))))
+  const geo = new THREE.ShapeGeometry(shape)
+  geo.computeVertexNormals()
+  finUV(geo)                 // UVs from the SHAPE coords (x = length here)
+  geo.rotateY(-Math.PI / 2)  // shape-x → model +z, shape-y → model y
+  whiteColors(geo)
+  return geo
 }
 
 export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   const parts: THREE.BufferGeometry[] = []
 
-  // --- hull — painting wrapped around it ---
-  const { geo: body, radiusAt, widthAt, surfaceXAt } = makeHull(CUSTOM_BODY)
-  mapBodyUV(body)
-  parts.push(body)
+  parts.push(buildBody())
+  parts.push(finShell(DORSAL))                       // medial — flat, exactly as drawn
+  parts.push(finShell(TAIL))
+  parts.push(finShell(ANAL))
 
-  // --- caudal fin — samples the painted tail fork ---
-  const tail = makeTailFan(TAIL_SPEC.len, TAIL_SPEC.spread, TAIL_SPEC.fork, WHITE)
-  mapFinUV(tail, FISH_SHEET.TAIL, 'zFront', 'span')
-  whiteColors(tail)
-  tail.translate(0, 0, -CUSTOM_BODY.len * 0.46)
-  parts.push(tail)
-
-  // --- dorsal + anal — ray grids seated on the hull ---
-  const dorsal = makeRayFin(DORSAL_SPEC, WHITE, radiusAt, CUSTOM_BODY.h, 1, 9)
-  mapFinUV(dorsal, FISH_SHEET.DORSAL, 'zFront', 'up')
-  whiteColors(dorsal)
-  parts.push(dorsal)
-
-  const anal = makeRayFin(ANAL_SPEC, WHITE, radiusAt, CUSTOM_BODY.h, -1, 7)
-  mapFinUV(anal, FISH_SHEET.ANAL, 'zFront', 'down')
-  whiteColors(anal)
-  parts.push(anal)
-
-  // --- pectorals behind the gill plate, pelvics on the belly ---
-  const pecZ = CUSTOM_BODY.len * 0.1
-  const pecW = widthAt(pecZ) * CUSTOM_BODY.w
-  const pecY = -radiusAt(pecZ) * CUSTOM_BODY.h * 0.12
-  const pelZ = CUSTOM_BODY.len * 0.12
-  const pelY = -radiusAt(pelZ) * CUSTOM_BODY.h * 0.62
+  // paired fins — the drawing shows one of each; the 3D fish wears
+  // a mirrored pair so it reads as a real fish from every side
+  const pecBase: [number, number] = [0.395, 0.868]
+  const pelBase: [number, number] = [0.37, 0.9]
   for (const side of [1, -1] as const) {
-    const pec = makePectoralFan(0.17, WHITE, 6)
-    mapFinUV(pec, FISH_SHEET.PECTORAL, 'radial', 'down')
-    whiteColors(pec)
+    const pec = finShell(PECTORAL)
+    // flare outward around the drawn base, keeping the side view identical
+    pec.translate(-wz(pecBase[0]), -wy(pecBase[1]), 0)
     pec.rotateY(side * -0.9)
-    pec.rotateZ(side * 0.5)
-    pec.translate(side * pecW * 0.74, pecY, pecZ)
+    pec.translate(wz(pecBase[0]), wy(pecBase[1]), side * 0.028)
     parts.push(pec)
 
-    const pel = makePectoralFan(0.15, WHITE, 5)
-    mapFinUV(pel, FISH_SHEET.PELVIC, 'radial', 'down')
-    whiteColors(pel)
-    pel.rotateY(side * -0.5)
-    pel.rotateX(-0.85)
-    pel.translate(side * widthAt(pelZ) * CUSTOM_BODY.w * 0.4, pelY, pelZ)
+    const pel = finShell(PELVIC)
+    pel.translate(-wz(pelBase[0]), -wy(pelBase[1]), 0)
+    pel.rotateY(side * -0.32)
+    pel.translate(wz(pelBase[0]), wy(pelBase[1]), side * 0.05)
     parts.push(pel)
   }
 
-  // --- real 3D eyes seated where the sheet draws the eye ---
-  // (pupil measured at 32% back from the nose, just above mid-height)
-  const eyeZ = CUSTOM_BODY.len * 0.32
-  const eyeY = radiusAt(eyeZ) * CUSTOM_BODY.h * 0.16
-  const skinX = surfaceXAt(eyeZ, eyeY)
-  const eyeR = Math.min(0.046, skinX * 0.85)
-  parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, '#2a2014'))
-  parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, '#2a2014'))
+  // real 3D eyes seated where the pupil was drawn
+  const eyeZ = wz(EYE.x)
+  const eyeY = wy(EYE.y)
+  const eyeR = EYE.rS * LEN * 0.8
+  const sx = surfaceXAt(EYE.x, EYE.y)
+  parts.push(...makeEyeParts(1, sx, eyeY, eyeZ, eyeR, '#232a31'))
+  parts.push(...makeEyeParts(-1, sx, eyeY, eyeZ, eyeR, '#232a31'))
 
   const merged = mergeGeometries(
     parts.map((p) => (p.index ? p.toNonIndexed() : p)),
@@ -168,16 +243,17 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
 
 /**
  * Material for a painted fish — same swim-bend/rim shader as the reef
- * species, gentler scale bump so crayon strokes stay readable.
+ * species, gentle bump so crayon strokes stay readable.
  */
 export function makeCustomFishMaterial(texture: THREE.Texture): THREE.MeshStandardMaterial {
-  const mat = makeFishMaterial(texture as THREE.CanvasTexture, 0.085, 7, `fish-custom-${Math.random().toString(36).slice(2)}`)
-  mat.bumpScale = 0.16
+  const mat = makeFishMaterial(texture as THREE.CanvasTexture, 0.075, 7, `fish-custom-${Math.random().toString(36).slice(2)}`)
+  mat.bumpScale = 0.12
   return mat
 }
 
 /** paint the reserved white texel (eyes sample it) onto a processed sheet */
 export function reserveWhiteTexel(ctx: CanvasRenderingContext2D, size: number) {
+  const WHITE_UV = 0.965
   const x = WHITE_UV * size
   const y = (1 - WHITE_UV) * size   // v-up → canvas y-down
   const r = size * 0.018

@@ -742,6 +742,7 @@ export class ProjectionEditorUI {
     body.appendChild(importRow)
     body.appendChild(status)
     body.appendChild(this.hint('2 · IMPORT PHOTO picks one or more photos; IMPORT FOLDER scans a whole local folder and releases every image it finds. Lay the sheet flat, shoot straight on in good light — the drawing is found automatically.'))
+    body.appendChild(this.hint('Every picture spawns 1–3 of that fish. While a painted fish swims, the regular reef fish step aside so the hand-made ones carry the show.'))
 
     // ---- step 3: the tank ----
     body.appendChild(this.sepEl())
