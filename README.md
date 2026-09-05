@@ -21,7 +21,7 @@ The Living Ocean is a real-time 3D ocean built with **Three.js**, **GSAP** and *
 - **Pufferfish defence display** — when a shark crosses the reef (or you swim right up to one), pufferfish inflate into a ball and their spines extend off the skin in real time — a per-instance shader morph — while the rest of the school panics and scatters around the predator.
 - **Procedural reef** — fbm-dune seabed with a canyon basin and seamount, biome-tinted sand, pebbles and shells, 8 procedural coral families, deformed instanced boulders, GPU-swaying seaweed and kelp, starfish, sea urchins and scallop shells — zero external 3D assets.
 - **Atmosphere** — animated water surface with Snell-window glow, procedural caustics, volumetric god rays, depth-graded fog, particle plankton, bubble clusters and a fully procedural WebAudio soundscape (drone, water noise, whale calls, gesture shimmer).
-- **Projection mapping studio** — turn the ocean into a multi-surface projection system (Resolume-style): spawn 1 → N surfaces (Front / Left / Right walls, floor, ceiling), each with its own virtual camera rendering the **same shared world**, drag 4-corner perspective pins and mesh-warp grids to match real walls, blend and feather overlapping edges, align projectors with calibration patterns (grid, crosshair, color bars, checkerboard, corners), and push a fullscreen, UI-free **OUTPUT** to the projector (Enter / F11-style toggle). Presets: Flat Screen, Cinema Screen, 180° Panorama, 270° Immersive, Immersive Room, Cube Room, Floor + Front. Projects autosave to the browser and export/import as `ocean-projection.project.json`.
+- **Projection mapping studio** — turn the ocean into a multi-surface projection system (Resolume-style): spawn 1 → N surfaces (Front / Left / Right walls, floor, ceiling), each with its own virtual camera rendering the **same shared world**, drag 4-corner perspective pins and mesh-warp grids to match real walls, blend and feather overlapping edges, align projectors with calibration patterns (grid, crosshair, color bars, checkerboard, corners), and push a fullscreen, UI-free **OUTPUT** to the projector (Enter / F11-style toggle). Presets: Flat Screen, Cinema Screen, 180° Panorama, 270° Immersive, 360° Linked Ring, Immersive Room, Cube Room, Floor + Front. Projects autosave to the browser and export/import as `ocean-projection.project.json`.
 - **Cinematic entry** — GSAP-sequenced loading, dive-in descent and staged reveals.
 - **Graceful everywhere** — three quality tiers with adaptive degradation, mobile/touch layout, reduced-motion support, and a mouse/keyboard fallback that keeps the ocean alive without a camera.
 
@@ -69,7 +69,7 @@ Open the projector HUD button (or press the studio button top-right of the HUD) 
 **Operator workflow:**
 
 ```text
-1. Pick a preset        Flat Screen · Cinema · 180° · 270° Immersive · Immersive Room · Cube Room · Floor+Front
+1. Pick a preset        Flat Screen · Cinema · 180° · 270° Immersive · 360° Linked Ring · Immersive Room · Cube Room · Floor+Front
 2. Match your room      drag corner nodes in the OUTPUT tab (true perspective corner pin)
 3. Refine               raise WARP grid resolution and push interior nodes (mesh warp)
 4. Camera               set position / yaw / pitch / FOV per surface, or snap FRONT·LEFT·RIGHT·FLOOR·CEILING
@@ -95,6 +95,23 @@ For real installs, open **`/output`** on the projector machine (or a second wind
 - **Operator settings in place** — move the mouse and a small overlay fades in: **QUALITY** (Auto / Performance / Balanced / High / Ultra — saved into the project and synced back to the show), **PATTERN** (show/hide grid · crosshair · color bars · checkerboard · white · black · corners for alignment — set back to OFF for the show), **FULLSCREEN**, **IMPORT .JSON** and a live surface/resolution readout (active quality + per-surface source pixels). It hides itself (and the cursor) after a moment, so the projection stays clean. `?pattern=grid` starts pre-calibrated.
 - **Seamless edges (span lock)** — room presets derive every camera's frustum from the world angles its wall covers (shared eye point + 90°×90° spans for right-angle rooms). Adjacent frustum edges meet **exactly**, so the frame is never cut or duplicated between walls; floor wedges continue walls at the matching pitch. Toggle it per surface via **“Match wall edges (span lock)”** in the properties panel (SPAN H / SPAN V sliders).
 
+### Smartphone remote control — QR code, camera gestures + double joystick, over a true WebSocket
+
+Press **REMOTE QR** in the projection studio topbar (or on the `/output` overlay): a modal shows a QR code plus the controller URL. Scan it with a phone and the phone becomes the controller. The design is deliberately minimal — **the controls exist only while the camera is on; camera off = controls off**:
+
+- **Off state** — just a start card (**START CAMERA**). Nothing else.
+- **Live state — the camera view IS the controller** — the phone's front camera shows live (mirrored) with both hand skeletons drawn on top; **up to TWO hands** are tracked on the phone with the same local MediaPipe model and stream at ~25 Hz, so fish follow the swimming gesture on every screen. Floating over that view:
+  - **LEFT joystick — MOVE** — push right/left to strafe the camera chain (X), up/down to **raise/lower it (naik-turun, Y)**.
+  - **RIGHT joystick — ORBIT** — push right/left to sweep the chain's yaw, up/down to tilt its pitch.
+  - **PINCH** on the view — dolly the chain toward/away (Z). **⟲ button** — glide everything back to the saved poses.
+  - The sticks are **velocity** controllers: while deflected they stream small per-tick **deltas** at ~30 Hz, so a late packet can never yank the view and pushing into a range limit just eases to a stop (no hard edges, no patah). The whole chain still moves as **ONE motion around the center camera** — span-locked walls stay perfectly joined.
+- **True WebSocket relay (`/ws`, same port)** — hands, view deltas, show commands and presence ride one persistent WebSocket served by the app itself (`scripts/dev-server.mjs`, zero dependencies). This replaced the per-frame HTTP POST + SSE polling that looked stuttery over wifi — motion on the studio and every `/output` page is now steady push, not bursts. The SSE/POST relay (`/api/remote/*`) stays wired as an automatic fallback while the socket is down.
+- **Full control lives in the studio** — the desktop **CHAIN tab** drives the same rig precisely (YAW / PITCH / DOLLY Z / MOVE X / LIFT Y sliders, viewpoint presets, AUTO ORBIT with a smooth sinusoidal 270° sweep, RESET) plus all show actions (feed, shark, turtle, ray, pulse, swim, sound).
+- **Auto-QR on the output screen** — the `/output` page shows a **small QR badge in the corner by itself** whenever no phone is connected (it sizes with the screen via `vmin`, subtle on any projector resolution). With the WebSocket up, presence is **instant** — the badge fades the moment a phone joins the room and returns the moment it leaves (polling fallback for SSE-only clients). Tap it to open the full REMOTE QR modal.
+- **Every page follows, in real time** — the studio and every `/output` page (any browser, any machine on the network) consume the same WebSocket stream. While the phone streams hands they take priority over the local camera and drive the same two-point force field the local hands use — the HUD shows **REMOTE HANDS**. Stop the phone and every page falls back to local tracking automatically.
+- **Two hands on the desktop camera too** — the local tracker runs `numHands: 2` with stable per-hand slots, so fish schools can follow both sides of a swimming stroke even without a phone.
+- **HTTPS note** — phones only grant camera access on secure origins. `http://localhost` works; over the LAN run `npm run dev:https` (self-signed cert generated into `.next/certificates/`) or open the app through its HTTPS link. The controller page shows an explicit warning when the origin is insecure — since the controls are camera-gated, an insecure origin means no remote control.
+
 ## 🚀 Quick Start
 
 ```bash
@@ -107,6 +124,8 @@ npm install        # or: bun install
 
 # 3. run
 npm run dev        # http://localhost:3000
+# over the LAN with a phone controller (camera needs HTTPS):
+# npm run dev:https
 
 # 4. production
 npm run build

@@ -438,6 +438,150 @@ Stage Summary:
 ---
 Task ID: 17
 Agent: main (Super Z)
+Task: Smartphone remote control via QR code — phone camera mode tracking BOTH hands, every page follows in real time
+
+Work Log:
+- New server relay src/app/api/remote/hands/: store.ts (globalThis in-memory bus per room — snapshot, listeners, phoneSeenAt, 8-room LRU cap), route.ts (POST phone frames — validated/sanitized: hard cap 2 hands, x/y/openness clamped 0..1, 21-point landmark matrices, garbage-tolerant; GET ?room= snapshot), stream/route.ts (SSE: instant replay of a fresh snapshot on connect, live 'hands' events, 15 s keep-alives, abort/cancel cleanup), host/route.ts (GET /api/remote/host → LAN IPv4 candidates via os.networkInterfaces so the QR can point the phone at the machine instead of localhost)
+- Shared math: interaction/handMath.ts — extractHandSample() + mirrorLandmarks() moved out of HandTracker so the DESKTOP tracker and the PHONE controller produce byte-identical HandSamples (same mirroring, same openness/scale curves)
+- HandTracker: numHands 1 → 2; per-frame results matched to stable slots (greedy nearest-previous-position assignment, 450 ms memory) so a second hand entering never steals the primary channel; hands() + landmarksList() expose smoothed per-hand samples; detect() still returns the primary sample for swim steering
+- InteractionField: full second force point (point2/dir2/strength2/mode2 + independent idle clock + setTarget2) — FieldSnapshot/FieldCtx extended; Boids got a mirrored second gesture-force block (current/push/repel/attract per point) so schools follow both hands of a swimming stroke
+- GestureEngine rewritten as per-hand channels: HandChannel state (hist, velocity, palm/fist hysteresis, cadence) ×2; channel 0 → field.setTarget, channel 1 → field.setTarget2; callbacks fire from either hand; merged status (priority: push > swipe > pull > attract > caution > current), hands count added
+- RemoteHands client (experience/remote/): EventSource on /api/remote/hands/stream, freshness window 1300 ms, 400 ms watchdog live→stale→live, exposes hands+landmarks in the exact same shape as the local tracker
+- main.ts: gesture source priority = phone remote while fresh → local camera (both 2-hand); status chip REMOTE HANDS on phone contact with toast, honest fallback to HAND TRACKING/MOUSE MODE when the stream dies; GestureView updated to draw BOTH skeletons (cyan/amber) with per-hand crosshairs + "TRACKED × n"; QA hooks __ocean.remote.{status,fresh,hands,room,inject,clear} + __ocean.field() + __ocean.gesture()
+- RemotePhone (experience/remote/ + src/app/remote/page.tsx): ocean-styled phone controller — front camera preview (mirrored) with live skeleton overlay, START CAMERA gate, GPU→CPU landmarker fallback, ~25 Hz POST (400 ms idle keepalive), sendBeacon 'hands gone' on pagehide, OFFLINE/status chip + FPS, insecure-context warning (phone cameras need HTTPS off-localhost)
+- RemoteQR modal: REMOTE QR buttons in the projection-studio topbar and the /output overlay → glass modal with QR (npm qrcode, dynamic import), URL row + COPY, candidate origin chips (this origin + LAN addresses from /api/remote/host, localhost deprioritized for the phone), live connection poll ("● PHONE CONNECTED — 2 hands streaming"), HTTPS hint when !isSecureContext; modal closes on ESC/backdrop and in projection dispose
+- package.json: npm run dev:https (next dev --experimental-https) for LAN phone camera; README: new "Smartphone remote control" section + Quick Start note
+
+Verified headless (agent-browser + curl/python fake phone):
+- API: POST 2-hand frames → {ok,hands:2}; snapshot GET live:true; 4-hand/garbage payload → sanitized to 2 (clamps verified); SSE stream connects + hello event
+- Studio /: remote.status connecting → with fake stream fresh:true, hands:2, field {active, active2, point [-6,1.6,1.7] for hand@x0.3, point2 [4.9,0.9,1.7] for hand@x0.68 — mirroring + channel split correct}, gesture 'attract' (open palm) — park('pufferfish') drifted toward the attract point under stream
+- /output: same stream lands live (fresh, 2 hands, strength 0.80/0.59 both points) — the projector page follows the phone directly, no control tab needed
+- QR modals on studio AND /output: open, QR data-URL renders (first open pays one dev compile), URL correct /remote?room=ocean, /output modal reads "● PHONE CONNECTED — 2 hands streaming"
+- /remote page boots: START CAMERA card, no insecure warning on localhost, headless camera-denial handled by TRY AGAIN state
+- Regression: fresh reload + __ocean.remote.inject two hands → both field points engaged, zero console errors; tsc clean; eslint clean on all new/modified files (only pre-existing MediaPipe WASM vendor warnings remain)
+
+Stage Summary:
+- Scan a QR (studio topbar or /output overlay) → the phone's camera becomes a two-hand gesture controller; every ocean page on the network — control and outputs — follows the swim in real time, and falls back to local tracking the moment the phone stops
+- Two-hand tracking is now native everywhere: desktop camera (stable slots) and phone remote share one pipeline with two independent force points, so alternating swimming strokes drive two currents instead of being averaged away
+- Show-time safety unchanged: the phone is a pure ADD-ON — closing it never disturbs the output pages
+
+---
+Task ID: 18
+Agent: main (Super Z)
+Task: Phone controller BUTTON PAD mode — one-thumb show control (action grid, joystick, toggles, hold-boost) beside the camera mode, all realtime
+
+Work Log:
+- New command relay src/app/api/remote/cmd/: store.ts (globalThis bus per room — cmd ring (24 cap, monotonic ids), hostState echo {swim,muted}, padSeenAt liveness, 8-room LRU), route.ts (POST cmd/host/ping — type whitelist REMOTE_CMD_TYPES, GET bootstrap snapshot with padLive), stream/route.ts (SSE: 3 s cmd replay on connect + host snapshot + live 'cmd'/'host' events + 15 s heartbeat)
+- RemoteCmds client (experience/remote/): EventSource on /api/remote/cmd/stream, id-set dedupe (64 cap), onCmd/onHost; main.ts assigns applyRemoteCmd — feed (doFeed), burst (fish-centroid shockwave + scatter + camera push), shark/turtle/ray (visitors), pulse (lighting), bubbles, impulse; swim/sound/boost are studio-only (outputOnly pages apply world events, never view changes); publishHostState() echoes swim/muted at boot + on every change (swim.onChange, sound toggle, remote swim/sound cmds)
+- RemotePhonePad (experience/remote/): ocean-glass touch pad — 6-button action grid (FEED/BURST/SHARK/TURTLE/RAY/PULSE with hand-drawn SVG stroke icons + per-action accent colors), joystick (pointer-capture, 90 ms keepalive, knob glow) that streams a synthesized open-palm hand (openness 0.78 → attract) through the EXISTING /api/remote/hands pipeline — fish follow the stick on every page with zero new consumption code; SWIM/SOUND toggles with live state badges (host poll 1.5 s), BOOST hold (press/release cmd pair, dimmed until SWIM is on), haptics (navigator.vibrate), pad heartbeat ping 2.5 s keeps the QR modal green in buttons mode
+- RemotePhone reworked into a two-mode controller: segmented CAMERA/BUTTONS switch; entering BUTTONS fully stops the camera (battery) and posts empty hands; leaving restores the START CAMERA card; per-mode legend text; pagehide beacon kept
+- Robustness fixes found by headless testing: RemoteHands frame gate moved from sender-seq to SERVER receive timestamp (the POST route stamps t) — a second phone/QA inject with its own private seq previously starved the first sender forever; joystick guards: finite-check + center fallback + hidden-rect bail (NaN → null → corner-clamp bug), setPointerCapture try/catch; removed duplicate pad legend
+- RemoteQR: modal copy now mentions the BUTTONS pad; connection poll checks hands liveness OR pad liveness ('● PHONE CONNECTED — pad / camera active'); REMOTE QR button tooltips updated (studio + /output)
+- QA hooks: __ocean.pad.{status,room,apply(type,on)} — pad.apply fires a command straight into the pipeline
+- README: remote section rewritten for the two-mode controller
+
+Verified headless (agent-browser + curl fake phone):
+- API: POST cmd → {ok,id}; host echo stored+returned; ping → padLive:true; unknown type rejected; GET snapshot lists cmds; SSE replayed host+hello then live 'cmd' events
+- End-to-end: curl shark → studio threat 1 + toast 'PHONE PAD · Shark!'; curl feed/swim/sound/boost all consumed (swimMode toggled true→false via commands, hostState published swim:true after)
+- Phone pad clicks (TURTLE/SHARK/BOOST) POSTed and recorded on the server (cmd ids 12-17); BOOST hold captured on:true → on:false pair ~580 ms apart
+- Joystick: synthetic drag → hands snapshot (0.808, 0.332, openness 0.78, 'stick') exactly as computed; same-page stream test → studio field.active true, point (0.9,1.4,-6.2) follows x0.75/y0.35; release → hands [] → field deactivates
+- Badges: curl swim → pad poll flips SWIM badge ON + BOOST opacity 1 (state-driven); sound badge tracks muted
+- UI: 390x844 screenshots — action grid + toggles + centered knob, single legend; QR modal on /output shows new copy + 'PHONE CONNECTED — pad / camera active'
+- CAMERA regression: tab back → START CAMERA card, no page errors; tsc clean; eslint clean on all new/modified files
+
+Stage Summary:
+- The phone is now a full remote: CAMERA (both-hand gesture steering) or BUTTONS (one-thumb show control: feed/burst/shark/turtle/ray/pulse + joystick current + swim/sound toggles + hold-boost), both channels realtime over SSE to the studio AND every /output page
+- Multi-sender hands relay is now timestamp-gated — any number of phones/QA sources can coexist safely
+- Show-time safety unchanged: closing the pad stops timers/releases the stick; closing the phone calms the water and falls back to local tracking
+
+---
+Task ID: 19
+Agent: main (Super Z)
+Task: Phone VIEW remote moves the CAMERA CHAIN as one motion (pivot = center camera) + 270° linked viewpoint sweep with zero breaks + 360° Linked Ring preset
+
+Work Log:
+- New ChainRig (projection/ChainRig.ts): yaw/pitch/dolly targets with exponential ease + ping-pong AUTO sweep across the ±135° range (270° linked coverage); pivot = the enabled surface whose output slice center sits nearest the canvas center ("posisi tengah kamera"); forward vector of the rotated center camera drives the dolly; applyView({yaw,pitch,dolly,auto,speed,reset}) is idempotent; pose is exposed read-only
+- Render-time transform: CameraManager.sync now computes the effective pose (stored pose + rig orbit around pivot + dolly along the rotated center-camera forward) — the stored surface data is NEVER mutated, so autosaves, published sessions, portable links and undo history stay clean while the rig swings (verified: qaState storedCam yaw 0 / pos [0,2.2,0] while rig showed 48°)
+- Interconnection guarantee: every camera gets the SAME yaw/pitch offsets around the shared pivot, so relative angles — and therefore span-locked wall edges (62°/90°/92° spans) — stay exactly met during any motion; the picture sweeps 270° with no cut ("tidak patah tampilannya")
+- Relay: new 'view' cmd type with sanitized payload (yaw ±180, pitch ±89, dolly ±20, speed 1–30, auto/reset booleans) through the existing /api/remote/cmd store + SSE stream; stale 'view' cmds (>1.5 s) are excluded from stream replay so a freshly opened page never lurches to an old drag target; RemoteHostState now carries chain {yaw,pitch,dolly,auto} and the studio publishes it (trailing 550 ms throttle against 18 Hz drag streams)
+- main.ts: 'view' case applies on EVERY page (studio + all /output — each renders its own surfaces, no outputOnly gating); publishHostState extended with chain; QA hooks __ocean.chain.{state,view,reset}
+- Phone: new VIEW stage (remote/RemotePhoneView.ts) — orbit drag pad (relative grab, 0.28°/px yaw · 0.14°/px pitch, crosshair feedback, ~18 Hz stream), 7 viewpoint chips (−135…+135 every 45°), YAW/PITCH/DOLLY touch sliders with host-sync guard, AUTO ORBIT toggle + RESET; mode switch is now three-way CAMERA / BUTTONS / VIEW (pads stop the camera; leaving a pad stops its timers + stream)
+- Studio: new CHAIN dock tab — live readout (yaw/pitch/dolly + pivot surface, refreshed by the 140 ms tick), three sliders queued through a 120 ms trailing push (pm.pushChainView = apply locally + POST to the relay so every /output follows), 270° LINKED SWEEP chips, AUTO ORBIT, RESET; /output overlay info shows the live sweep (CHAIN AUTO -46°)
+- New preset 'pano-360' (360° Linked Ring): four span-locked walls (92° spans on 90° centres, 2° overlap joins) closing a full ring the rig can sweep endlessly — completes the linked family 180°/270°/360°
+- Dev-server note: the sandbox reaps tool-call descendants (and OOM killed chrome once) — scripts/start-dev-daemon.py double-forks `bun run dev` so it re-parents to init and survives; a restart was REQUIRED because the old process's globalThis remoteCmdStore singleton (created before the 'view' type existed) silently dropped the 4th push() argument
+
+Verified headless (agent-browser + curl fake phone):
+- Relay: POST view {yaw:120,dolly:-3} → stored intact; host echo carries chain; stale-view replay filter in place
+- Full loop: curl view {yaw:60,pitch:8,dolly:1.5} → studio targets set, rig eased (yaw 16→…→60), engaged, center='Main Screen', stored camera data untouched
+- pano-360: 4 walls span-locked h92/v90; rig yaw→90 with all stored yaws (0/−90/180/90) unchanged; center tie-break = Right Wall (two middle slices tie at 0.125 offset)
+- Phone pad: 3-way tabs render; VIEW tab chip '+90°' → cmd {'yaw':90} stored → studio target.yaw=90; readout + sliders sync from host chain echo (screenshot)
+- Multi-page: one view cmd → /output (yaw −29.3) and studio (yaw 45.5) both easing toward −120 simultaneously — one motion everywhere
+- AUTO ORBIT {auto:true,speed:14} → auto engaged, yaw sweeping; RESET glides targets home; zero console errors (only pre-existing three.js warnings)
+- Screenshots: download/qa-remote-view-pad.png, qa-studio-chain-tab.png, qa-output-chain.png; tsc clean (only pre-existing examples//skills/ errors); eslint clean on all changed files
+
+Stage Summary:
+- The QR remote now primarily controls the CAMERA/SURFACE CHAIN: one motion, pivot at the center camera, 270° of linked viewpoints that interpolate continuously — walls stay seam-joined while the view sweeps
+- Same rig driven from the studio CHAIN tab; both apply at render time so no saved data is ever bent by a show-time move
+- pano-360 completes the span-locked preset family for full-ring rooms
+
+---
+Task ID: 20
+Agent: main (Super Z)
+Task: Remote VIEW gains MOVE XYZ + naik-turun kamera (pivot = center screen), and the /output auto-QR badge (small, vmin-sized, shows until a phone connects)
+
+Work Log:
+- ChainRig: new moveX/moveY axes (eased + targets, ±10 m moveRange) completing MOVE XYZ (dolly stays Z); applyView accepts moveX/moveY — applied BEFORE the auto-orbit early-return so translation keeps working while the sweep owns yaw; reset zeroes all five targets; pose now carries mx/my + `right` vector (center camera's horizontal right = (-fz,0,fx), always well-defined up to ±89°); transformedCenter includes the move; qaState exposes moveX/moveY/target/range.move
+- CameraManager.sync: after the orbit + dolly, adds ONE shared translation to every camera — right·mx + worldUp·my — so the chain strafes/rises as a rigid group: relative angles and span-locked wall edges stay exactly met, nothing patah
+- Relay: RemoteCmdView + host.chain gain moveX/moveY (sanitizeView clamps ±20, rounds 0.01; host parse passes them through); main.ts publishHostState echoes moveXT/moveYT so the phone sliders stay honest
+- RemotePhoneView rebuilt: two pads side by side — ORBIT (yaw/pitch, unchanged) + MOVE pad (drag right/left = strafe X, drag up/down = naik/turun Y, 0.034 m/px relative grab, ~18 Hz) — plus a 2×2 slider grid (YAW | PITCH / DOLLY Z | LIFT Y), two-line readout (YAW/PITCH + MOVE X·Y·Z), viewpoint chips, AUTO ORBIT + RESET; host poll syncs moveX/moveY; stop() releases both pads
+- Studio CHAIN tab: DOLLY Z relabel + new MOVE X M / LIFT Y M sliders (queued through the 120 ms trailing push like the rest), readout now shows `YAW · PITCH · XYZ x y z`, hint text explains the three translation axes
+- New RemoteQrBadge (experience/remote/): fixed bottom-right QR badge mounted on /output only — sizes with clamp(64px, 11vmin, 112px) + vmin label so it follows the screen size, renders the /remote?room= QR once via pickRemoteBase() (LAN-aware, refactored out of RemoteQR), polls hands live OR padLive every 1.5 s: shows while NO phone is connected, fades out on connection, comes back when the phone leaves, stays hidden while the full modal is open; tap opens openRemoteQR; disposed with the projection
+- RemoteQR refactor: exported pickRemoteBases/isLocalBase/pickRemoteBase (no duplicate LAN logic); README remote section rewritten (auto-QR + MOVE XYZ + LIFT Y)
+
+Verified headless (agent-browser + curl fake phone):
+- Badge: visible at boot (opacity 1, QR data-URL loaded, 105×80 @ 720p, 14 px from the corner) → pad ping → fades (0.86 mid-transition) → gone; 6 s later (heartbeat expired) back to 1 on its own; tap opens the modal with the right URL and the badge hides; ESC closes → badge returns on the next poll
+- Relay: POST view {moveX:2.5, moveY:-1.2, dolly:-2} → sanitized intact; studio chain eases toward it (0.5→1.6→…, RAF-throttled in headless, smooth by design) and the STORED camera stays [0,2.2,0]/yaw 0 — render-time-only transform confirmed
+- Studio CHAIN tab: all five sliders present; MOVE X slider → target.moveX −3 + relay push {moveX:-3, auto:false}; readout shows XYZ live; RESET zeroes everything
+- Phone VIEW: ORBIT + MOVE pads + 4 sliders render; synthetic drag on the MOVE pad (right + up) streams {moveX:3.13, moveY:3.23} = exactly dx·0.034 / dy·0.034; padLive stays true (badge logic consistent)
+- Multi-page: one move cmd → /output tab chain engaged, easing to (−1.5, 2) while targets land everywhere — one motion on every screen; zero page errors on studio, /output and /remote
+- Host echo now carries moveX/moveY; tsc clean (only pre-existing examples//skills/ errors); eslint clean on all changed files
+- Screenshots: download/qa-output-qr-badge.png, qa-phone-view-move.png, qa-studio-chain-move.png
+
+Stage Summary:
+- The QR remote now moves the camera chain through space, not just around it: ORBIT (yaw/pitch) + MOVE XYZ (strafe X, naik-turun Y, dolly Z) all pivot on the center camera and stay one synchronized motion on the studio and every output screen
+- The output screen sells itself: a small self-hiding QR waits in the corner until a phone joins, then vanishes until it's needed again
+
+---
+Task ID: 21
+Agent: main (Super Z)
+Task: Fix "patah-patah" remote link + camera edge breaks — true WebSocket relay, delta-based soft-edge camera chain, and a minimal camera-only phone controller with a double joystick
+
+Work Log:
+- User feedback: (1) koneksi patah-patah — gunakan WS; (2) kamera patah saat movement mencapai edge; (3) kontrol HP terlalu banyak — hanya kamera saat kamera dipakai, off saat tidak; (4) kontrol berbentuk double joystick dengan gerakan lebih smooth.
+- TRUE WEBSOCKET on the SAME port: scripts/ocean-ws.mjs (dependency-free RFC6455 relay — handshake SHA1 accept, masked client frames, 16/64-bit lengths, ping/pong sweep, rooms, monotonic cmd ids, presence, 'sync' request on join; fragmented frames closed by design) + scripts/dev-server.mjs (Next 16 programmatic custom server: HTTP(S) + /ws upgrade → relay, all other upgrades → app.getUpgradeHandler() so dev HMR keeps working; RUN_HTTPS=1 generates a self-signed cert via openssl into .next/certificates/). package.json: dev/dev:https now run the custom server — the WS shares port 3000 (no mixed content, no extra firewall hole).
+- RemoteSocket.ts (browser client): persistent ws(s)://host/ws?room=…, hello/host role, capped-backoff reconnect (0.4s→5s), callbacks hands/view/cmd/host/presence/sync; sendHands/sendView/sendCmd/sendHost/ping. main.ts wires it on EVERY page: hands → remoteHands.ingest(), view/cmd → applyRemoteCmd, sync → publishHostState, presence → new remotePresenceBus; publishHostState also pushes over WS; 3 s chain beacon while engaged keeps late joiners converging. SSE/POST relays stay wired as automatic fallback.
+- ChainRig (anti-patah): new DELTA API (dyaw/dpitch/ddolly/dmx/dmy) — velocity pads nudge the page's OWN live target so a late packet can never LURCH the camera back to a stale absolute (root cause of the edge breaks); softEdge() = tanh compression beyond 82% of any range (pushing into ±135° yaw / ±45° pitch / ±10 m move / ±8 m dolly decelerates asymptotically instead of hard-stopping; verified 240° of pushed deltas saturate exactly at 135 with no NaN); auto orbit is now SINUSOIDAL (yawT = range·sin(phase), C¹ reversal at the edges, starts from the current yaw via asin); ease 4.2 → 5; pitchRange 30 → 45 (studio CHAIN slider derives from it automatically).
+- Relay payload: RemoteCmdView + route sanitizer carry the five delta fields (SSE fallback parity, clamped ±30/±10, 0.01 rounding).
+- Phone rebuilt (user asked "control hanya kamera, off jika tidak"): /remote is now ONE screen — boot card (START CAMERA) or the live camera view; RemotePhonePad.ts (BUTTONS grid/toggles/boost) and RemotePhoneView.ts (pads/sliders/chips) DELETED.
+- New RemotePhoneSticks.ts: double VELOCITY joystick floating over the camera view — LEFT = MOVE (kanan/kiri = geser X, atas/bawah = naik-turun Y, 6.5/4.5 m·s⁻¹), RIGHT = ORBIT (yaw 80°/s — stick right looks right, pitch 38°/s), smoothstep + 14% deadzone, per-stick pointer capture (multi-touch), knob glow + spring-back, PINCH anywhere = dolly (9 m/pinch), small ⟲ reset button, 30 Hz flush loop streaming rounded deltas; controls exist ONLY while the camera runs. RemotePhone.ts: camera loop unchanged (2 hands, 25 Hz) but sendHands/sendView prefer the WS (POST fallback), status chip shows '· WS', ?qa=1 boots sticks without a camera (start card hidden) for headless tests (__oceanPhone hook).
+- RemoteHands: frame-apply logic extracted into ingest() — WS frames and SSE events share one path with the same server-stamp freshness gate; seq made public for QA. RemoteQrBadge: subscribes to the presence bus — INSTANT hide on phone join / show on leave (1 s hold to stop poll flicker); hands/pad polling kept as fallback; vmin sizing unchanged (follows screen).
+- QA hooks: __ocean.ws.{status,live,sendView}, __ocean.remote.{at,now,seq}, __oceanPhone (phone page).
+- New QA tools: scripts/ws-smoke.mjs (relay protocol test), scripts/ws-fake-phone.mjs (choreographed phone: delta streams, hands, cmds, auto, pings).
+
+Verified headless (agent-browser + node WS clients):
+- Relay: hello/presence/sync/view/cmd/hands fanout ✓ (host receives all, hands stamped with server `at`, cmd ids monotonic); presence {phones} correct on join AND graceful close; host echo fanout ✓.
+- Pages: studio + /output + /remote all report __ocean.ws live; zero page errors (only pre-existing three.js warnings).
+- Deltas end-to-end: fake phone dyaw stream → studio target.yaw 17.5→44.5; dmx → moveX −3.6; /output moveX 0.8; stress 60×4° deltas saturate EXACTLY at +135, NaN-free.
+- Hands: WS burst ingested 1:1 (seq 0→50 monitored in-page), freshness gate intact, SSE path unchanged.
+- Phone sticks: ORBIT drag → studio yaw −86.6 / pitch +17.5 (stick right = look right); MOVE drag → moveX +6.6 / moveY +1.7 (naik); ⟲ reset → studio targets all 0. Fixed during QA: start card (z-index) blocked synthetic drags in ?qa=1 — now hidden.
+- QR badge: visible at boot (opacity 1) → phone joins → fades INSTANTLY via WS presence (0.59 mid-fade sampled) → phone leaves → back to 1. Earlier "stuck hidden" reading traced to zombie sockets of killed test processes — relay 25 s sweep cleans them; graceful close is instant.
+- tsc clean (only pre-existing examples//skills/ errors); eslint clean on all new/modified files; all pages 200 after final edits; WS RELAY OK.
+- Screenshots: download/qa-phone-sticks-final.png (double joystick), qa-output-ws-badge.png, qa-studio-final.png.
+
+Stage Summary:
+- The remote link now rides a real same-port WebSocket: hands, view deltas, commands and presence are steady push — the patah-patah is gone, and SSE/POST remain as silent fallback.
+- The camera chain can no longer break at its edges: velocity deltas + tanh soft limits + sinusoidal auto sweep mean every motion decelerates smoothly into its range and reverses without a jolt; walls stay span-locked through all of it.
+- The phone is one idea: camera on → the view IS the controller (MOVE + ORBIT double joystick, pinch dolly, reset); camera off → controls off. Everything else lives in the studio.
 Task: QR smartphone connection on /output + /control-mobile double-joystick remote over a real WebSocket + smooth rigid camera rig (user: "qr untuk koneksi dengan smartphone"; earlier: "gunakan ws", "control di hp terlalu banyak ... doubel joystik ... lebih smooth")
 
 Work Log:

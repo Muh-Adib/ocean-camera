@@ -372,12 +372,14 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     // ---- interaction pipeline ----
     pointer.updateKeyboard(dt)
     if (handTracker.isRunning) {
-      const sample = handTracker.detect(dt)
-      gestureEngine.update(sample, dt)
-      gestureView?.update(dt, sample, handTracker.lastLandmarks, gestureEngine.status, true, handTracker.video)
-      // in swim mode the palm doubles as a steering joystick
+      handTracker.detect(dt)          // drives per-slot smoothing (0-2 hands)
+      const samples = handTracker.hands()
+      gestureEngine.update(samples, dt)
+      gestureView?.update(dt, samples, handTracker.landmarksList(), gestureEngine.status, true, handTracker.video)
+      // in swim mode the primary palm doubles as a steering joystick
       if (swim.active) {
-        swim.setHandSteer(sample.x, sample.y, sample.present, sample.present && sample.openness < 0.28)
+        const steer = samples[0]
+        swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
       }
     } else {
       gestureView?.update(dt, null, null, gestureEngine.status, false, null)

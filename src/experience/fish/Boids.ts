@@ -20,6 +20,12 @@ export interface FieldCtx {
   caution: number           // 0..1 (closed fist nearby)
   curiosity: number         // 0..1 (open palm nearby)
   scatter: number           // 0..1 push boost
+  // second hand (local two-hand or the phone remote) — same semantics
+  active2: boolean
+  point2: THREE.Vector3
+  dir2: THREE.Vector3
+  strength2: number
+  mode2: 'current' | 'push' | 'pull' | 'attract' | 'repel'
 }
 
 export interface SchoolParams {
@@ -293,6 +299,26 @@ export class School {
             f.acc.addScaledVector(_tmp, w * 16 * (1 + field.curiosity))
           }
           // 'pull' → calm recovery handled by extra damping below
+        }
+      }
+
+      // ---- second hand: the SAME localized field for the second
+      //      hand (local two-hand or the phone remote) so schools
+      //      can follow both sides of a swimming stroke ----
+      if (field.active2 && field.strength2 > 0.003) {
+        const d2 = f.pos.distanceTo(field.point2)
+        const reach2 = field.radius * 2.1
+        if (d2 < reach2) {
+          const t2 = 1 - d2 / reach2
+          const w2 = t2 * t2 * field.strength2 * this.speciesResponse
+          f.acc.addScaledVector(field.dir2, w2 * 15)
+          if (field.mode2 === 'push' || field.mode2 === 'repel') {
+            _tmp.subVectors(f.pos, field.point2).normalize()
+            f.acc.addScaledVector(_tmp, w2 * (field.mode2 === 'push' ? 26 : 14))
+          } else if (field.mode2 === 'attract') {
+            _tmp.subVectors(field.point2, f.pos).normalize()
+            f.acc.addScaledVector(_tmp, w2 * 16 * (1 + field.curiosity))
+          }
         }
       }
 
