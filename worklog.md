@@ -609,3 +609,20 @@ Stage Summary:
 - The wall now invites the phone: a live QR sits on the projected picture, follows every wall move/warp, and vanishes the instant a phone links
 - The phone is a double-joystick remote over a real WebSocket — smooth velocity control with rigid constellation camera motion, soft rubber-band limits and graceful decay, so the walls stay seamless and the motion stays fluid edge to edge
 - Camera controls appear only when camera mode is on; everything else stays out of the way
+
+---
+Task ID: 17-b
+Agent: main (Super Z)
+Task: Reconcile with the previous session's pushed commits (remote main had 5 commits this checkout never had)
+
+Work Log:
+- Remote main carried the earlier SSE-based remote iteration (api/remote cmd/hands/host routes, /remote page, ChainRig, RemoteSocket/RemotePhone/RemoteQR/RemoteHands modules, two-hand gesture system)
+- Merged FETCH_HEAD; resolved conflicts keeping the NEW stack as canonical: server.js WS hub, RemoteRig, QrOverlay, /control-mobile, CameraManager rig hook, ProjectionManager
+- Deleted the rejected SSE transport stack (the source of "patah patah" + the chain rig edge tearing it was meant to fix)
+- PORTED the orthogonal two-hand gesture work: HandTracker (numHands 2 + stable slots + hands()/landmarksList()), handMath, GestureEngine multi-sample update, GestureView multi-hand draw, InteractionField/Boids enhancements, Linked Ring preset
+- main.ts interaction loop updated to the new API: detect() drives slot smoothing, samples = handTracker.hands(), GestureView takes the samples array, swim steering uses the primary palm
+
+Verified: tsc clean; /output boots (QR at wall centroid, WS open), /control-mobile connects (green dot), /output flips to phoneOn + hides QR; home page boots with 236 fish and zero page errors; pushed 97df41c..1e9b497
+
+Stage Summary:
+- One canonical smartphone link now exists (WebSocket), the stuttering SSE remote is gone, and the good two-hand gesture work from the old branch rides on the new stack
