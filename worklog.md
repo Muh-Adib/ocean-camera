@@ -834,5 +834,31 @@ Stage Summary:
 - Hiu berwujud predator ganas realistis dengan mulut terbuka, taring tajam berseri, 5 celah insang, dan tubuh berenang lentur.
 - Penyu berwujud cangkang hati aerodinamis dengan kepakan sirip sayap terbang air yang anggun.
 
+---
+Task ID: 30
+Agent: main (Antigravity)
+Task: "perbaikan tempurung kura-kura yang sebelumnya invisibel dan kaki/flipper kura-kura yang berada di dalam tubuh kura-kura serta tidak bergerak"
 
+Work Log:
+- PENYEBAB MASALAH SEBELUMNYA:
+  * Tempurung kura-kura invisibel karena urutan winding indeks segitiga terbalik ke arah dalam sehingga normal vertex menghadap ke bawah/dalam; saat Three.js melakukan backface culling, seluruh tempurung tersembunyi.
+  * Flipper kura-kura berada di dalam tubuh dan tampak tidak bergerak karena sumbu lokal geometri berada di +Z (searah kepala/leher) dengan rotasi Z diterapkan pada sumbu Z lokal yang hanya memutar sirip pada poros panjangnya (tidak mengayun atas-bawah), sementara kaki belakang mengarah ke depan (+Z) menusuk ke dalam perut cangkang.
+- REKONSTRUKSI TOTAL GEOMETRI PENYU (SpecialCreatures.ts):
+  * buildCarapaceGeometry: Cangkang oval lebar aerodinamis (SEG_Z: 34, SEG_A: 32) dengan profil melengkung anggun, lunas vertebral dorsal halus (keel), dan simetri bilateral 100% sempurna antara sisi kiri dan kanan. Urutan indeks segitiga diperbaiki (idx.push(a, c, b, b, c, d)) sehingga normal vertex mengarah keluar (+Y pada puncak).
+  * Material cangkang & kulit (shellMat, plastronMat, skinMat, beakMat) kini diberi side: THREE.DoubleSide dan transparent: true, memastikan tempurung 100% tampak jelas dan tidak pernah tembus pandang dari sudut pandang manapun.
+  * Rim cangkang dibuat mengikuti ketebalan alami kontur kerapas (bukan cincin Torus terpisah), dan plastron bawah perut dibuat melengkung lembut.
+  * Kepala & paruh: dua bagian membulat natural (beakUpper dan beakLower) dengan material paruh khusus (#8a7b52), mata berglint putih, dan leher fleksibel.
+  * Sayap depan (buildFrontFlipper): Geometri hidrofoil 3D melengkung lebar yang menjulur lateral ke luar (+X untuk kanan, -X untuk kiri) dengan sweep mundur aerodinamis. Terletak sepenuhnya di luar cangkang dengan bentang sayap anggun.
+  * Kaki belakang (buildRearFlipper): Sirip kemudi yang menjulur ke belakang (-Z) di belakang cangkang (-0.95 s/d -1.95), bukan di dalam perut.
+- ANIMASI RENANG SAYAP PENYU REALISTIS (SpecialCreatures.ts):
+  * Update loop kini menggerakkan kedua sayap depan secara sinkron (underwater flight flap): rotasi Z untuk kepakan atas-bawah bertenaga (swing ~1.7 meter), rotasi X untuk sudut serang (pitch/feathering), dan rotasi Y untuk dorongan kayuh (sweep).
+  * Kaki belakang mengayuh secara bergantian/berirama untuk kestabilan dan kemudi arah.
+- VERIFIKASI:
+  * Skrip pengujian Three.js: normal puncak cangkang terbukti menghadap keluar (+0.99), simetri kanan-kiri selisih 0.00000, ujung sayap depan menjangkau x = ±2.68 m dan mengayun dari y = -0.94 ke +0.82.
+  * Pengujian simulasi 50 frame SpecialCreatures lulus dengan 0 error.
+  * bunx eslint src/experience/fish/SpecialCreatures.ts bersih 0 error 0 warning.
 
+Stage Summary:
+- Tempurung penyu kini tampil utuh, solid, dan indah dengan tekstur scute zaitun alami.
+- Sirip depan menjulur bebas di luar tubuh sebagai sayap renang hidrofoil yang mengepak naik-turun secara sinkron.
+- Kaki belakang berada di belakang cangkang mendayung dengan anggun.

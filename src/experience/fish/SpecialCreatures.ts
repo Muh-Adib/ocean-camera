@@ -310,144 +310,334 @@ function buildRay(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
   return { mesh, mat }
 }
 
-// ---------- sea turtle ----------
-/** tapered paddle flipper — pivot at the shoulder (origin), extends +z */
-function buildFlipper(len: number): THREE.BufferGeometry {
-  const g = new THREE.SphereGeometry(0.5, 12, 8)
-  const p = g.attributes.position
-  for (let i = 0; i < p.count; i++) {
-    const x = p.getX(i), y = p.getY(i), z = p.getZ(i)
-    const u = THREE.MathUtils.clamp((z + 0.5) / 0.85, 0, 1)   // 0 base → 1 tip
-    const taper = 1 - 0.42 * u                                 // narrows toward the tip
-    const sweep = z * z * 0.28 * Math.sign(z || 1)             // trailing curve
-    p.setXYZ(
-      i,
-      x * taper,
-      y * (taper * 0.9) + Math.sin(u * Math.PI) * 0.06,        // gentle camber
-      z + sweep,
-    )
+// ---------- realistic sea turtle ----------
+/**
+ * Realistic sea turtle
+ *
+ * Coordinate:
+ *   +Z = head / forward
+ *   -Z = tail
+ *   +Y = top of shell
+ *   -Y = belly
+ *
+ * Design goals:
+ *   - broad oval sea-turtle carapace with outward-facing normals
+ *   - rounded but streamlined flattened shell
+ *   - natural shell taper at front/rear with vertebral keel
+ *   - long tapered hydrofoil front flippers outside the shell
+ *   - shorter rear rudder flippers trailing behind
+ *   - realistic head & two-piece rounded beak
+ *   - separate eyes with pupil glints
+ */
+
+function buildFrontFlipper(len: number, width = 0.43): THREE.BufferGeometry {
+  const SEG = 14
+  const W = 8
+
+  const pos: number[] = []
+  const idx: number[] = []
+  const uvs: number[] = []
+
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG
+    // Shoulder (u=0) -> tip (u=1) along lateral +X
+    const x = u * len
+
+    // Broad shoulder, gradually narrowing to hydrodynamic paddle tip
+    const taper = 1.0 - 0.72 * Math.pow(u, 0.75)
+    // Paddle is slightly wider in the middle
+    const paddleWidth = width * (0.72 + 0.55 * Math.sin(u * Math.PI))
+    // Natural backward sweep along -Z
+    const sweep = -Math.sin(u * Math.PI * 0.85) * len * 0.20
+    // Slight downward camber toward tip along Y
+    const bend = -Math.pow(u, 1.6) * len * 0.05
+
+    for (let j = 0; j <= W; j++) {
+      const v = j / W
+      const a = (v - 0.5) * Math.PI
+      const side = Math.sin(a)
+      const thickness = Math.cos(a)
+
+      const z = side * paddleWidth * taper + sweep
+      const y = thickness * (0.055 * (1 - u * 0.7)) + bend
+
+      pos.push(x, y, z)
+      uvs.push(v, u)
+    }
   }
-  g.scale(len * 0.34, len * 0.16, len)
-  g.translate(0, 0, len * 0.42)                                // shoulder joint at origin
+
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < W; j++) {
+      const a = i * (W + 1) + j
+      const b = a + 1
+      const c = (i + 1) * (W + 1) + j
+      const d = c + 1
+      idx.push(a, b, c, b, d, c)
+    }
+  }
+
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
   g.computeVertexNormals()
   return g
 }
 
-function buildTurtle(): { group: THREE.Group; flippers: THREE.Mesh[]; mats: THREE.MeshStandardMaterial[] } {
-  const group = new THREE.Group()
-  const mats: THREE.MeshStandardMaterial[] = []
-  const mkMat = (c: string, r = 0.75, map?: THREE.Texture) => {
-    const m = new THREE.MeshStandardMaterial({ color: c, roughness: r, map, transparent: true, opacity: 0 })
-    mats.push(m)
-    return m
-  }
-  const shellMat = mkMat('#a8b488', 0.66, getScuteTexture())
-  const plastronMat = mkMat('#e8dcc0', 0.8, getPlastronTexture())
-  const skinMat = mkMat('#8a9663', 0.82, getTurtleSkinTexture())
+function buildRearFlipper(len: number, width = 0.28): THREE.BufferGeometry {
+  const SEG = 10
+  const W = 6
 
-  // Carapace — heart-shaped dome with vertebral keel and anterior neck notch
-  const RINGS = 24, RAD = 28
-  const pos: number[] = [], uvs: number[] = [], idx: number[] = []
-  for (let i = 0; i < RINGS; i++) {
-    const u = i / (RINGS - 1) // 0 posterior tip -> 1 anterior collar
-    const z = -1.42 + u * 2.80
-    // heart-shaped width profile: widest at shoulders u=0.68, tapering to point at u=0
-    const wHeart = 1.22 * Math.sqrt(Math.max(0, u)) * (1 - 0.22 * u) * (1 + 0.15 * Math.sin(u * Math.PI))
-    const hDome = 0.52 * Math.sin(Math.pow(u, 0.65) * Math.PI * 0.95)
-    for (let j = 0; j <= RAD; j++) {
-      const v = j / RAD
-      const a = (v - 0.5) * Math.PI // -pi/2 to +pi/2
-      const ca = Math.cos(a), sa = Math.sin(a)
-      const keel = 1 + 0.08 * Math.pow(Math.max(0, ca), 4.0)
-      const x = sa * wHeart
-      const collarDip = (u > 0.85) ? -0.12 * Math.pow((u - 0.85) / 0.15, 2) * Math.max(0, ca) : 0
-      const y = hDome * ca * keel
-      pos.push(x, y, z + collarDip)
+  const pos: number[] = []
+  const idx: number[] = []
+  const uvs: number[] = []
+
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG
+    // Shoulder (u=0) -> tip (u=1) along -Z (pointing backward behind shell)
+    const z = -u * len
+    const taper = 1.0 - 0.58 * Math.pow(u, 0.8)
+    const paddleWidth = width * (0.8 + 0.4 * Math.sin(u * Math.PI))
+    const outwardSplay = Math.sin(u * Math.PI * 0.75) * len * 0.14
+
+    for (let j = 0; j <= W; j++) {
+      const v = j / W
+      const a = (v - 0.5) * Math.PI
+      const side = Math.sin(a)
+      const thickness = Math.cos(a)
+
+      const x = side * paddleWidth * taper + outwardSplay
+      const y = thickness * (0.045 * (1 - u * 0.6))
+
+      pos.push(x, y, z)
       uvs.push(v, u)
     }
   }
-  for (let i = 0; i < RINGS - 1; i++) {
-    for (let j = 0; j < RAD; j++) {
-      const a0 = i * (RAD + 1) + j, b0 = a0 + 1
-      const a1 = (i + 1) * (RAD + 1) + j, b1 = a1 + 1
-      idx.push(a0, b0, a1, b0, b1, a1)
+
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < W; j++) {
+      const a = i * (W + 1) + j
+      const b = a + 1
+      const c = (i + 1) * (W + 1) + j
+      const d = c + 1
+      idx.push(a, c, b, b, c, d)
     }
   }
-  const shellGeo = new THREE.BufferGeometry()
-  shellGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
-  shellGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
-  shellGeo.setIndex(idx)
-  shellGeo.computeVertexNormals()
 
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
+  g.computeVertexNormals()
+  return g
+}
+
+function buildCarapaceGeometry(): THREE.BufferGeometry {
+  const SEG_Z = 34
+  const SEG_A = 32
+
+  const pos: number[] = []
+  const uvs: number[] = []
+  const idx: number[] = []
+
+  for (let i = 0; i <= SEG_Z; i++) {
+    const u = i / SEG_Z
+    // -1.55 rear -> +1.45 front
+    const z = -1.55 + u * 3.00
+
+    /*
+     * Sea turtle shell:
+     *   rear = tapered to posterior point
+     *   middle = broad, widest around shoulders (u = 0.62)
+     *   front = slightly narrower with gentle neck emergence
+     */
+    const rearTaper = THREE.MathUtils.smoothstep(u, 0.0, 0.25)
+    const frontTaper = 1 - THREE.MathUtils.smoothstep(u, 0.75, 1.0) * 0.18
+    const bodyWidth = 1.32 * Math.sin(Math.pow(u, 0.58) * Math.PI * 0.94) * (0.68 + 0.32 * rearTaper) * frontTaper
+    const domeHeight = 0.46 * Math.sin(Math.pow(u, 0.52) * Math.PI * 0.92)
+
+    for (let j = 0; j <= SEG_A; j++) {
+      const v = j / SEG_A
+      const phi = (v - 0.5) * Math.PI // -PI/2 (left rim) -> 0 (vertebral keel) -> +PI/2 (right rim)
+
+      const cosP = Math.cos(phi) // 1 at center, 0 at rims
+      const sinP = Math.sin(phi) // -1 at left, +1 at right
+
+      const x = sinP * bodyWidth
+      // Smooth streamlined oval dome with vertebral keel
+      const keel = 0.045 * Math.pow(cosP, 6)
+      const y = Math.max(0, domeHeight * Math.pow(cosP, 0.74)) + keel
+
+      pos.push(x, y, z)
+      uvs.push(v, u)
+    }
+  }
+
+  for (let i = 0; i < SEG_Z; i++) {
+    for (let j = 0; j < SEG_A; j++) {
+      const a = i * (SEG_A + 1) + j
+      const b = a + 1
+      const c = (i + 1) * (SEG_A + 1) + j
+      const d = c + 1
+      // Winding order ensuring outward normals (+Y at top apex)
+      idx.push(a, c, b, b, c, d)
+    }
+  }
+
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setIndex(idx)
+  g.computeVertexNormals()
+  return g
+}
+
+function buildTurtle(): {
+  group: THREE.Group
+  flippers: THREE.Mesh[]
+  mats: THREE.MeshStandardMaterial[]
+} {
+  const group = new THREE.Group()
+  const mats: THREE.MeshStandardMaterial[] = []
+
+  const mkMat = (c: string, roughness = 0.72, map?: THREE.Texture) => {
+    const m = new THREE.MeshStandardMaterial({
+      color: c,
+      roughness,
+      metalness: 0.0,
+      map,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    })
+    mats.push(m)
+    return m
+  }
+
+  // -------------------------------------------------------------
+  // materials
+  // -------------------------------------------------------------
+  const shellMat = mkMat('#667548', 0.78, getScuteTexture())
+  const shellDarkMat = mkMat('#4c5b39', 0.82)
+  const plastronMat = mkMat('#b9a97f', 0.84, getPlastronTexture())
+  const skinMat = mkMat('#66724b', 0.88, getTurtleSkinTexture())
+  const eyeMat = mkMat('#11130c', 0.28)
+  const eyeGlintMat = mkMat('#ffffff', 0.12)
+  const beakMat = mkMat('#8a7b52', 0.78)
+
+  // 1. CARAPACE (Broad oval shell)
+  const shellGeo = buildCarapaceGeometry()
   const shell = new THREE.Mesh(shellGeo, shellMat)
+  shell.position.set(0, 0.02, 0)
   group.add(shell)
 
-  // marginal rim around the shell edge
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.12, 8, 28), shellMat)
-  rim.rotation.x = Math.PI / 2
-  rim.scale.set(1.08, 1.34, 1)
-  rim.position.set(0, -0.02, -0.05)
-  group.add(rim)
-
-  // plastron (belly plate)
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.96, 16, 8), plastronMat)
-  belly.scale.set(0.98, 0.24, 1.26)
-  belly.position.set(0, -0.15, -0.05)
+  // 2. LOWER SHELL / PLASTRON (Ventral belly plate)
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 16), plastronMat)
+  belly.scale.set(1.12, 0.22, 1.30)
+  belly.position.set(0, -0.19, 0.02)
   group.add(belly)
 
-  // neck + head + parrot beak
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.22, 0.65, 10), skinMat)
-  neck.position.set(0, 0.10, 1.42)
-  neck.rotation.x = 1.18
+  // 3. SHELL EDGE / RIM (Follows natural carapace contour, no separate ring)
+  const rim = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 18), shellDarkMat)
+  rim.scale.set(1.30, 0.18, 1.55)
+  rim.position.set(0, -0.01, 0)
+  group.add(rim)
+
+  // 4. NECK
+  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.32, 18, 12), skinMat)
+  neck.scale.set(0.70, 0.65, 1.15)
+  neck.position.set(0, 0.20, 1.34)
   group.add(neck)
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), skinMat)
-  head.scale.set(0.88, 0.78, 1.20)
-  head.position.set(0, 0.32, 1.72)
+  // 5. HEAD
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 20, 14), skinMat)
+  head.scale.set(0.92, 0.82, 1.15)
+  head.position.set(0, 0.28, 1.65)
   group.add(head)
 
-  // Parrot-like hooked beak (rhamphotheca)
-  const beakTop = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 8), skinMat)
-  beakTop.rotation.x = -Math.PI / 2 - 0.25 // hooked downward
-  beakTop.position.set(0, 0.26, 2.08)
-  group.add(beakTop)
+  // 6. REALISTIC TURTLE BEAK (Two rounded pieces instead of cartoon cone)
+  const beakUpper = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), beakMat)
+  beakUpper.scale.set(0.72, 0.40, 0.95)
+  beakUpper.position.set(0, 0.22, 1.94)
+  beakUpper.rotation.x = -0.15
+  group.add(beakUpper)
 
-  const beakBot = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.22), skinMat)
-  beakBot.position.set(0, 0.18, 1.95)
-  group.add(beakBot)
+  const beakLower = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 7), beakMat)
+  beakLower.scale.set(0.72, 0.32, 0.75)
+  beakLower.position.set(0, 0.16, 1.96)
+  group.add(beakLower)
 
-  // eyes
+  // 7. EYES
   for (const side of [1, -1] as const) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.058, 8, 6), mkMat('#151009', 0.35))
-    eye.position.set(side * 0.21, 0.42, 1.78)
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 12, 8), eyeMat)
+    eye.position.set(side * 0.25, 0.39, 1.78)
     group.add(eye)
-    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.018, 5, 4), mkMat('#ffffff', 0.2))
-    glint.position.set(side * 0.25, 0.45, 1.82)
+
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.016, 6, 5), eyeGlintMat)
+    glint.position.set(side * 0.27, 0.405, 1.81)
     group.add(glint)
   }
 
-  // paddle flippers
+  // 8. PADDLE FLIPPERS (Positioned outside the shell with wide reach)
   const flippers: THREE.Mesh[] = []
-  const mkFlip = (x: number, z: number, len: number, rotZ: number, rotY: number) => {
-    const f = new THREE.Mesh(buildFlipper(len), skinMat)
-    f.position.set(x, -0.05, z)
-    f.rotation.z = rotZ
-    f.rotation.y = rotY
-    flippers.push(f)
-    group.add(f)
+
+  // Front flipper right (i = 0)
+  const fGeoRight = buildFrontFlipper(1.95, 0.43)
+  const fRight = new THREE.Mesh(fGeoRight, skinMat)
+  fRight.position.set(0.92, -0.02, 0.65)
+  flippers.push(fRight)
+  group.add(fRight)
+
+  // Front flipper left (i = 1)
+  const fGeoLeft = fGeoRight.clone()
+  fGeoLeft.scale(-1, 1, 1)
+  const idxLeft = Array.from(fGeoLeft.index!.array)
+  for (let k = 0; k < idxLeft.length; k += 3) {
+    const tmp = idxLeft[k + 1]
+    idxLeft[k + 1] = idxLeft[k + 2]
+    idxLeft[k + 2] = tmp
   }
-  mkFlip(1.10, 0.82, 1.85, -0.95, 0.38)     // front pair — long hydrofoils
-  mkFlip(-1.10, 0.82, 1.85, 0.95, -0.38)
-  mkFlip(0.88, -0.95, 1.05, -1.12, -0.3)   // rear pair — rudders
-  mkFlip(-0.88, -0.95, 1.05, 1.12, 0.3)
+  fGeoLeft.setIndex(idxLeft)
+  fGeoLeft.computeVertexNormals()
+  const fLeft = new THREE.Mesh(fGeoLeft, skinMat)
+  fLeft.position.set(-0.92, -0.02, 0.65)
+  flippers.push(fLeft)
+  group.add(fLeft)
 
-  // tail stub
-  const tailStub = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.32, 6), skinMat)
-  tailStub.rotation.x = Math.PI / 2 + 0.45
-  tailStub.position.set(0, -0.02, -1.45)
-  group.add(tailStub)
+  // Rear flipper right (i = 2)
+  const rGeoRight = buildRearFlipper(1.02, 0.28)
+  const rRight = new THREE.Mesh(rGeoRight, skinMat)
+  rRight.position.set(0.70, -0.12, -0.95)
+  rRight.rotation.y = -0.22
+  rRight.rotation.z = -0.15
+  flippers.push(rRight)
+  group.add(rRight)
 
-  group.scale.setScalar(1.6)
+  // Rear flipper left (i = 3)
+  const rGeoLeft = rGeoRight.clone()
+  rGeoLeft.scale(-1, 1, 1)
+  const idxRearLeft = Array.from(rGeoLeft.index!.array)
+  for (let k = 0; k < idxRearLeft.length; k += 3) {
+    const tmp = idxRearLeft[k + 1]
+    idxRearLeft[k + 1] = idxRearLeft[k + 2]
+    idxRearLeft[k + 2] = tmp
+  }
+  rGeoLeft.setIndex(idxRearLeft)
+  rGeoLeft.computeVertexNormals()
+  const rLeft = new THREE.Mesh(rGeoLeft, skinMat)
+  rLeft.position.set(-0.70, -0.12, -0.95)
+  rLeft.rotation.y = 0.22
+  rLeft.rotation.z = 0.15
+  flippers.push(rLeft)
+  group.add(rLeft)
+
+  // 9. TAIL
+  const tail = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 7), skinMat)
+  tail.scale.set(0.50, 0.40, 1.20)
+  tail.position.set(0, -0.02, -1.50)
+  group.add(tail)
+
+  group.scale.setScalar(1.55)
   return { group, flippers, mats }
 }
 
@@ -899,19 +1089,27 @@ export class SpecialCreatures {
         // nose (+Z) faces the travel direction — no flip, no back-pedalling
         v.obj.rotation.y = Math.atan2(dx, dz)
         v.obj.rotation.z = Math.sin(time * 0.4) * 0.04
-        for (let i = 0; i < this.turtleFlippers.length; i++) {
-          const front = i < 2
-          const side = i % 2 === 0 ? 1 : -1
-          const phase = front ? (i % 2) * Math.PI : (i % 2) * Math.PI + 0.9
-          const stroke = Math.sin(time * (front ? 1.2 : 0.85) + phase)
-          if (front) {
-            // 3-axis underwater flight: flapping Z + feathering Y + rowing X
-            this.turtleFlippers[i].rotation.z = (side * -0.92) + stroke * 0.42 * side
-            this.turtleFlippers[i].rotation.y = (side * 0.35) + Math.cos(time * 1.2 + phase) * 0.26 * side
-            this.turtleFlippers[i].rotation.x = stroke * 0.28 - 0.10
-          } else {
-            this.turtleFlippers[i].rotation.x = stroke * 0.22 - 0.08
-          }
+        const strokeFront = Math.sin(time * 1.25)
+        if (this.turtleFlippers[0] && this.turtleFlippers[1]) {
+          // Front Right (i = 0) — flaps up/down in unison with pitch feathering & sweep
+          this.turtleFlippers[0].rotation.z = strokeFront * 0.42
+          this.turtleFlippers[0].rotation.x = -strokeFront * 0.20
+          this.turtleFlippers[0].rotation.y = -0.15 + strokeFront * 0.12
+
+          // Front Left (i = 1) — symmetrical wing flap
+          this.turtleFlippers[1].rotation.z = -strokeFront * 0.42
+          this.turtleFlippers[1].rotation.x = -strokeFront * 0.20
+          this.turtleFlippers[1].rotation.y = 0.15 - strokeFront * 0.12
+        }
+        const strokeRear = Math.sin(time * 0.9 + 0.8)
+        if (this.turtleFlippers[2] && this.turtleFlippers[3]) {
+          // Rear Right (i = 2) — gentle rudder paddling
+          this.turtleFlippers[2].rotation.x = strokeRear * 0.22 - 0.05
+          this.turtleFlippers[2].rotation.y = -0.22 + strokeRear * 0.08
+
+          // Rear Left (i = 3)
+          this.turtleFlippers[3].rotation.x = strokeRear * 0.22 - 0.05
+          this.turtleFlippers[3].rotation.y = 0.22 - strokeRear * 0.08
         }
       } else {
         // shark: straight pass with predatory yaw & banking
