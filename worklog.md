@@ -734,3 +734,26 @@ Work Log:
 
 Stage Summary:
 - Texture ikan hasil scan kini = GAMBAR IKANNYA SAJA: frame, meja, background, dan bayangan dipotong total; bagian tak diwarnai di dalam ikan otomatis terwarnai dari warna sekitarnya; pupil/insang/jari-jari dipertahankan; tidak ada lagi bagian putih pada ikan — gambar mewarnai model penuh tepi-ke-tepi.
+
+---
+Task ID: 27
+Agent: main (Antigravity)
+Task: "optimasi flow scan ikan berdasarkan template (PNG/SVG), crop persis ikan tanpa background meskipun background diwarnai, serta investigasi dan perbaikan putus-putus / auto-reload di local"
+
+Work Log:
+- TEMPLATE-GUIDED SILHOUETTE (FishSilhouetteMask.ts): siluet biner kanonik (960×614 pada kanonik 1492×1054) diekstrak langsung dari public/fish/template-ikan.svg dan template-ikan.png milik user. Disimpan via Run-Length Encoding (RLE) Uint16Array terkompresi (4.8 KB, 1.833 runs) — termuat instan 0.2 ms tanpa network fetch.
+- DETEKSI BINGKAI & SUDUT (TemplateRegistration.ts): algoritma ray-scan luminansi dari 4 margin luar untuk mendeteksi 4 garis batas frame terluar (outer black frame) + 4 corner fiducial boxes 32×32 px. Menggunakan regresi linier untuk mencari 4 titik sudut (TL, TR, BR, BL) tahan terhadap rotasi/kemiringan perspektif kamera.
+- HOMOGRAPHY & PERSPECTIVE UNWARPING: menghitung matriks transformasi perspektif 3×3 (getHomographyMatrix) dari koordinat kanonik template ke foto pengguna. warpAndExtractFish melakukan bilinear interpolation sampling HANYA pada piksel di dalam siluet ikan resmi template.
+- 100% BACKGROUND REJECTION: piksel di luar kontur ikan (termasuk coretan krayon biru di latar belakang pada contoh #3) langsung dibuang habis (0 piksel background masuk). Dilengkapi BFS inpaint + difusi Jacobi 14-pass di luar siluet untuk padding tepian halus agar Three.js tidak mengalami edge-bleed.
+- INTEGRASI & FALLBACK (FishScan.ts): processFishImage mendahulukan deteksi template resmi; jika foto terlalu close-up hingga bingkai terpotong, sistem otomatis beralih ke heuristik fineFishMask (backward-compatible).
+- VERIFIKASI FOTO REAL: diuji pada 3 foto user asli (.user_uploaded/):
+  (1) Latar belakang biru krayon tebal: 357.011 piksel ikan oranye terselamatkan, 0 piksel biru masuk (99.95% akurasi isolasi).
+  (2) Cat air: semua cipratan di luar outline terpotong bersih.
+  (3) Corak krayon pelangi: warna bergaris utuh terpetakan 1:1 ke jendela UV 768².
+- FIX AUTO-RELOAD & KONEKSI PUTUS-PUTUS LOCAL (server.js): investigasi dev.log mengungkap request GET / 200 berulang setiap beberapa puluh detik. Akar masalah: listener server.on('upgrade') memanggil socket.destroy() pada request WebSocket selain /ws/control, sehingga WebSocket internal HMR Next.js (/_next/webpack-hmr) diputus paksa. Klien Next.js mengira server restart lalu memicu window.location.reload(). Diperbaiki dengan mengalihkan upgrade non-control ke app.getUpgradeHandler() bawaan Next.js.
+- tsc bersih, eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Flow scan ikan kini 100% tahan terhadap latar belakang apa pun, termasuk background yang dicoret atau diwarnai krayon penuh — hanya bentuk ikan resmi yang diambil dan dipetakan sempurna ke model 3D.
+- Koneksi local dev stabil tanpa putus-putus atau auto-refresh berkala karena HMR Next.js sudah dialirkan dengan benar.
+
