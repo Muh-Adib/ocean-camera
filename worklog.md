@@ -862,3 +862,31 @@ Stage Summary:
 - Tempurung penyu kini tampil utuh, solid, dan indah dengan tekstur scute zaitun alami.
 - Sirip depan menjulur bebas di luar tubuh sebagai sayap renang hidrofoil yang mengepak naik-turun secara sinkron.
 - Kaki belakang berada di belakang cangkang mendayung dengan anggun.
+
+---
+Task ID: 31
+Agent: main (Antigravity)
+Task: "peningkatan standar kualitas visual 3D tingkat tinggi (high-fidelity standard) untuk seluruh makhluk laut: relief lempeng perisai 3D penyu, kelenturan aeroelastik flipper shader, sirip 3D volumetrik & taring pisau hiu, paruh tanduk dua keping ikan buntal, dan tekstur resolusi tinggi 512x512"
+
+Work Log:
+- PENYU LAUT (SEA TURTLE) HIGH-FIDELITY (SpecialCreatures.ts):
+  * Relief Lempeng Perisai 3D (buildCarapaceGeometry, 48 rings x 40 rad): Cangkang dirombak dengan geometri relief fisik nyata: 5 lempeng vertebral di lunas punggung tengah, 4 pasang lempeng costal di kedua sisi rusuk, dan 12 pasang lempeng marginal di bibir keliling dengan gerigi posterior alami. Lekukan parit sulkus (seam grooves) dan tonjolan kubah cembung lempeng (plate bulge) menghasilkan bayangan kontur fisik 3D yang sangat tajam di bawah pencahayaan laut.
+  * Kelenturan Sayap Renang Aeroelastik (mkFlipperMat): Diinjeksi vertex shader dinamis pada sayap flipper depan penyu. Saat mengepak turun (downstroke), hambatan fluida air melenturkan ujung sayap (+y) dan memilin trailing edge (feathering twist); saat mengepak naik (upstroke), ujung sayap melengkung turun secara elastis (spanwise aeroelastic flex), menghasilkan kepakan renang megah seperti dokumenter alam bawah laut.
+  * Sayap Depan Hidrofoil Cambered (buildFrontFlipper): Profil asimetris NACA airfoil dengan leading edge tebal membulat dan trailing edge tipis tajam serta sweep aerodinamis sinuous.
+  * Tekstur Prosedural Resolusi Tinggi (getScuteTexture, getPlastronTexture, getTurtleSkinTexture 512x512): Pancaran guratan emas amber (radiant amber rays) dari pusat setiap scute, cincin pertumbuhan tahunan (annuli), sulkus gelap tegas, dan mozaik sisik heksagonal reptil (pebble scale tessellation) pada kulit leher dan kaki.
+- IKAN HIU (PREDATOR SHARK) HIGH-FIDELITY (SpecialCreatures.ts):
+  * Sirip Punggung Pertama Volumetrik 3D (build3DDorsal): Menggantikan sirip 2D tipis dengan bilah sayap hidrofoil 3D berketebalan leading edge, lekuk sabit aerodinamis, dan takik belakang (notch / free rear tip) yang tajam.
+  * Sirip Dada Volumetrik 3D (build3DPectoral): Sepasang sayap sabit hydrofoil 3D berprofil aerofoil dengan ketebalan organik.
+  * Ekor Heteroserkal Volumetrik 3D (build3DCaudal): Struktur cuping atas panjang melengkung dengan takik subterminal (subterminal notch) dan cuping bawah kokoh bervolume 3D.
+  * Mulut, Gusi, & Barisan Taring Pisau Tajam: Rongga mulut bervolume dengan lengkungan gusi merah crimson padat (upperGums), 18 taring pisau segitiga tajam bersusun di rahang atas dan 14 taring tajam di rahang bawah berwarna putih porselen, serta 5 celah insang dengan rongga gelap.
+  * Kinetika Renang Thunniform & Roll Banking: Shader gelombang tulang belakang dengan penguatan kuadratik ke arah ekor (tailFactor^2) disertai roll banking dinamis saat bermanuver.
+- IKAN BUNTAL & KARANG (FishGeometryFactory.ts):
+  * Ikan Buntal: Paruh tanduk gading dua keping (beakUpper dan beakLower) dengan celah bibir manis realistis, bodi spherical teardrop padat di depan dan melandai lonjong ke ekor.
+- VERIFIKASI:
+  * Pengujian headless Three.js: 10/10 spesies ikan karang + hiu 3D + penyu 3D berhasil dibangun dan berjalan 50 siklus update dengan 0 error.
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Model penyu dan hiu kini memiliki geometri volumetrik 3D sejati dengan lekukan aerofoil alami, bukan poligon tipis.
+- Sayap penyu meliuk lentur membelah air secara aeroelastik dan tempurung memiliki relief perisai fisik 3D.
+- Hiu berpenampilan predator gagah dengan sirip 3D berlekuk, mulut bergusi dan deretan taring tajam berseri.

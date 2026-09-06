@@ -982,14 +982,24 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
   parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
 
-  // pufferfish cute rounded beak at the snout
+  // pufferfish cute fused parrot beak with upper & lower dental plates
   if (key === 'pufferfish') {
-    const beak = new THREE.SphereGeometry(0.028, 12, 8)
-    beak.scale(1.25, 0.75, 0.9)
-    beak.translate(0, -bbs.h * 0.045, bbs.len * 0.49)
-    setUniformUV(beak)
-    paintColors(beak, new THREE.Color('#7a684c'))
-    parts.push(beak)
+    const beakColor = new THREE.Color('#8a7652')
+    // Upper dental plate
+    const beakUpper = new THREE.SphereGeometry(0.024, 12, 8)
+    beakUpper.scale(1.3, 0.65, 0.85)
+    beakUpper.translate(0, -bbs.h * 0.030, bbs.len * 0.492)
+    setUniformUV(beakUpper)
+    paintColors(beakUpper, beakColor)
+    parts.push(beakUpper)
+
+    // Lower dental plate
+    const beakLower = new THREE.SphereGeometry(0.020, 10, 7)
+    beakLower.scale(1.2, 0.55, 0.80)
+    beakLower.translate(0, -bbs.h * 0.065, bbs.len * 0.490)
+    setUniformUV(beakLower)
+    paintColors(beakLower, beakColor.clone().multiplyScalar(0.90))
+    parts.push(beakLower)
   }
 
   // pufferfish spines — Fibonacci spiral distribution along the spherical body.
