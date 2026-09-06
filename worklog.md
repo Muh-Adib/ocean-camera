@@ -908,3 +908,31 @@ Stage Summary:
 - Sinkronisasi selesai: lokal kini identik dengan remote 76e49ef.
 - Task 27-31 dari mesin lain sudah aktif: template-guided silhouette scan (100% rejection background), fix HMR/auto-reload, locomosi renang alami + sirip simetris, hiu/penyu/buntal high-fidelity volumetrik.
 - Fix HMR kini aktif di proses dev berjalan — koneksi local tidak lagi putus-putus/auto-reload.
+
+---
+Task ID: 33
+Agent: main (Super Z)
+Task: "logo.svg sebagai favicon + app icon; perombakan UI/UX control panel; folder SYNC live untuk mesin scanner pameran; isolasi sesi; perbaikan control phone yang patah-patah dan tidak sinkron"
+
+Work Log:
+- FAVICON & APP ICON: public/logo.svg → src/app/icon.svg (favicon otomatis Next.js App Router), apple-icon.png 180² + icon-512.png 512² dirender dari SVG via sharp; metadata.icons di layout.tsx menunjuk /logo.svg + /icon-512.png + /apple-icon.png.
+- PHONE CONTROL MULUS (akar masalah "patah-patah"): kecepatan stick dibocorkan decayInput exp(-10·dt) ≈ −15%/frame di sela paket 30 Hz (render 60 fps) → gerak gergaji. RemoteRig ditulis ulang: PACKET-DRIVEN INTEGRATION — tiap paket mengintegrasikan target dengan dt sejak paket TERAKHIR DIKONSUMSI (clamp 4–250 ms), sehingga (1) tanpa bleed antar-paket = tanpa sawtooth, (2) layar lambat sekalipun (headless ~9 fps) mengintegrasikan total waktu yang sama = semua layar tetap lockstep, tidak ada drift lintas layar ("tidak sinkron"). Paket hilang ditahan 450 ms lalu meluruh lembut 4/s. Kirim phone dinaikkan 30→40 Hz.
+- VERIFIKASI RIG: streaming ctl 40 Hz via scripts/test-phone-ws.js — yaw naik mulus monoton 20°→93°→178° (menuju gain penuh 90°/s), tanpa sawtooth.
+- ISOLASI SESI end-to-end: (1) WS hub server.js — socket di-tag session ('main' default), ctl/hand/cam hanya fan-out ke screen SESESI; (2) /api/fish multi-sesi (Map per sesi + mirror .fish-tank.json format baru + backward compat format lama); (3) FishTank client pakai ?session=, setSession() dipanggil dari studio; (4) sesi aktif menumpang project JSON (tank.session) → /output mengikuti studio via BroadcastChannel/SSE; (5) QR wall + fallback deep-link /control-mobile?s=<id>; (6) phone menampilkan tag "SESSION · X"; (7) localStorage ocean-tank-session mempertahankan sesi antar reload.
+- VERIFIKASI ISOLASI: phone session expo2 streaming 3 s → yaw layar main tetap (Δ0.11° = sisa glide); tank expo2 kosong terpisah dari main (3 fish); sesi dipulihkan setelah reload.
+- FOLDER SYNC LIVE (FolderSync.ts): File System Access API — showDirectoryPicker sekali, handle disimpan IndexedDB (db ocean-fs), polling 2,5 s, sweep awal (cap 30 file), file baru → processFishImage → POST /api/fish sesi aktif → ikan masuk kolam otomatis (skenario mesin scanner pameran). Status: watching / needs-permission (tombol RESUME, aturan satu-gesture Chromium) / unsupported / error. Sig file name:lastModified:size anti-duplikat + garbage-collect 30 menit.
+- PEROMBAKAN UI CONTROL (ProjectionEditorUI + projection.css):
+  * Topbar: status pills live — GPU ms, kualitas, NO PHONE/PHONE LIVE, SESI aktif, jumlah ikan (update tiap tick, diff-signal agar murah).
+  * Tab FISH → FISH STUDIO: empat bagian — SHOW SESSION (chips + CREATE), SCAN & IMPORT (template + foto + folder sekali), LIVE FOLDER SYNC (panel status + tombol), IN THE TANK (grid + CLEAR TANK per sesi).
+  * Tab PROJECT: collapstible groups — OUTPUT CANVAS & RATIO, OUTPUT QUALITY, PROJECT FILES, OUTPUT SESSIONS, PHONE REMOTE.
+  * Grid tank repaint antar-sesi diperbaiki (bandingkan daftar hasil fetch vs yang ter-render, tanpa infinite loop).
+  * Status bar bawah + CSS lengkap (pm-pill, pm-statusbar, pm-collap, pm-sync, session tag phone).
+- QA hooks baru: __ocean.projection.session(id).
+- Verifikasi: bunx tsc --noEmit bersih; eslint src/ bersih (error tersisa hanya file vendor mediapipe + server.js require, pre-existing); agent-browser end-to-end: studio enter, 7 tab, FISH STUDIO section, switch sesi MAIN↔EXPO2, /output live + WS open + QR ?s=expo2, /control-mobile?s=expo2 connected + tag sesi; dev.log tanpa error.
+
+Stage Summary:
+- Control dari phone kini mulus (packet-driven, tanpa patah-patah) dan konsisten antar layar (integrasi berbasis waktu konsumsi — lockstep lintas mesin).
+- Sesi terisolasi penuh: tank ikan, phone remote, dan QR semuanya per-sesi; sesi ikut menyebar ke semua /output lewat push project.
+- Folder scanner pameran: pilih folder sekali → setiap scan baru otomatis jadi ikan di kolam sesi aktif, hands-free.
+- Control panel ditata ulang: pills vitals, FISH STUDIO 4 seksi, PROJECT collapsible, status bar.
+- logo.svg kini jadi favicon + app icon (SVG + PNG 180/512).

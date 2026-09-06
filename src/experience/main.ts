@@ -510,6 +510,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       relay: () => projection.relayInfo(),
       /** phone remote diagnostics (WebSocket link, rig pose, QR) */
       remote: () => projection.remoteInfo(),
+      /** QA: switch the show session (tank + phone isolation) */
+      session: (id: string) => { projection.setTankSession(String(id)); return projection.tankSession },
       /** QA: force the remote rig offsets (headless tests) */
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */

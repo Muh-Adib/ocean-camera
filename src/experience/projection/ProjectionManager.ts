@@ -20,7 +20,7 @@ import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
 import { RemoteRig } from '../remote/RemoteRig'
-import { ScreenLink, type HandFrame } from '../remote/RemoteLink'
+import { ScreenLink, cleanSessionId, type HandFrame } from '../remote/RemoteLink'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
@@ -48,6 +48,8 @@ const RELAY_HEARTBEAT = 4000
  * cosmetic marker needs the slack.
  */
 const LIVE_FRESH_MS = 70000
+/** localStorage key for this browser's active show session */
+const TANK_SESSION_KEY = 'ocean-tank-session'
 
 export class ProjectionManager {
   /** studio open — the render pipeline is ours */
@@ -111,6 +113,14 @@ export class ProjectionManager {
   private qrDismissed = false
   /** painted-fish sync client — assigned by main.ts (studio edits, all pages follow) */
   fishTank: import('../fish/FishTank').FishTank | null = null
+  /**
+   * SHOW SESSION — isolates everything that flows per exhibition/venue:
+   * the painted-fish tank (which scans swim where) and the phone remote
+   * (a phone can only steer screens of its own session). The active id
+   * rides inside the serialized project, so every /output follows the
+   * studio's session automatically.
+   */
+  tankSession = 'main'
   /** phone-camera hand signals forwarded to the ocean (set by main.ts) */
   onPhoneHand: ((h: HandFrame | null) => void) | null = null
   phoneOn = false
@@ -130,6 +140,8 @@ export class ProjectionManager {
       // live getter — a snapshot value would go stale the moment the host changes
       get qrHost() { return self.qrHost },
       setQrHost: (h) => { self.setQrHost(h, { silent: true }) },
+      get tankSession() { return self.tankSession },
+      setTankSession: (id, opts) => { self.setTankSession(id, opts) },
     })
     // studio side: every persisted save is also pushed to /output tabs live
     if (deps.outputOnly) this.outputOnly = true
@@ -165,7 +177,7 @@ export class ProjectionManager {
   private ensureRemote() {
     if (this.remoteLink) return
     this.cameras.rig = this.remoteRig
-    const link = new ScreenLink()
+    const link = new ScreenLink(this.tankSession)
     this.remoteLink = link
     link.onPresence = (on) => {
       this.phoneOn = on
@@ -216,18 +228,47 @@ export class ProjectionManager {
     }
   }
 
+  /**
+   * Switch the show session: the fish tank re-polls its store, the QR
+   * invitation re-points at /control-mobile?s=<id>, the WebSocket remote
+   * re-homes to that session group and (unless silent) the new id rides
+   * the next push so every /output switches with us.
+   */
+  setTankSession(id: string, opts: { silent?: boolean } = {}) {
+    const clean = cleanSessionId(id)
+    if (clean === this.tankSession) return
+    this.tankSession = clean
+    try { localStorage.setItem(TANK_SESSION_KEY, clean) } catch { /* private mode */ }
+    void this.fishTank?.setSession(clean)
+    this.wallQr.setSession(clean)
+    this.qr?.setSession(clean)
+    // the remote link must join the new session group (cheap reconnect)
+    if (this.remoteLink) {
+      this.remoteLink.dispose()
+      this.remoteLink = null
+      this.ensureRemote()
+    }
+    if (!opts.silent) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.ui?.refreshAll()
+      this.deps.toast(`Session “${clean}” — tank + phone remote are isolated to it`, 3000)
+    }
+  }
+
   /** per-frame remote pump — control smoothing + hand forwarding */
   private updateRemote(dt: number) {
     const link = this.remoteLink
     if (!link) return
-    // stale-input handling: fresh packets drive the rig directly; when the
-    // phone goes quiet (tab hidden, Wi-Fi hiccup) the last velocity BLEEDS
-    // out smoothly — the view coasts to a stop, never drifts, never freezes
-    if (link.ctlAge() < 350) {
-      const c = link.ctl
-      if (c) this.remoteRig.apply(c)
-    } else if (this.remoteRig.hasInput()) {
-      this.remoteRig.decayInput(dt)
+    // Packet-driven rig: every arriving packet integrates its own motion
+    // (scaled by the time since the PREVIOUS packet) inside RemoteRig.apply,
+    // so every screen moves the same amount per packet — no cross-screen
+    // drift, and no per-frame velocity bleed between 30 Hz packets (the old
+    // stutter). Stale-velocity coasting lives inside RemoteRig.update too.
+    const c = link.ctl
+    if (c) {
+      this.remoteRig.apply(c)
+      link.ctl = null
     }
     this.remoteRig.update(dt)
     this.onPhoneHand?.(link.freshHand())
@@ -277,6 +318,12 @@ export class ProjectionManager {
     this.wireSyncChannel()
     this.startRelayHeartbeat()
     this.ensureRemote()
+
+    // resume this browser's last active show session (studio side)
+    try {
+      const saved = localStorage.getItem(TANK_SESSION_KEY)
+      if (saved) this.setTankSession(saved, { silent: true })
+    } catch { /* private mode */ }
 
     let restored = false
     if (this.surfaces.surfaces.length === 0) {
@@ -473,6 +520,10 @@ export class ProjectionManager {
     if (this.liveLinked) {
       this.lastAppliedJson = json
       this.lastSyncAt = performance.now()
+      // follow the studio's show session — tank + phone remote switch with
+      // the push (silent: never echo a state change back upstream)
+      const pushedSession = (project as { tank?: { session?: unknown } } | null)?.tank?.session
+      if (typeof pushedSession === 'string') this.setTankSession(pushedSession, { silent: true })
       // keep the published session's stored settings current — reloading
       // the link boots the newest state the operator pushed, even if the
       // studio closed without republishing

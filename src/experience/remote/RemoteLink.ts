@@ -9,10 +9,13 @@
 //     backoff so the link self-heals after projector sleep, network
 //     blips or a dev-server restart.
 //   • PhoneLink  — used by /control-mobile. Sends ctl/hand/cam
-//     frames at a fixed 30 Hz cadence while anything is live, and
+//     frames at a fixed cadence while anything is live, and
 //     reports connection state for the phone UI.
 //
-// Both speak to the hub created in server.js at /ws/control.
+// Both speak to the hub created in server.js at /ws/control. A
+// session tag rides the hello handshake: control frames only ever
+// reach screens of the SAME session, which is what isolates two
+// shows (venues / pools) sharing one server.
 // ---------------------------------------------------------------
 
 export interface CtlFrame { t: 'ctl'; mx: number; my: number; ox: number; oy: number; dz: number }
@@ -28,6 +31,12 @@ function wsUrl(): string {
   return `${proto}//${location.host}${WS_PATH}`
 }
 
+/** canonical session tag from a URL param / stored value — '' becomes 'main' */
+export function cleanSessionId(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) : ''
+  return s || 'main'
+}
+
 /** shared socket with hello/reconnect — resolves callbacks per role */
 class WsBase {
   protected ws: WebSocket | null = null
@@ -35,7 +44,7 @@ class WsBase {
   private retry = 0
   private timer = 0
 
-  constructor(private role: 'phone' | 'screen') {}
+  constructor(private role: 'phone' | 'screen', protected session: string) {}
 
   protected connect() {
     if (this.closed) return
@@ -43,7 +52,7 @@ class WsBase {
     const ws = this.ws
     ws.onopen = () => {
       this.retry = 0
-      try { ws.send(JSON.stringify({ t: 'hello', role: this.role })) } catch { /* noop */ }
+      try { ws.send(JSON.stringify({ t: 'hello', role: this.role, session: this.session })) } catch { /* noop */ }
       this.onOpen?.()
     }
     ws.onmessage = (e) => {
@@ -98,8 +107,8 @@ export class ScreenLink extends WsBase {
   lastCtlAt = 0
   lastHandAt = 0
 
-  constructor() {
-    super('screen')
+  constructor(session: string) {
+    super('screen', session)
     this.onMessage = (msg) => {
       switch (msg.t) {
         case 'ctl':
@@ -153,8 +162,8 @@ export class PhoneLink extends WsBase {
   onState?: (live: boolean) => void
   private hbTimer = 0
 
-  constructor() {
-    super('phone')
+  constructor(session: string) {
+    super('phone', session)
     this.onOpen = () => this.onState?.(true)
     this.onClose = () => this.onState?.(false)
     this.connect()

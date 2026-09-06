@@ -7,24 +7,49 @@
 // the show runs one: the main ocean, the studio tab AND every
 // /output projector machine — new fish simply swim in on all of
 // them without any reload.
+//
+// SESSIONS: each tank is scoped to a show session (venue). Pages
+// follow the session of the last studio push (or their own saved
+// one), so two exhibitions on one server never see each other's
+// fish.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { FishManager } from './FishManager'
 
 const POLL_MS = 4000
 const FAST_POLL_MS = 1200
+const SESSION_KEY = 'ocean-tank-session'
 
 export class FishTank {
   /** diagnostics */
   lastError: string | null = null
   synced = false
+  /** active show session — isolates tanks between venues */
+  session: string
 
   private timer = 0
   private v = -1
   private busy = false
   private fastUntil = 0
 
-  constructor(private fish: FishManager) {}
+  constructor(private fish: FishManager) {
+    try {
+      this.session = cleanSession(localStorage.getItem(SESSION_KEY))
+    } catch {
+      this.session = 'main'
+    }
+  }
+
+  /** switch to another show session — clears local designs not in it and re-polls */
+  async setSession(id: string) {
+    const clean = cleanSession(id)
+    if (clean === this.session) return
+    this.session = clean
+    try { localStorage.setItem(SESSION_KEY, clean) } catch { /* private mode */ }
+    this.v = -1
+    this.synced = false
+    this.schedule(0)
+  }
 
   start() {
     this.schedule(0)
@@ -54,7 +79,7 @@ export class FishTank {
     if (this.busy) return
     this.busy = true
     try {
-      const res = await fetch('/api/fish', { cache: 'no-store' })
+      const res = await fetch(`/api/fish?session=${encodeURIComponent(this.session)}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`tank ${res.status}`)
       const data = await res.json() as { v?: number }
       const v = typeof data.v === 'number' ? data.v : -1
@@ -68,7 +93,7 @@ export class FishTank {
   }
 
   private async pullFull(v: number) {
-    const res = await fetch('/api/fish?full=1', { cache: 'no-store' })
+    const res = await fetch(`/api/fish?full=1&session=${encodeURIComponent(this.session)}`, { cache: 'no-store' })
     if (!res.ok) throw new Error(`tank full ${res.status}`)
     const data = await res.json() as { v?: number; designs?: { id: string; name: string; url: string }[] }
     const designs = (Array.isArray(data.designs) ? data.designs : [])
@@ -94,12 +119,18 @@ export class FishTank {
   /** QA: what is swimming right now */
   info() {
     return {
+      session: this.session,
       v: this.v,
       synced: this.synced,
       lastError: this.lastError,
       designs: this.fish.customInfo(),
     }
   }
+}
+
+function cleanSession(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) : ''
+  return s || 'main'
 }
 
 async function loadTexture(url: string): Promise<THREE.Texture> {

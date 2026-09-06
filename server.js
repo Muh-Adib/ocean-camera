@@ -9,7 +9,10 @@
 // and hand everything that is not /ws/* to Next.js untouched.
 //
 // Hub protocol (JSON text frames):
-//   → {t:'hello', role:'phone'|'screen', name?}   first frame, tags the socket
+//   → {t:'hello', role:'phone'|'screen', name?, session?}   first frame, tags the socket
+//     session (optional) isolates rooms/venues: control frames only fan out
+//     to screens of the SAME session (default 'main'), so a second show on
+//     the same LAN can never steal another show's phone.
 //   phone → hub → screens: {t:'ctl', mx,my,ox,oy,dz}   stick velocities (−1..1)
 //                          {t:'hand', p,x,y,o,n}       hand metrics (p=present)
 //                          {t:'cam', on}               camera mode toggled
@@ -30,26 +33,41 @@ const dev = process.env.NODE_ENV !== 'production'
 const app = next({ dev, hostname: '0.0.0.0', port })
 const handle = app.getRequestHandler()
 
+const cleanSession = (v) => {
+  const s = typeof v === 'string' ? v.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) : ''
+  return s || 'main'
+}
+
 app.prepare().then(() => {
   const server = createServer((req, res) => handle(req, res))
 
   // ---------------- WebSocket hub ----------------
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false })
-  /** role-tagged live sockets */
-  const phones = new Set()
-  const screens = new Set()
+  /** role-tagged live sockets, grouped per session for isolation */
+  const phonesBySession = new Map()   // session → Set<ws>
+  const screensBySession = new Map()  // session → Set<ws>
+  const group = (map, key) => {
+    let g = map.get(key)
+    if (!g) { g = new Set(); map.set(key, g) }
+    return g
+  }
 
   const send = (ws, obj) => {
     try { if (ws.readyState === 1) ws.send(JSON.stringify(obj)) } catch { /* dying socket */ }
   }
-  /** fan out to every screen; phones never receive control chatter */
-  const toScreens = (obj) => { for (const s of screens) send(s, obj) }
-  const phoneCount = () => phones.size
+  /** fan out to every screen OF THE SAME SESSION; phones never receive control chatter */
+  const toScreens = (session, obj) => {
+    const g = screensBySession.get(session)
+    if (g) for (const s of g) send(s, obj)
+  }
+  const phoneCount = (session) => (phonesBySession.get(session) || new Set()).size
 
-  const announcePhones = () => toScreens({ t: 'phone', on: phoneCount() > 0, n: phoneCount() })
+  const announcePhones = (session) =>
+    toScreens(session, { t: 'phone', on: phoneCount(session) > 0, n: phoneCount(session) })
 
   wss.on('connection', (ws, req) => {
     ws.role = null
+    ws.session = 'main'
     ws.alive = true
     ws.lastSeen = Date.now()
     ws.on('pong', () => { ws.alive = true })
@@ -64,20 +82,30 @@ app.prepare().then(() => {
       if (!ws.role) {
         if (msg.t !== 'hello') return
         ws.role = msg.role === 'phone' ? 'phone' : 'screen'
-        ;(ws.role === 'phone' ? phones : screens).add(ws)
-        announcePhones()
-        if (ws.role === 'screen') send(ws, { t: 'phone', on: phoneCount() > 0, n: phoneCount() })
+        ws.session = cleanSession(msg.session)
+        ;(ws.role === 'phone'
+          ? group(phonesBySession, ws.session)
+          : group(screensBySession, ws.session)).add(ws)
+        announcePhones(ws.session)
+        if (ws.role === 'screen') {
+          send(ws, { t: 'phone', on: phoneCount(ws.session) > 0, n: phoneCount(ws.session) })
+        }
         return
       }
 
       if (ws.role !== 'phone') return   // screens listen; only phones steer
-      // control / hand frames ride straight through to every screen
-      if (msg.t === 'ctl' || msg.t === 'hand' || msg.t === 'cam') toScreens(msg)
+      // control / hand frames ride straight through to every screen of the SAME session
+      if (msg.t === 'ctl' || msg.t === 'hand' || msg.t === 'cam') toScreens(ws.session, msg)
     })
 
     ws.on('close', () => {
-      phones.delete(ws); screens.delete(ws)
-      if (ws.role === 'phone') announcePhones()
+      const map = ws.role === 'phone' ? phonesBySession : screensBySession
+      const g = map.get(ws.session)
+      if (g) {
+        g.delete(ws)
+        if (!g.size) map.delete(ws.session)
+      }
+      if (ws.role === 'phone') announcePhones(ws.session)
     })
     ws.on('error', () => { /* close will follow */ })
   })
