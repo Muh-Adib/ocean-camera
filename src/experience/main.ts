@@ -22,6 +22,7 @@ import { ReefDecor } from './environment/ReefDecor'
 import { Biomes } from './environment/Biomes'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
+import { SpongeBubbles } from './particles/SpongeBubbles'
 import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
 import { SpecialCreatures } from './fish/SpecialCreatures'
@@ -105,6 +106,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     pos: field.point, dir: field.dir, strength: sharedUniforms.uFieldStrength, radius: 11,
   })
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
+  // fine bubble streams rising out of every tube-sponge osculum
+  const spongeBubbles = arena.spongeLips.length
+    ? new SpongeBubbles(sceneMgr.scene, arena.spongeLips, {
+      pos: field.point, strength: sharedUniforms.uFieldStrength, radius: 11,
+    }, Math.min(210, Math.max(90, Math.round(arena.spongeLips.length * 0.7))))
+    : null
 
   // ---------------- fish ----------------
   const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])
@@ -420,6 +427,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     creatures.update(dt, elapsed)
     feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
+    spongeBubbles?.update(dt, elapsed)
     bursts.update(dt)
     dynamicEvents(dt)
 

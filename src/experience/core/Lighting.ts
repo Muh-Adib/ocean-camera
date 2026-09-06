@@ -76,15 +76,17 @@ export class Lighting {
     }
 
     for (let i = 0; i < count; i++) {
-      const w = rand(2.2, 6.5)
-      const h = rand(42, 62)
+      const w = rand(3.2, 8.5)
+      const h = rand(46, 64)
       const geo = new THREE.PlaneGeometry(w, h, 1, 1)
       const m = mat()
       const mesh = new THREE.Mesh(geo, m)
-      // ring the whole arena with light shafts so every heading gets rays
+      // ring the whole arena with light shafts so every heading gets rays;
+      // keep them INSIDE the reef wall band so they never glare against
+      // the dark horizon silhouettes
       const a = (i / count) * Math.PI * 2 + rand(-0.25, 0.25)
-      const r = rand(4, 52)
-      mesh.position.set(Math.cos(a) * r, 20 - h * 0.42, -20 + Math.sin(a) * r)
+      const r = rand(5, 26)
+      mesh.position.set(Math.cos(a) * r, 20 - h * 0.34, -20 + Math.sin(a) * r)
       mesh.rotation.y = rand(0, Math.PI)
       mesh.rotation.z = rand(-0.16, 0.16)
       mesh.renderOrder = 5
@@ -157,7 +159,7 @@ export class Lighting {
   reveal() {
     this.rayMats.forEach((m, i) => {
       setTimeout(() => {
-        gsap.to(m.uniforms.uOpacity, { value: rand(0.34, 0.7), duration: 4, ease: 'power2.inOut' })
+        gsap.to(m.uniforms.uOpacity, { value: rand(0.16, 0.34), duration: 4, ease: 'power2.inOut' })
       }, i * 180)
     })
     gsap.to(this.causticMat.uniforms.uOpacity, { value: 1.0, duration: 5, ease: 'power2.inOut' })

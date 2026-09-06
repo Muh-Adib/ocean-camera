@@ -959,3 +959,34 @@ Stage Summary:
 - Dunia kini arena karang 360°: pengunjung yang berkeliling di ruang pamer melihat dinding karang padat bergaya referensi dari segala penjukuan, bukan hanya sisi depan kamera.
 - Palet & atmosfer mengikuti referensi: air turquoise terang, pasir terang bercaustic net, karang sage/ungu/magenta/cream/merah/cyan di atas mound hijau lumut.
 - Renang bebas kini dibatasi bibir arena melingkar (slide halus), ikan tersebar 360°.
+
+---
+Task ID: 35
+Agent: main (Super Z)
+Task: "detailing 3D env level realistis (high-poly hingga jutaan), gelembung dari sponge, ujung arena jadi siluet biru (depth of field), jadwal long-running perbaikan detailing per piece (terutama table coral), pastikan material behaviour + interaction"
+
+Work Log:
+- ARSITEKTUR DETAIL-TIER: ReefCorals.ts (modul baru, 8 builder) menerima tier det 2/1/0 — ring A (r 26-34, terdekat pengunjung) = det 2 hero, filler/ring B = det 1, channel/ring C = det 0 siluet. ReefArena ditulis ulang sebagai penempatan + material; poly budget terukur via QA hook (arena().triK).
+- BUG FIX taperTube: three r185 TubeGeometry uv.x = along / uv.y = around — kode lama membaca terbalik (flare lip sebelumnya agak terpilin). Diperbaiki + semua builder baru pakai mapping benar.
+- TABLE CORAL (hero) total overhaul: disc 128 radial seg x 4 (dulu 30x1) dengan radial ribs (14-24) + grooves gelap + ridge light, rim tumbuh pucat, rim bergelombang + droop, dome pusat, trunk fbm-wobble + akar flare 7 cone, strut 6-seg, branchlet akropora 10-18 per disc (det2). Palet sage/teal digelapkan 2x (kompensasi sun 3.3 + exposure 1.26) → kini terbaca sage hijau, bukan putih.
+- TUBE SPONGE overhaul: tube 18x16 seg, flute vertikal (sin sekitar keliling) + pori fbm, lip flare 1.22 dengan rim bergelombang (8-12 lobes), penggelapan menuju mulut, FUNNEL HOLLOW sungguhan (cylinder terbuka menyempit ke bawah, sangat gelap) di dalam tiap osculum, skirt dasar. Tiap osculum mendaftarkan posisi lip (local) → ditransform dengan matriks yang sama saat place() → 310 emitter world-space.
+- SPONGE BUBBLES (modul baru particles/SpongeBubbles.ts): 90-210 instanced sphere shader fresnel-rim (rim terang, perut transparan), naik 1-3.4 m dari osculum dengan wobble + membesar saat naik, respawn bias medan gesture (current pengunjung menyapu sponge → stream burst). Reacts to sharedUniforms.uFieldStrength/uFieldPos.
+- SILUET BIRU DOF (modul baru environment/depthSilhouette.ts): injeksi shader kamera-relatif SETELAH fog — smoothstep(start,end,viewZ) → mix ke biru dalam #0d4266. Dipasang di semua material arena (start 46/end 105/k 0.8), mounds, rubble, rocks (42/105), seabed+pebbles+shells (52/140). Hasil: dinding hero tetap berwarna penuh, ring B mulai pudar, ring C + horizon jadi siluet biru tua seperti referensi.
+- BUBBLE CORAL: bola 12x9 seg dengan "jendela cahaya" di puncak tiap grape (khas Plerogyra), base blob fbm, ranting anggur menggantung. FINGER CORAL: jari 9x5 seg ber-flute + knuckle bulge + ujung pucat, dome berlump. RED WHIP: tube 34x9 + barisan polyp cone pucat spiral keliling blade. SPIRAL WHIP: tube 84x7 halus + banding pertumbuhan. ANEMONE: kolom berlipat + disc oral + 3 ring tentacle TubeGeometry melengkung meruncing dengan ujung terang (66-86 tentacle). GREEN MOUND: icosahedron detail 9 (2000 tris, dulu 180) fbm 4 oktaf + rubble 5-9 batu di kaki tiap bommie ring A.
+- KEPADATAN DINDING: sub-ring baru A2 (14 bommie kecil r 33-42) + entourage +1 finger +1 sponge per bommie A + ring B +1 koloni → dinding kontinu tanpa celah tembus pandang.
+- MATERIAL BEHAVIOUR per keluarga: sponge MeshPhysicalMaterial clearcoat 0.5 + DoubleSide (funnel terlihat), bubble clearcoat 0.65 rough 0.34 (anggur basah), redwhip/spiral clearcoat 0.25-0.3, table/finger matte 0.78-0.82, anemone 0.55; semua tetap vertex-colored + sway gesture di whip/spiral/anemone.
+- KOREKSI LINGKUNGAN: CoralSystem lama (karang draft putih krem) disingkirkan dari radius 64 m pusat arena (0,-20) — colosseum kini murni model baru; klaster jauh (>64 m) dipertahankan sebagai siluet. God rays: dipindah r 5-26 (di dalam clearing, tidak lagi berdiri nyala di depan dinding gelap), opacity 0.16-0.34, lebih lebar.
+- Stats akhir: 1.399.226 triangle arena (9 draw call), 409 karang + 46 mound, 310 emitter gelembung, build 1.76 s. Verifikasi: tsc bersih, eslint 9 file bersih, headless geometry test 300 siklus 0 error, agent-browser 360° (yaw 0/1.5/3.1/4.5/5.6/7.5/9.3/11.2 rad) — dinding padat berwarna dari SEMUA arah, siluet biru di horizon, caustics net di pasir, gelembung sponge terlihat di dekat klaster, dev.log tanpa error.
+
+JADWAL LONG-RUNGING DETAILING (lanjutan sesi berikutnya):
+1. (35-b DONE) table coral + sponge + gelembung + siluet biru + bubble/finger/whip/spiral/anemone/mound det tier.
+2. 35-c: CoralSystem sisa (branch/fan/brain/boulder/soft) di zona luar arena dirombak builder baru per-piece; palet disinkronkan referensi.
+3. 35-d: normal/detail map canvas-baked per keluarga (mikro-relief polyp, pori sponge) + vertex AO baking untuk crevice.
+4. 35-e: interaksi ikan-karang (berlindung di table saat threat, ikan kecil ngepak di sekitar sponge), animasi buka-tutup polyp anemone.
+5. 35-f: LOD dinamis dari PerformanceManager (turunkan det ring jika GPU ms tinggi), spesimen rare (table raksasa 5 m sebagai landmark).
+
+Stage Summary:
+- Arena karang 360° kini model high-detail sejati: 1,4 juta triangle, tiap keluarga punya bentuk/relief/material nyata (bukan draft primitif), dinding kontinu dari semua penjukuan.
+- Gelembung naik dari setiap osculum sponge dan meledak saat arus gesture pengunjung menyapu.
+- Ujung arena melebur menjadi siluet biru tua (depth of field) sesuai referensi, dinding hero tetap vivid.
+- Korupsi visual dari karang draft lama di dalam clearing dihapus; god rays tak lagi menabrak dinding gelap.

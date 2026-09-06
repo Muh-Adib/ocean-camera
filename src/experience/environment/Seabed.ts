@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { SEABED_Y, fbm2, noise2, rand, mulberry32 } from '../utils/math'
 import { sharedUniforms } from '../core/sharedUniforms'
+import { addDepthSilhouette } from './depthSilhouette'
 
 export class Seabed {
   group = new THREE.Group()
@@ -81,6 +82,8 @@ export class Seabed {
       roughness: 0.96,
       metalness: 0,
     })
+    // distant sand sinks into the deep-blue depth silhouette too
+    addDepthSilhouette(mat, { start: 52, end: 140, k: 0.78, color: '#0a3752' }, 'seabed-terrain')
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.z = -20
     this.group.add(mesh)
@@ -100,6 +103,7 @@ export class Seabed {
     geo.computeVertexNormals()
 
     const mat = new THREE.MeshStandardMaterial({ color: '#8d8471', roughness: 1 })
+    addDepthSilhouette(mat, { start: 52, end: 140, k: 0.78, color: '#0a3752' }, 'seabed-pebbles')
     const mesh = new THREE.InstancedMesh(geo, mat, count)
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
@@ -135,6 +139,7 @@ export class Seabed {
     const shellMat = new THREE.MeshStandardMaterial({
       color: '#e8dcc5', roughness: 0.8, side: THREE.DoubleSide,
     })
+    addDepthSilhouette(shellMat, { start: 52, end: 140, k: 0.78, color: '#0a3752' }, 'seabed-shells')
     const shells = new THREE.InstancedMesh(shellGeo, shellMat, 36)
     for (let i = 0; i < 36; i++) {
       const x = rand(-68, 68), z = rand(-82, 14)
