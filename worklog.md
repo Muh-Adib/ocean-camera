@@ -757,3 +757,42 @@ Stage Summary:
 - Flow scan ikan kini 100% tahan terhadap latar belakang apa pun, termasuk background yang dicoret atau diwarnai krayon penuh — hanya bentuk ikan resmi yang diambil dan dipetakan sempurna ke model 3D.
 - Koneksi local dev stabil tanpa putus-putus atau auto-refresh berkala karena HMR Next.js sudah dialirkan dengan benar.
 
+---
+Task ID: 28
+Agent: main (Antigravity)
+Task: "membuat gestur ikan dan model ikan bergerak lebih natural sesuai morfologi (badannya juga bergerak mendayung), perbaikan sirip ikan yang besar sebelah, redesign ikan gembung berduri agar realistis berbentuk sphere bulat sedikit lonjong ke ekor dan tidak mengerikan, serta perbaikan agar ikan tidak bolong dan memiliki rongga"
+
+Work Log:
+- WATERTIGHT HULL & ZERO HOLES (FishGeometryFactory.ts, CustomFish.ts):
+  * Pada makeHull (FishGeometryFactory), ring 0 (ekor) dan ring RINGS-1 (moncong) sebelumnya terbuka membentuk tabung silinder tanpa tutup. Ditambahkan tutup moncong (front cap fan) di z = +0.5L dan tutup peduncle (rear cap fan) di z = -0.5L dengan normal keluar.
+  * Pada buildBody (CustomFish), ring 0 (moncong) sebelumnya terbuka. Ditambahkan front cap fan di fx = 0 (z = wz(0) + 0.005) menyatu sempurna dengan tutup peduncle belakang.
+  * Hasil: kedua ujung ikan (depan & belakang) 100% tertutup rapat, tidak ada rongga atau lubang tembus pandang ke dalam bodi ikan.
+- PERBAIKAN SIRIP BESAR SEBELAH & ASIMETRIS (FishGeometryFactory.ts, CustomFish.ts):
+  * Investigasi CustomFish: koordinat translasi basis sirip tertukar secara fatal (argumen 1 diisi wz yang merupakan sumbu Z, sedangkan argumen 3 diisi side * 0.03 yang merupakan offset lateral X), serta rotasi sirip kiri tidak di-mirror melainkan hanya dirotasi balik sehingga bentuk dan posisinya melenceng jauh.
+  * Diperbaiki dengan translasi murni pivot ke titik pangkal (0, -pecY, -pecZ), rotasi keluar terhadap kontur badan, penempatan tepat pada permukaan kulit (surfaceXAt), dan pencerminan sejati bidang sagital untuk sisi kiri: left = right.clone().scale(-1, 1, 1) dengan pembalikan winding order index dan recompute normal.
+  * Hal serupa diterapkan pada placePectoral dan placePelvic di FishGeometryFactory.
+  * Verifikasi uji bounding box: seluruh 10 spesies bawaan + custom fish memiliki simetri lateral sumbu X sempurna (selisih diff = 0.00000).
+- REDESIGN IKAN GEMBUNG BERDURI (PUFFERFISH / PORCUPINEFISH):
+  * Bentuk Bodi: profil diubah dari elips kaku gepeng menjadi bola bundar bulat telur (sphere) yang melandai lembut ke arah ekor (profile: [0.035, 0.12, 0.26, 0.38, 0.42, 0.42, 0.38, 0.24, 0.06], w: 0.96, h: 0.96, len: 0.52).
+  * Moncong & Paruh: ditambahkan paruh bulat mungil (cute beak) di ujung moncong sehingga wajah ikan gembung terlihat ramah, lucu, dan natural.
+  * Duri / Spines: duri piramida runcing 4-sisi raksasa (0.11m, menyerupai bola duri gada abad pertengahan yang mengerikan) diganti dengan kerucut halus 6-sisi ramping (radius 0.007, panjang 0.038).
+  * Distribusi Fibonacci Spiral: penempatan duri kini mengikuti spiral bola Fibonacci (golden angle spiral) yang rapi dan teratur di seluruh permukaan bodi bola, dengan orientasi vektor normal elipsoid 3D sejati dan menjauhi area mata, mulut, dan sirip.
+  * Pangkal duri ditenggelamkan ke dalam kulit saat rileks (aPuff = 0) sehingga hanya tampak tonjolan nodul halus yang lucu; saat mode defensif kembung (aPuff > 0), duri menegak rapi mengikuti ekspansi bodi.
+- LOCOMOTORI BERENANG ALAMI & GERAKAN BADAN MENDAYUNG (FishGeometryFactory.ts, FishManager.ts):
+  * Vertex Shader locomotion dirombak dari engsel kaku tTail^2 (yang hanya mengibas ujung ekor) menjadi gelombang traveling wave sejati sepanjang sumbu tulang belakang Z: wave = sin(uTime * uSwimFreq - position.z * 3.4 + aPhase).
+  * Envelope undulasi tubuh dinamis: osilasi counter-yaw lembut di kepala (0.16), kelenturan elastis di bagian tengah badan (0.25 - 0.55), dan kibasan penuh di sirip ekor (1.0).
+  * Gerakan Mendayung Sirip Dada (Pectoral Paddling Flutter): vertek sirip samping (abs(position.x) > 0.06 pada rentang z dada) mendapatkan kibasan maju-mundur sepanjang sumbu Z dan bukaan melebar sepanjang sumbu X secara sinkron dengan kayuhan renang (paddle * flankMask).
+  * Flutter sirip punggung (dorsal) dan sirip perut (anal) bergelombang dengan keterlambatan fase yang luwes.
+  * FishManager: loop pembaruan uTime shader kini juga mencakup seluruh material ikan kustom (this.custom.forEach) sehingga ikan hasil scan pengguna berenang luwes dan tidak lagi beku/kaku.
+- VERIFIKASI:
+  * bun scratch/test_geometry.ts: 10/10 spesies + Custom Fish lulus uji simetri bilateral sempurna (min.x = -max.x, error 0.00000).
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+  * Hull tertutup rapat tanpa lubang interior.
+
+Stage Summary:
+- Gerakan ikan kini mengalir alami dari kepala hingga ekor dengan gelombang fleksibel dan sirip dada yang aktif mendayung ("badannya juga bergerak untuk mendayung").
+- Sirip kiri dan kanan 100% simetris berkat pencerminan sagital matematis sejati, melenyapkan masalah sirip besar sebelah.
+- Ikan gembung kini berwujud bola bundar yang ramping ke arah ekor ("sphere bulat sedikit lonjong ke ekor") dengan paruh mungil yang lucu dan duri halus rapi, tidak lagi tampak menakutkan.
+- Seluruh bodi ikan (bawaan & custom) tertutup rapat (watertight) tanpa rongga terbuka di moncong maupun ekor.
+
+

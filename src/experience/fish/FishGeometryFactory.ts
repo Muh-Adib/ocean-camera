@@ -433,6 +433,24 @@ export function makeHull(spec: BodySpec): Hull {
       idx.push(a0, b0, a1, b0, b1, a1)
     }
   }
+
+  // close the tail peduncle with an end cap fan (normal pointing -Z)
+  const rearCenterIdx = pos.length / 3
+  pos.push(0, 0, -0.5 * L)
+  uv.push(0.5, 0)
+  for (let j = 0; j < RAD; j++) {
+    idx.push(rearCenterIdx, j + 1, j)
+  }
+
+  // close the snout with an end cap fan (normal pointing +Z)
+  const frontCenterIdx = pos.length / 3
+  pos.push(0, 0, 0.5 * L)
+  uv.push(0.5, 1)
+  const lastRingBase = (RINGS - 1) * (RAD + 1)
+  for (let j = 0; j < RAD; j++) {
+    idx.push(frontCenterIdx, lastRingBase + j, lastRingBase + j + 1)
+  }
+
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
@@ -639,21 +657,45 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6): THR
   return g
 }
 
-/** pectoral fin rooted inside the flank at the hull surface */
+/** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry */
 function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 6)
-  g.rotateY(side * -0.9)
-  g.rotateZ(side * 0.5)
-  g.translate(side * rAt * 0.74, y, z)
+  g.rotateY(-0.75)
+  g.rotateZ(0.28)
+  g.translate(rAt * 0.78, y, z)
+  if (side === -1) {
+    g.scale(-1, 1, 1)
+    if (g.index) {
+      const arr = g.index.array as Uint16Array | Uint32Array
+      for (let i = 0; i < arr.length; i += 3) {
+        const tmp = arr[i]
+        arr[i] = arr[i + 1]
+        arr[i + 1] = tmp
+      }
+    }
+    g.computeVertexNormals()
+  }
   return g
 }
 
-/** paired pelvic fins on the belly, rooted at the hull surface */
+/** paired pelvic fins on the belly with exact bilateral symmetry */
 function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 5)
-  g.rotateY(side * -0.5)
-  g.rotateX(-0.85)                 // sweep downward
-  g.translate(side * rAt * 0.4, y, z)
+  g.rotateY(-0.4)
+  g.rotateX(-0.8)
+  g.translate(rAt * 0.42, y, z)
+  if (side === -1) {
+    g.scale(-1, 1, 1)
+    if (g.index) {
+      const arr = g.index.array as Uint16Array | Uint32Array
+      for (let i = 0; i < arr.length; i += 3) {
+        const tmp = arr[i]
+        arr[i] = arr[i + 1]
+        arr[i + 1] = tmp
+      }
+    }
+    g.computeVertexNormals()
+  }
   return g
 }
 
@@ -775,20 +817,20 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   pufferfish: {
-    // globefish — nearly spherical: blunt snout, fat belly, thick
-    // peduncle; length ≈ height so the silhouette reads as a ball
-    body: { profile: [0.075, 0.2, 0.275, 0.315, 0.335, 0.325, 0.28, 0.2, 0.115], w: 1.04, h: 1.0, len: 0.4 },
-    tail: [0.11, 0.09, 0.05],
-    dorsal: [[0.02, 0.07], [-0.12, 0.05]],
-    anal: [[0.0, 0.06], [-0.12, 0.04]],
-    pectoral: 0.11, eyeR: 0.062, eyeIris: '#4a5a68',
-    finColor: '#c8b482', tailColor: '#c8b482',
+    // porcupinefish / pufferfish — spherical anterior body smoothly tapering
+    // toward caudal peduncle, cute proportions, proper non-monstrous spines
+    body: { profile: [0.035, 0.12, 0.26, 0.38, 0.42, 0.42, 0.38, 0.24, 0.06], w: 0.96, h: 0.96, len: 0.52 },
+    tail: [0.14, 0.12, 0.08],
+    dorsal: [[0.02, 0.08], [-0.14, 0.05]],
+    anal: [[0.0, 0.07], [-0.14, 0.04]],
+    pectoral: 0.12, eyeR: 0.052, eyeIris: '#5c4a28',
+    finColor: '#d6c498', tailColor: '#d6c498',
     tex: {
-      back: '#c9b384', belly: '#e8dcc0',
-      spots: { color: '#4a3f2a', n: 16, r: 3.4 },
+      back: '#b8a67c', belly: '#f0e8d4',
+      spots: { color: '#3d3422', n: 18, r: 3.2 },
     },
     spikes: true,
-    spikeLen: 0.11,
+    spikeLen: 0.038,
   },
   moorish: {
     // Moorish idol — tall compressed body, trailing dorsal filament,
@@ -937,40 +979,61 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
   parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
 
-  // pufferfish spikes — seated at the hull surface and RADIATING
-  // outward (axis = local surface normal). Each vertex carries an
-  // `aSpike` apex weight (0 base → 1 tip) so the defence shader can
-  // anchor the base to the inflating skin while the tip extends.
+  // pufferfish cute rounded beak at the snout
+  if (key === 'pufferfish') {
+    const beak = new THREE.SphereGeometry(0.026, 12, 8)
+    beak.scale(1.25, 0.75, 0.9)
+    beak.translate(0, -bbs.h * 0.05, bbs.len * 0.49)
+    setUniformUV(beak)
+    paintColors(beak, new THREE.Color('#7a684c'))
+    parts.push(beak)
+  }
+
+  // pufferfish spines — Fibonacci spiral distribution along the spherical body.
+  // When relaxed (aPuff = 0), spines sit flush against the skin as cute small nubs.
+  // When defensive display triggers (aPuff > 0), spines erect along surface normals.
   if (def.spikes) {
-    const rng = mulberry32(7)
-    const spikeLen = def.spikeLen ?? 0.07
-    for (let i = 0; i < 78; i++) {
-      const a = rng() * Math.PI * 2
-      const y = (rng() - 0.35) * 0.3
-      const t = 0.25 + rng() * 0.45
-      const z = (-0.5 + t) * 2 * bbs.len * 0.9
-      const yAbs = y * bbs.h + Math.abs(y) * 0.2
-      // keep the orbit clear — no spike stabs the eye
-      if (Math.hypot(z - eyeZ, yAbs - eyeY) < eyeR * 1.7) continue
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5)) // ~2.39996 rad
+    const spikeLen = def.spikeLen ?? 0.038
+    const spikeRadius = 0.007
+    for (let i = 0; i < 96; i++) {
+      const tNorm = (i + 0.5) / 96
+      // restrict spines to the spherical body portion (t from 0.20 to 0.82)
+      const t = 0.20 + tNorm * 0.62
+      const z = (-0.5 + t) * bbs.len
+      const phi = i * goldenAngle
+      const cy = Math.sin(phi)
+      const cx = Math.cos(phi)
       const profR = radiusAt(z)
-      // cross-section shrinks toward the ridge/belly — pull the base in with it
-      const yHalf = Math.max(1e-4, profR * bbs.h)
-      const shrink = Math.sqrt(Math.max(0.15, 1 - (yAbs / yHalf) * (yAbs / yHalf)))
-      const px = Math.cos(a) * profR * bbs.w * 0.96 * shrink
-      // outward direction = elliptic surface normal at the base point
-      const dir = new THREE.Vector3(px / (profR * bbs.w + 1e-5), yAbs / yHalf, 0).normalize()
-      const spike = new THREE.ConeGeometry(0.016, spikeLen, 4)
+
+      const y = cy * profR * bbs.h * 0.96
+      const x = cx * profR * bbs.w * 0.96
+
+      // Keep clear of eyes, mouth, and fins
+      if (Math.hypot(z - eyeZ, y - eyeY) < eyeR * 1.8) continue
+      if (Math.hypot(z - eyeZ, y + eyeY) < eyeR * 1.8) continue
+      if (Math.abs(x) < 0.025 && (z < -bbs.len * 0.1 || z > bbs.len * 0.38)) continue
+
+      // 3D Ellipsoid normal direction
+      const nx = x / Math.max(1e-4, bbs.w * bbs.w)
+      const ny = y / Math.max(1e-4, bbs.h * bbs.h)
+      const nz = (z + bbs.len * 0.06) / Math.max(1e-4, (bbs.len * 0.5) * (bbs.len * 0.5))
+      const dir = new THREE.Vector3(nx, ny, nz).normalize()
+
+      // Neat 6-sided smooth cone
+      const spike = new THREE.ConeGeometry(spikeRadius, spikeLen, 6)
       setUniformUV(spike)
-      // apex weight BEFORE any transform: base ring 0 → tip 1
       const sw = new Float32Array(spike.attributes.position.count)
       for (let k = 0; k < sw.length; k++) {
         sw[k] = clamp((spike.attributes.position.getY(k) + spikeLen / 2) / spikeLen, 0, 1)
       }
       spike.setAttribute('aSpike', new THREE.BufferAttribute(sw, 1))
-      spike.translate(0, spikeLen * 0.5 - 0.02, 0)      // base buried 0.02 in the skin
+
+      // Base buried so when aPuff = 0 only neat small nubs peek out
+      spike.translate(0, spikeLen * 0.5 - spikeLen * 0.76, 0)
       spike.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir))
-      spike.translate(px, yAbs, z)
-      paintColors(spike, new THREE.Color('#b8a478'))
+      spike.translate(x, y, z)
+      paintColors(spike, new THREE.Color('#c2b28c'))
       spikeSet.add(spike)
       parts.push(spike)
     }
@@ -1020,17 +1083,32 @@ export function makeFishMaterial(
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
       #include <begin_vertex>
       {
-        float tTail = clamp((0.28 - position.z) / 0.85, 0.0, 1.0);
-        tTail *= tTail;
-        transformed.x += sin(uTime * uSwimFreq + aPhase - position.z * 2.4) * uSwimAmp * tTail;
-        transformed.x += sin(uTime * uSwimFreq * 0.5 + aPhase) * uSwimAmp * 0.06;
-        // fin membrane flutter — tall fin tips ripple softly out of phase
-        float finMask = smoothstep(0.55, 1.4, abs(transformed.y)) * (1.0 - tTail);
-        transformed.x += sin(uTime * uSwimFreq * 1.35 + aPhase * 1.7) * uSwimAmp * 0.4 * finMask;
-        ${opts.puff ? `// defence display: hull inflates radially, spines ride the skin
-        float coreFall = 1.0 - smoothstep(0.14, 0.3, abs(position.z));
-        float hullGrow = aPuff * 0.17 * coreFall;
-        transformed.xyz += normalize(position + vec3(1e-4)) * (hullGrow + aPuff * aSpike * 0.34);` : ''}
+        // 1. Natural spine traveling wave (head to tail along -z)
+        float wave = sin(uTime * uSwimFreq - position.z * 3.4 + aPhase);
+
+        // Continuous envelope: subtle counter-yaw at head (0.16), flexible mid-body, maximum tail sweep (1.0)
+        float tailFactor = clamp((0.18 - position.z) / 0.72, 0.0, 1.0);
+        float bodyEnvelope = 0.16 + 0.84 * (tailFactor * tailFactor);
+        transformed.x += wave * uSwimAmp * bodyEnvelope;
+
+        // Subtle secondary undulation along body for organic elasticity
+        transformed.x += sin(uTime * uSwimFreq * 0.5 + aPhase) * uSwimAmp * 0.05;
+
+        // 2. Active pectoral fin paddling ("badannya juga bergerak untuk mendayung")
+        // Flank fins (large |x|, mid-body z) flap forward/back and flare laterally
+        float flankMask = smoothstep(0.06, 0.22, abs(position.x)) * smoothstep(0.25, 0.02, position.z) * smoothstep(-0.25, -0.04, position.z);
+        float paddle = sin(uTime * uSwimFreq * 1.15 + aPhase);
+        transformed.z += paddle * 0.04 * flankMask;
+        transformed.x += sign(position.x) * (paddle * 0.025 + 0.015) * flankMask;
+
+        // 3. Dorsal / anal fin tips flutter rippling out of phase
+        float finMask = smoothstep(0.45, 1.2, abs(transformed.y)) * (1.0 - tailFactor * 0.5);
+        transformed.x += sin(uTime * uSwimFreq * 1.35 - position.z * 3.0 + aPhase * 1.5) * uSwimAmp * 0.35 * finMask;
+
+        ${opts.puff ? `// defence display: hull inflates radially, spines erect neatly
+        float coreFall = 1.0 - smoothstep(0.12, 0.32, abs(position.z));
+        float hullGrow = aPuff * 0.18 * coreFall;
+        transformed.xyz += normalize(position + vec3(1e-4)) * (hullGrow + aPuff * aSpike * 0.065);` : ''}
       }
     `)
     shader.fragmentShader = `

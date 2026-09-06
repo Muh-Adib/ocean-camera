@@ -183,6 +183,7 @@ export class FishManager {
     }
     // swim shader time
     for (const m of this.mats) updateFishMaterialTime(m, time)
+    this.custom.forEach((c) => updateFishMaterialTime(c.mat, time))
   }
 
   /** camera world position is injected by main each frame */
