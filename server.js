@@ -82,11 +82,15 @@ app.prepare().then(() => {
     ws.on('error', () => { /* close will follow */ })
   })
 
+  const upgradeHandler = typeof app.getUpgradeHandler === 'function' ? app.getUpgradeHandler() : null
+
   server.on('upgrade', (req, socket, head) => {
     let pathname = '/'
     try { pathname = new URL(req.url, 'http://x').pathname } catch { /* bad url */ }
     if (pathname === '/ws/control') {
       wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+    } else if (upgradeHandler) {
+      upgradeHandler(req, socket, head)
     } else {
       socket.destroy()   // no other WS endpoints exist
     }

@@ -37,6 +37,8 @@
 // ---------------------------------------------------------------
 import { reserveWhiteTexel } from './CustomFish'
 import { SHEET_CONTRACT } from './FishTemplate'
+import { getFishSilhouetteMask } from './FishSilhouetteMask'
+import { detectTemplateFrame, warpAndExtractFish } from './TemplateRegistration'
 
 export interface ProcessedFish {
   dataUrl: string
@@ -401,11 +403,20 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
   const { ctx, W, H } = toWorkCanvas(src)
   if ('close' in src && typeof src.close === 'function') src.close()
 
-  const found = fineFishMask(ctx, W, H)
-
-  // fish-only crop — or the whole picture as a last-resort fallback
+  // 1. Primary: Template-guided registration using official template frame & corners.
+  // Exactly crops the fish silhouette and discards all background (even if heavily colored).
+  const detected = detectTemplateFrame(ctx, W, H)
   let crop: HTMLCanvasElement
-  if (found) {
+
+  if (detected) {
+    const fishMask = getFishSilhouetteMask()
+    crop = warpAndExtractFish(ctx, W, H, detected, fishMask)
+  } else {
+    // 2. Fallback: heuristic fineFishMask for close-ups or cropped scans
+    const found = fineFishMask(ctx, W, H)
+
+    // fish-only crop — or the whole picture as a last-resort fallback
+    if (found) {
     const cw = found.x1 - found.x0 + 1
     const ch = found.y1 - found.y0 + 1
     crop = document.createElement('canvas')
@@ -496,6 +507,7 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
     crop.width = W
     crop.height = H
     crop.getContext('2d')!.drawImage(ctx.canvas, 0, 0)
+  }
   }
 
   // sheet: the fish-only crop stretched to fill the whole UV window
