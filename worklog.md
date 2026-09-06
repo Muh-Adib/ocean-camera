@@ -795,4 +795,44 @@ Stage Summary:
 - Ikan gembung kini berwujud bola bundar yang ramping ke arah ekor ("sphere bulat sedikit lonjong ke ekor") dengan paruh mungil yang lucu dan duri halus rapi, tidak lagi tampak menakutkan.
 - Seluruh bodi ikan (bawaan & custom) tertutup rapat (watertight) tanpa rongga terbuka di moncong maupun ekor.
 
+---
+Task ID: 29
+Agent: main (Antigravity)
+Task: "perdetail treatment untuk bentuk masing masing ikan agar proporsional sesuai bentuk ikan asli, buat sirip samping mendayung aktif sesuai morfologi, ikan buntal lebih bulat lonjong ke ekor dan kepala, ikan hiu realistis dengan mulut dan taring tajam, serta perbaikan bentuk kura-kura"
+
+Work Log:
+- ATRIBUT PECTORAL PADDLE MURNI & SHADER MENDAYUNG (FishGeometryFactory.ts, CustomFish.ts):
+  * Ditambahkan atribut vertex aPecPaddle murni (0.0 pada akar kulit -> 1.0 pada ujung sirip) pada makePectoralFan dan finShell pectoral CustomFish. Seluruh bodi dan sirip lain bernilai 0.0.
+  * Vertex shader makeFishMaterial kini mendayung murni dengan aPecPaddle: power stroke mengayun ke belakang (-z) dan melebar (+x), recovery stroke merapat maju (+z), serta gerak sculling vertikal (y). Bodi ikan 0% terdistorsi, sirip dada mengayuh air secara jelas dan bertenaga.
+- PROPORSI SPESIFIK SELURUH SPESIES IKAN (FishGeometryFactory.ts):
+  * Ikan Buntal (Pufferfish): bodi disempurnakan menjadi bola bundar telur (spherical teardrop) yang padat di kepala & perut lalu melandai lonjong ke ekor (profile: [0.035, 0.09, 0.20, 0.38, 0.50, 0.52, 0.46, 0.34, 0.10], w: 1.05, h: 1.02, len: 0.56). Ditambahkan paruh tanduk (fused beak), mata besar di pipi atas (eyeR: 0.056), dan sirip dada membulat lincah (0.16).
+  * Clownfish (Amphiprion ocellaris): bodi oval membulat padat (w: 0.48, h: 1.15, len: 0.44), sirip dada membulat besar (0.16), sirip ekor bulat (fork: 0.02, rounded paddle tail).
+  * Blue Tang (Paracanthurus hepatus): cakram oval pipih lateral (w: 0.28, h: 1.55, len: 0.72), sirip dada sayap kuning (0.18), ekor segitiga kuning kontras.
+  * Angelfish (Pterophyllum scalare): wajik pipih tinggi (w: 0.24, h: 1.95, len: 0.48), sirip dorsal menjulang (0.55), sirip anal menjuntai panjang (0.50).
+  * Patin (Pangasius): torpedo bertenaga (len: 0.90, w: 0.52, h: 1.12), sirip dada sayap lebar (0.28), ekor bercabang dalam (fork: 0.85).
+- REDESIGN TOTAL IKAN HIU REALISTIS (SpecialCreatures.ts):
+  * Mengganti siluet lathe 12-segmen kaku dengan bodi hiu fusiform aerodinamis (RINGS=32, RAD=28, L=4.2) berpunggung melengkung, moncong kerucut tajam yang sedikit mendongak, dan lunas samping peduncle (caudal keels).
+  * Mulut ventral terbuka di bawah moncong dengan rongga mulut dalam gelap (#150508).
+  * Dua baris taring tajam putih bersusun (#ffffff): 14 taring tajam atas menghadap ke bawah-belakang dan 12 taring tajam bawah menghadap ke atas-belakang.
+  * 5 celah insang vertikal di kedua sisi leher (#101b24) dan mata predator gelap berglint di sisi moncong.
+  * Sirip punggung pertama sabit tinggi dengan takik trailing edge, sirip dada hidrofoil melengkung, dan sirip ekor heteroserkal (cuping atas menjulang panjang).
+  * Shading MeshStandardMaterial counter-shading (punggung abu-abu biru samudra #243547, perut putih #eef3f8) + vertex shader renang gelombang lentur thunniform.
+- REDESIGN PENYU / KURA-KURA LAUT REALISTIS (SpecialCreatures.ts):
+  * Kerapas cangkang dirombak menjadi bentuk hati aerodinamis (heart-shaped shell, RINGS=24, RAD=28) yang melebar di bahu depan dan meruncing rapi ke belakang dengan bubungan tengah (vertebral keel) dan takik anterior leher.
+  * Kepala reptil berparuh tajam melengkung ke bawah (rhamphotheca), leher berkerut, dan mata bersisik.
+  * Sayap hidrofoil depan panjang melengkung aerodinamis (len: 1.85).
+  * Animasi renang 3-aksial di update loop: kepakan sayap terbang air (rotasi Z untuk ayunan atas-bawah, Y untuk sudut serang sayap, X untuk kayuhan dorong).
+- VERIFIKASI:
+  * bun scratch/test_creatures.ts: seluruh spesies + custom fish memiliki aPecPaddle aktif (1.00) dan simetri lateral sempurna (diff = 0.00000).
+  * bun scratch/test_special.ts: SpecialCreatures (Hiu, Penyu, Manta Ray) berjalan mulus tanpa error.
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Masing-masing ikan memiliki proporsi bentuk dan sirip yang akurat sesuai anatomi aslinya.
+- Sirip samping kini mendayung nyata dengan atribut paddle vertex murni.
+- Ikan buntal berwujud bola telur bundar yang melandai lonjong ke ekor dengan paruh ramah dan mata bundar.
+- Hiu berwujud predator ganas realistis dengan mulut terbuka, taring tajam berseri, 5 celah insang, dan tubuh berenang lentur.
+- Penyu berwujud cangkang hati aerodinamis dengan kepakan sirip sayap terbang air yang anggun.
+
+
 

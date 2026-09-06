@@ -229,6 +229,17 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
 
   const rightPec = finShell(PECTORAL)
   rightPec.translate(0, -pecY, -pecZ)
+
+  // assign paddle weights (0 at base origin -> 1 at fin edge)
+  const pecPos = rightPec.attributes.position
+  const paddleArr = new Float32Array(pecPos.count)
+  const maxPecDist = 0.16
+  for (let i = 0; i < pecPos.count; i++) {
+    const d = Math.hypot(pecPos.getX(i), pecPos.getY(i), pecPos.getZ(i))
+    paddleArr[i] = Math.min(1, Math.max(0, d / maxPecDist))
+  }
+  rightPec.setAttribute('aPecPaddle', new THREE.BufferAttribute(paddleArr, 1))
+
   rightPec.rotateY(-0.5)
   rightPec.translate(pecSx * 0.82, pecY, pecZ)
   parts.push(rightPec)
@@ -280,7 +291,13 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   parts.push(...makeEyeParts(-1, sx, eyeY, eyeZ, eyeR, '#232a31'))
 
   const merged = mergeGeometries(
-    parts.map((p) => (p.index ? p.toNonIndexed() : p)),
+    parts.map((p) => {
+      const g = p.index ? p.toNonIndexed() : p
+      if (!g.attributes.aPecPaddle) {
+        g.setAttribute('aPecPaddle', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1))
+      }
+      return g
+    }),
     false,
   )!
   return { geometry: merged }

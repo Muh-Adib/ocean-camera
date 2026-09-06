@@ -345,51 +345,88 @@ function buildTurtle(): { group: THREE.Group; flippers: THREE.Mesh[]; mats: THRE
   const plastronMat = mkMat('#e8dcc0', 0.8, getPlastronTexture())
   const skinMat = mkMat('#8a9663', 0.82, getTurtleSkinTexture())
 
-  // carapace — textured dome
-  const shell = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 13), shellMat)
-  shell.scale.set(1.15, 0.5, 1.42)
+  // Carapace — heart-shaped dome with vertebral keel and anterior neck notch
+  const RINGS = 24, RAD = 28
+  const pos: number[] = [], uvs: number[] = [], idx: number[] = []
+  for (let i = 0; i < RINGS; i++) {
+    const u = i / (RINGS - 1) // 0 posterior tip -> 1 anterior collar
+    const z = -1.42 + u * 2.80
+    // heart-shaped width profile: widest at shoulders u=0.68, tapering to point at u=0
+    const wHeart = 1.22 * Math.sqrt(Math.max(0, u)) * (1 - 0.22 * u) * (1 + 0.15 * Math.sin(u * Math.PI))
+    const hDome = 0.52 * Math.sin(Math.pow(u, 0.65) * Math.PI * 0.95)
+    for (let j = 0; j <= RAD; j++) {
+      const v = j / RAD
+      const a = (v - 0.5) * Math.PI // -pi/2 to +pi/2
+      const ca = Math.cos(a), sa = Math.sin(a)
+      const keel = 1 + 0.08 * Math.pow(Math.max(0, ca), 4.0)
+      const x = sa * wHeart
+      const collarDip = (u > 0.85) ? -0.12 * Math.pow((u - 0.85) / 0.15, 2) * Math.max(0, ca) : 0
+      const y = hDome * ca * keel
+      pos.push(x, y, z + collarDip)
+      uvs.push(v, u)
+    }
+  }
+  for (let i = 0; i < RINGS - 1; i++) {
+    for (let j = 0; j < RAD; j++) {
+      const a0 = i * (RAD + 1) + j, b0 = a0 + 1
+      const a1 = (i + 1) * (RAD + 1) + j, b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
+  const shellGeo = new THREE.BufferGeometry()
+  shellGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  shellGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  shellGeo.setIndex(idx)
+  shellGeo.computeVertexNormals()
+
+  const shell = new THREE.Mesh(shellGeo, shellMat)
   group.add(shell)
+
   // marginal rim around the shell edge
-  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.06, 0.13, 8, 26), shellMat)
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.12, 8, 28), shellMat)
   rim.rotation.x = Math.PI / 2
-  rim.scale.set(1.1, 1.36, 1)
-  rim.position.y = -0.02
+  rim.scale.set(1.08, 1.34, 1)
+  rim.position.set(0, -0.02, -0.05)
   group.add(rim)
+
   // plastron (belly plate)
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.94, 14, 8), plastronMat)
-  belly.scale.set(1.0, 0.26, 1.24)
-  belly.position.y = -0.16
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.96, 16, 8), plastronMat)
+  belly.scale.set(0.98, 0.24, 1.26)
+  belly.position.set(0, -0.15, -0.05)
   group.add(belly)
 
   // neck + head + parrot beak
-  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.21, 0.6, 9), skinMat)
-  neck.position.set(0, 0.08, 1.42)
-  neck.rotation.x = 1.15
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.22, 0.65, 10), skinMat)
+  neck.position.set(0, 0.10, 1.42)
+  neck.rotation.x = 1.18
   group.add(neck)
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 9), skinMat)
-  head.scale.set(0.88, 0.76, 1.18)
-  head.position.set(0, 0.3, 1.68)
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), skinMat)
+  head.scale.set(0.88, 0.78, 1.20)
+  head.position.set(0, 0.32, 1.72)
   group.add(head)
-  // two stacked beak lobes → the parrot-beak cleft
-  const beakTop = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 6), skinMat)
-  beakTop.scale.set(1.15, 0.5, 1.1)
-  beakTop.position.set(0, 0.31, 1.96)
+
+  // Parrot-like hooked beak (rhamphotheca)
+  const beakTop = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.32, 8), skinMat)
+  beakTop.rotation.x = -Math.PI / 2 - 0.25 // hooked downward
+  beakTop.position.set(0, 0.26, 2.08)
   group.add(beakTop)
-  const beakBot = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 6), skinMat)
-  beakBot.scale.set(1.0, 0.42, 0.95)
-  beakBot.position.set(0, 0.2, 1.93)
+
+  const beakBot = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.22), skinMat)
+  beakBot.position.set(0, 0.18, 1.95)
   group.add(beakBot)
-  // eyes — dark ball + glint, ringed by the skin texture
+
+  // eyes
   for (const side of [1, -1] as const) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.055, 8, 6), mkMat('#151009', 0.35))
-    eye.position.set(side * 0.2, 0.41, 1.76)
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.058, 8, 6), mkMat('#151009', 0.35))
+    eye.position.set(side * 0.21, 0.42, 1.78)
     group.add(eye)
-    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.016, 5, 4), mkMat('#ffffff', 0.2))
-    glint.position.set(side * 0.24, 0.44, 1.8)
+    const glint = new THREE.Mesh(new THREE.SphereGeometry(0.018, 5, 4), mkMat('#ffffff', 0.2))
+    glint.position.set(side * 0.25, 0.45, 1.82)
     group.add(glint)
   }
 
-  // paddle flippers — pivoted at the shoulder, tapered, cambered
+  // paddle flippers
   const flippers: THREE.Mesh[] = []
   const mkFlip = (x: number, z: number, len: number, rotZ: number, rotY: number) => {
     const f = new THREE.Mesh(buildFlipper(len), skinMat)
@@ -399,59 +436,334 @@ function buildTurtle(): { group: THREE.Group; flippers: THREE.Mesh[]; mats: THRE
     flippers.push(f)
     group.add(f)
   }
-  mkFlip(1.05, 0.82, 1.75, -0.95, 0.38)     // front pair — long & swept
-  mkFlip(-1.05, 0.82, 1.75, 0.95, -0.38)
-  mkFlip(0.9, -0.95, 1.05, -1.12, -0.3)     // rear pair — shorter
-  mkFlip(-0.9, -0.95, 1.05, 1.12, 0.3)
-  // tiny tail stub
-  const tailStub = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.3, 6), skinMat)
-  tailStub.rotation.x = Math.PI / 2 + 0.5
-  tailStub.position.set(0, -0.02, -1.42)
+  mkFlip(1.10, 0.82, 1.85, -0.95, 0.38)     // front pair — long hydrofoils
+  mkFlip(-1.10, 0.82, 1.85, 0.95, -0.38)
+  mkFlip(0.88, -0.95, 1.05, -1.12, -0.3)   // rear pair — rudders
+  mkFlip(-0.88, -0.95, 1.05, 1.12, 0.3)
+
+  // tail stub
+  const tailStub = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.32, 6), skinMat)
+  tailStub.rotation.x = Math.PI / 2 + 0.45
+  tailStub.position.set(0, -0.02, -1.45)
   group.add(tailStub)
 
   group.scale.setScalar(1.6)
   return { group, flippers, mats }
 }
 
-// ---------- shark silhouette ----------
-function buildPredator(): { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial } {
+// ---------- realistic predator shark ----------
+function buildPredator(): { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial } {
   const parts: THREE.BufferGeometry[] = []
-  const addTri = (verts: number[]) => {
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(verts), 3))
-    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(verts.length / 3 * 2), 2))
-    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(verts.length).fill(1), 3))
-    g.computeVertexNormals()
-    parts.push(g)
+
+  // 1. Shark Hull — aerodynamic fusiform predator body with predatory snout,
+  // arched back, gills girth, caudal keels, and sealed ends.
+  const RINGS = 32, RAD = 28
+  const L = 4.2
+  const profile = [0.05, 0.09, 0.16, 0.28, 0.40, 0.46, 0.48, 0.47, 0.42, 0.30, 0.16, 0.02]
+  const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+
+  const TOP_COLOR = new THREE.Color('#243547')
+  const BELLY_COLOR = new THREE.Color('#eef3f8')
+
+  const resample = (t: number) => {
+    const f = t * (profile.length - 1)
+    const i = Math.floor(f)
+    const fr = f - i
+    return profile[i] + (profile[Math.min(i + 1, profile.length - 1)] - profile[i]) * fr
   }
-  // fuselage — fusiform: ~6.8:1 length-to-height like a real shark
-  const body = new THREE.LatheGeometry(
-    [0.02, 0.22, 0.42, 0.5, 0.4, 0.16, 0.03].map((r, i, a) => new THREE.Vector2(r, -0.5 + i / (a.length - 1))),
-    12,
-  )
-  body.rotateX(Math.PI / 2)
-  body.scale(0.5, 0.5, 3.4)
-  body.setAttribute('color', new THREE.BufferAttribute(new Float32Array(body.attributes.position.count * 3).fill(1), 3))
-  parts.push(body)
-  // dorsal — swept back, plus a small second dorsal
-  addTri([0, 0.2, 0.9, 0, 1.02, -0.2, 0, 0.22, -0.75])
-  addTri([0, 0.18, -1.05, 0, 0.46, -1.42, 0, 0.18, -1.5])
-  // pectoral fins — long, swept back and down
-  addTri([0.16, -0.12, 0.8, 1.05, -0.52, -0.4, 0.18, -0.18, 0.3])
-  addTri([-0.16, -0.12, 0.8, -1.05, -0.52, -0.4, -0.18, -0.18, 0.3])
-  // caudal fin — two-lobed (longer upper lobe, like a real shark)
-  addTri([0, 0.04, -1.6, 0, 0.95, -2.75, 0, 0.12, -2.05])
-  addTri([0, 0.04, -1.6, 0, 0.12, -2.05, 0, -0.4, -2.35])
+
+  for (let i = 0; i < RINGS; i++) {
+    const t = i / (RINGS - 1)
+    const z = -2.3 + t * L
+    const r = resample(t)
+    const yCenter = t > 0.7 ? 0.09 * Math.pow((t - 0.7) / 0.3, 1.4) : 0
+
+    for (let j = 0; j <= RAD; j++) {
+      const u = j / RAD
+      const a = u * Math.PI * 2
+      const cy = -Math.cos(a) // -1 belly -> +1 back
+      const sx = Math.sin(a)
+      let x = sx * r * 1.05
+      let y = yCenter + cy * r
+
+      if (cy > 0) {
+        x *= 1 - 0.28 * Math.pow(cy, 1.5)
+      } else {
+        // Ventral mouth arching: mouth cavity under snout (t in 0.70 .. 0.88)
+        if (t >= 0.70 && t <= 0.88 && cy < -0.3) {
+          const mFactor = Math.sin(((t - 0.70) / 0.18) * Math.PI) * Math.pow(-cy, 1.3)
+          y += mFactor * 0.14
+          x *= 1 - mFactor * 0.25
+        }
+      }
+
+      // Horizontal caudal keels near the tail peduncle (t in 0.08 .. 0.24)
+      if (t >= 0.08 && t <= 0.24 && Math.abs(cy) < 0.35) {
+        const keelF = Math.sin(((t - 0.08) / 0.16) * Math.PI) * (1 - Math.abs(cy) / 0.35)
+        x *= 1 + keelF * 0.55
+      }
+
+      pos.push(x, y, z)
+      uvs.push(u, t)
+
+      const vertColor = new THREE.Color()
+      const shadeT = THREE.MathUtils.smoothstep(cy, -0.22, 0.28)
+      vertColor.copy(BELLY_COLOR).lerp(TOP_COLOR, shadeT)
+      cols.push(vertColor.r, vertColor.g, vertColor.b)
+    }
+  }
+
+  for (let i = 0; i < RINGS - 1; i++) {
+    for (let j = 0; j < RAD; j++) {
+      const a0 = i * (RAD + 1) + j, b0 = a0 + 1
+      const a1 = (i + 1) * (RAD + 1) + j, b1 = a1 + 1
+      idx.push(a0, b0, a1, b0, b1, a1)
+    }
+  }
+
+  // Rear cap (tail root at z=-2.3)
+  const rearCenter = pos.length / 3
+  pos.push(0, 0, -2.3)
+  uvs.push(0.5, 0)
+  cols.push(TOP_COLOR.r, TOP_COLOR.g, TOP_COLOR.b)
+  for (let j = 0; j < RAD; j++) idx.push(rearCenter, j + 1, j)
+
+  // Front cap (snout tip at z=1.8)
+  const frontCenter = pos.length / 3
+  pos.push(0, 0.09, 1.8)
+  uvs.push(0.5, 1)
+  cols.push(TOP_COLOR.r, TOP_COLOR.g, TOP_COLOR.b)
+  const lastBase = (RINGS - 1) * (RAD + 1)
+  for (let j = 0; j < RAD; j++) idx.push(frontCenter, lastBase + j, lastBase + j + 1)
+
+  const bodyGeo = new THREE.BufferGeometry()
+  bodyGeo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
+  bodyGeo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
+  bodyGeo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  bodyGeo.setIndex(idx)
+  bodyGeo.computeVertexNormals()
+  parts.push(bodyGeo)
+
+  // 2. Razor-Sharp Teeth / Fangs (Mulut & Taring Tajam)
+  const palate = new THREE.SphereGeometry(0.24, 10, 8)
+  palate.scale(0.85, 0.45, 1.1)
+  palate.translate(0, -0.16, 1.12)
+  const palCols = new Float32Array(palate.attributes.position.count * 3)
+  for (let k = 0; k < palate.attributes.position.count; k++) {
+    palCols[k * 3] = 0.08; palCols[k * 3 + 1] = 0.02; palCols[k * 3 + 2] = 0.03
+  }
+  palate.setAttribute('color', new THREE.BufferAttribute(palCols, 3))
+  parts.push(palate)
+
+  // Upper Jaw Teeth (14 sharp white conical fangs)
+  for (let k = 0; k < 14; k++) {
+    const phi = ((k / 13) * 2 - 1) * 0.95
+    const cosP = Math.cos(phi), sinP = Math.sin(phi)
+    const tx = sinP * 0.185
+    const tz = 1.38 - (1 - cosP) * 0.32
+    const ty = -0.10 + (1 - cosP) * 0.03
+    const tooth = new THREE.ConeGeometry(0.018, 0.075, 4)
+    tooth.rotateX(Math.PI - 0.3)
+    tooth.rotateZ(-sinP * 0.35)
+    tooth.translate(tx, ty, tz)
+    const tCol = new Float32Array(tooth.attributes.position.count * 3).fill(1)
+    tooth.setAttribute('color', new THREE.BufferAttribute(tCol, 3))
+    parts.push(tooth)
+  }
+
+  // Lower Jaw Teeth (12 sharp white conical fangs pointing upward)
+  for (let k = 0; k < 12; k++) {
+    const phi = ((k / 11) * 2 - 1) * 0.88
+    const cosP = Math.cos(phi), sinP = Math.sin(phi)
+    const tx = sinP * 0.155
+    const tz = 1.28 - (1 - cosP) * 0.28
+    const ty = -0.22 + (1 - cosP) * 0.02
+    const tooth = new THREE.ConeGeometry(0.016, 0.068, 4)
+    tooth.rotateX(0.25)
+    tooth.rotateZ(-sinP * 0.3)
+    tooth.translate(tx, ty, tz)
+    const tCol = new Float32Array(tooth.attributes.position.count * 3).fill(1)
+    tooth.setAttribute('color', new THREE.BufferAttribute(tCol, 3))
+    parts.push(tooth)
+  }
+
+  // 3. 5 Gill Slits on each flank
+  for (const s of [1, -1] as const) {
+    for (let g = 0; g < 5; g++) {
+      const gz = 0.58 + g * 0.075
+      const slit = new THREE.CylinderGeometry(0.006, 0.006, 0.22 - g * 0.015, 4)
+      slit.rotateZ(s * 0.15)
+      slit.translate(s * 0.44, 0.02, gz)
+      const sCol = new Float32Array(slit.attributes.position.count * 3)
+      for (let k = 0; k < slit.attributes.position.count; k++) {
+        sCol[k * 3] = 0.07; sCol[k * 3 + 1] = 0.10; sCol[k * 3 + 2] = 0.14
+      }
+      slit.setAttribute('color', new THREE.BufferAttribute(sCol, 3))
+      parts.push(slit)
+    }
+  }
+
+  // 4. Predatory Eyes
+  for (const s of [1, -1] as const) {
+    const eye = new THREE.SphereGeometry(0.048, 8, 6)
+    eye.translate(s * 0.24, 0.11, 1.45)
+    const eCol = new Float32Array(eye.attributes.position.count * 3)
+    for (let k = 0; k < eye.attributes.position.count; k++) {
+      eCol[k * 3] = 0.04; eCol[k * 3 + 1] = 0.06; eCol[k * 3 + 2] = 0.08
+    }
+    eye.setAttribute('color', new THREE.BufferAttribute(eCol, 3))
+    parts.push(eye)
+
+    const glint = new THREE.SphereGeometry(0.014, 5, 4)
+    glint.translate(s * 0.27, 0.13, 1.48)
+    const gCol = new Float32Array(glint.attributes.position.count * 3).fill(1)
+    glint.setAttribute('color', new THREE.BufferAttribute(gCol, 3))
+    parts.push(glint)
+  }
+
+  // 5. Classic First Dorsal Fin (tall triangular swept foil with notch)
+  const dorsalGeo = new THREE.BufferGeometry()
+  const dPos = [
+    0, 0.46, 0.65,
+    0, 1.25, -0.05,
+    0, 0.40, -0.55,
+    0, 0.48, -0.42,
+  ]
+  const dIdx = [0, 1, 3, 3, 1, 2]
+  dorsalGeo.setAttribute('position', new THREE.Float32BufferAttribute(dPos, 3))
+  dorsalGeo.setIndex(dIdx)
+  dorsalGeo.computeVertexNormals()
+  const dCol = new Float32Array(4 * 3)
+  for (let k = 0; k < 4; k++) {
+    dCol[k * 3] = TOP_COLOR.r; dCol[k * 3 + 1] = TOP_COLOR.g; dCol[k * 3 + 2] = TOP_COLOR.b
+  }
+  dorsalGeo.setAttribute('color', new THREE.BufferAttribute(dCol, 3))
+  parts.push(dorsalGeo)
+
+  // 6. Second Dorsal and Anal Fin
+  const d2Geo = new THREE.BufferGeometry()
+  d2Geo.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, 0.20, -1.25,
+    0, 0.52, -1.55,
+    0, 0.16, -1.68,
+  ], 3))
+  d2Geo.setIndex([0, 1, 2])
+  d2Geo.computeVertexNormals()
+  d2Geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9).fill(TOP_COLOR.r), 3))
+  parts.push(d2Geo)
+
+  const analGeo = new THREE.BufferGeometry()
+  analGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+    0, -0.16, -1.35,
+    0, -0.44, -1.62,
+    0, -0.14, -1.72,
+  ], 3))
+  analGeo.setIndex([0, 1, 2])
+  analGeo.computeVertexNormals()
+  analGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9).fill(BELLY_COLOR.r), 3))
+  parts.push(analGeo)
+
+  // 7. Pectoral Fins (Sickle Hydrofoils)
+  for (const s of [1, -1] as const) {
+    const pecGeo = new THREE.BufferGeometry()
+    const pVerts = [
+      s * 0.40, -0.12, 0.72,
+      s * 1.48, -0.58, -0.28,
+      s * 0.38, -0.24, 0.15,
+      s * 0.88, -0.38, 0.05,
+    ]
+    const pIndices = s > 0 ? [0, 1, 3, 0, 3, 2] : [0, 3, 1, 0, 2, 3]
+    pecGeo.setAttribute('position', new THREE.Float32BufferAttribute(pVerts, 3))
+    pecGeo.setIndex(pIndices)
+    pecGeo.computeVertexNormals()
+    const pCol = new Float32Array(4 * 3)
+    for (let k = 0; k < 4; k++) {
+      const c = k === 0 || k === 1 ? TOP_COLOR : BELLY_COLOR
+      pCol[k * 3] = c.r; pCol[k * 3 + 1] = c.g; pCol[k * 3 + 2] = c.b
+    }
+    pecGeo.setAttribute('color', new THREE.BufferAttribute(pCol, 3))
+    parts.push(pecGeo)
+
+    // Pelvic fin
+    const pelGeo = new THREE.BufferGeometry()
+    const pelVerts = [
+      s * 0.20, -0.22, -0.52,
+      s * 0.58, -0.42, -0.85,
+      s * 0.18, -0.20, -0.88,
+    ]
+    pelGeo.setAttribute('position', new THREE.Float32BufferAttribute(pelVerts, 3))
+    pelGeo.setIndex(s > 0 ? [0, 1, 2] : [0, 2, 1])
+    pelGeo.computeVertexNormals()
+    pelGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(9).fill(BELLY_COLOR.r), 3))
+    parts.push(pelGeo)
+  }
+
+  // 8. Heterocercal Caudal Fin (two-lobed, long upper lobe with notch)
+  const tailGeo = new THREE.BufferGeometry()
+  const tailVerts = [
+    0, 0.04, -2.15,
+    0, 1.15, -3.35,
+    0, 0.88, -3.15,
+    0, 0.18, -2.55,
+    0, -0.58, -2.78,
+  ]
+  const tailIndices = [
+    0, 1, 2,
+    0, 2, 3,
+    0, 3, 4,
+  ]
+  tailGeo.setAttribute('position', new THREE.Float32BufferAttribute(tailVerts, 3))
+  tailGeo.setIndex(tailIndices)
+  tailGeo.computeVertexNormals()
+  const tCols = new Float32Array(5 * 3)
+  for (let k = 0; k < 5; k++) {
+    const c = k <= 3 ? TOP_COLOR : BELLY_COLOR
+    tCols[k * 3] = c.r; tCols[k * 3 + 1] = c.g; tCols[k * 3 + 2] = c.b
+  }
+  tailGeo.setAttribute('color', new THREE.BufferAttribute(tCols, 3))
+  parts.push(tailGeo)
+
+  // Merge all geometries
   const merged = mergeGeometries(
-    parts.map((p) => (p.index ? p.toNonIndexed() : p)),
+    parts.map((p) => {
+      const g = p.index ? p.toNonIndexed() : p
+      if (!g.attributes.uv) {
+        g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2))
+      }
+      return g
+    }),
     false,
   )!
-  const mat = new THREE.MeshBasicMaterial({
-    color: '#0a1c2c', transparent: true, opacity: 0, side: THREE.DoubleSide, fog: true,
-    depthWrite: false,
+
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.36,
+    metalness: 0.22,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
   })
+
+  // Hook shark spine wave swimming motion
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = sharedUniforms.uTime
+    shader.vertexShader = `
+      uniform float uTime;
+    ` + shader.vertexShader
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
+      #include <begin_vertex>
+      {
+        float wave = sin(uTime * 2.3 - position.z * 0.75);
+        float tailEnv = clamp((0.55 - position.z) / 2.7, 0.0, 1.0);
+        transformed.x += wave * 0.19 * (tailEnv * tailEnv);
+        transformed.x += sin(uTime * 1.15) * 0.035 * (1.0 - tailEnv);
+      }
+    `)
+  }
+  mat.customProgramCacheKey = () => 'shark-swim-v2'
+
   const mesh = new THREE.Mesh(merged, mat)
-  mesh.scale.setScalar(1.3)
+  mesh.scale.setScalar(1.2)
   mesh.frustumCulled = false
   return { mesh, mat }
 }
@@ -589,21 +901,28 @@ export class SpecialCreatures {
         v.obj.rotation.z = Math.sin(time * 0.4) * 0.04
         for (let i = 0; i < this.turtleFlippers.length; i++) {
           const front = i < 2
+          const side = i % 2 === 0 ? 1 : -1
           const phase = front ? (i % 2) * Math.PI : (i % 2) * Math.PI + 0.9
-          this.turtleFlippers[i].rotation.x =
-            Math.sin(time * (front ? 1.25 : 0.9) + phase) * (front ? 0.55 : 0.35) - 0.12
+          const stroke = Math.sin(time * (front ? 1.2 : 0.85) + phase)
+          if (front) {
+            // 3-axis underwater flight: flapping Z + feathering Y + rowing X
+            this.turtleFlippers[i].rotation.z = (side * -0.92) + stroke * 0.42 * side
+            this.turtleFlippers[i].rotation.y = (side * 0.35) + Math.cos(time * 1.2 + phase) * 0.26 * side
+            this.turtleFlippers[i].rotation.x = stroke * 0.28 - 0.10
+          } else {
+            this.turtleFlippers[i].rotation.x = stroke * 0.22 - 0.08
+          }
         }
       } else {
-        // shark: straight pass — seed 0 sweeps the deep north, seed 1
-        // cuts through the pufferfish anchor zone, seed 2 grazes the
-        // curious cluster that drifts near the camera
+        // shark: straight pass with predatory yaw & banking
         const zLine = v.pathSeed === 0 ? -55 : v.pathSeed === 1 ? -12 : 6
         const yLine = v.pathSeed === 0 ? 1.5 + (v.pathSeed % 2) * 3 : v.pathSeed === 1 ? -0.4 : 0.6
         const dir = v.pathSeed === 1 ? -1 : 1
         const x = dir * (-50 + progress * 100)
         v.obj.position.set(x, yLine + Math.sin(progress * Math.PI) * 1.2, zLine)
-        v.obj.rotation.y = dir > 0 ? Math.PI / 2 : -Math.PI / 2
-        v.obj.rotation.x = Math.sin(time * 2 + v.pathSeed * 3) * 0.015
+        v.obj.rotation.y = (dir > 0 ? Math.PI / 2 : -Math.PI / 2) + Math.sin(time * 2.3 + v.pathSeed * 2.1) * 0.06
+        v.obj.rotation.z = Math.sin(time * 1.5 + v.pathSeed) * 0.04 * (dir > 0 ? 1 : -1)
+        v.obj.rotation.x = Math.sin(time * 2 + v.pathSeed * 3) * 0.02
       }
     }
   }
