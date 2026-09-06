@@ -890,3 +890,21 @@ Stage Summary:
 - Model penyu dan hiu kini memiliki geometri volumetrik 3D sejati dengan lekukan aerofoil alami, bukan poligon tipis.
 - Sayap penyu meliuk lentur membelah air secara aeroelastik dan tempurung memiliki relief perisai fisik 3D.
 - Hiu berpenampilan predator gagah dengan sirip 3D berlekuk, mulut bergusi dan deretan taring tajam berseri.
+
+---
+Task ID: 32
+Agent: main (Super Z)
+Task: "cek git, pull dari remote, dan review perubahan serta tentukan langkah selanjutnya"
+
+Work Log:
+- Cek git lokal: branch main di b00c304 (Task 26 texture crop fix), tanpa remote origin terpasang (PAT tidak disimpan di disk sesuai kebijakan).
+- Fetch one-off URL github.com/Muh-Adib/ocean-camera.git: remote lebih maju 6 commit (fast-forward, tanpa divergensi/konflik).
+- Buang trivial local change (file mode change 100644→100755 pada FishSheetData.ts) agar pull mulus.
+- git merge --ff-only: b00c304 → 76e49ef. 11 file berubah (+2068/-303), 2 file baru: FishSilhouetteMask.ts, TemplateRegistration.ts, + template-ikan.svg.
+- Verifikasi: bunx tsc --noEmit bersih (0 error proyek).
+- Restart node server.js (proses lama dari Sep05 belum membawa fix HMR WebSocket dari Task 27); setelah restart localhost:3000 merespons 200.
+
+Stage Summary:
+- Sinkronisasi selesai: lokal kini identik dengan remote 76e49ef.
+- Task 27-31 dari mesin lain sudah aktif: template-guided silhouette scan (100% rejection background), fix HMR/auto-reload, locomosi renang alami + sirip simetris, hiu/penyu/buntal high-fidelity volumetrik.
+- Fix HMR kini aktif di proses dev berjalan — koneksi local tidak lagi putus-putus/auto-reload.
