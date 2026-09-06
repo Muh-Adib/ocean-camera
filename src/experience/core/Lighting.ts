@@ -17,16 +17,16 @@ export class Lighting {
   private lightEnergy = { value: 1 }
 
   constructor(scene: THREE.Scene) {
-    this.sun = new THREE.DirectionalLight('#c8ecff', 3.0)
+    this.sun = new THREE.DirectionalLight('#dffaff', 3.3)
     this.sun.position.set(6, 42, 8)
     this.sun.castShadow = false
     scene.add(this.sun)
 
-    this.ambient = new THREE.HemisphereLight('#a8dce8', '#0d2b3e', 1.0)
+    this.ambient = new THREE.HemisphereLight('#bceef2', '#155a70', 1.15)
     scene.add(this.ambient)
 
     // faint fill from the front so fish bellies never go fully black
-    const fill = new THREE.DirectionalLight('#3388aa', 0.7)
+    const fill = new THREE.DirectionalLight('#3fa8c8', 0.65)
     fill.position.set(-8, -4, 24)
     scene.add(fill)
 
@@ -81,9 +81,10 @@ export class Lighting {
       const geo = new THREE.PlaneGeometry(w, h, 1, 1)
       const m = mat()
       const mesh = new THREE.Mesh(geo, m)
-      const x = rand(-34, 34)
-      const z = rand(-58, 6)
-      mesh.position.set(x, 20 - h * 0.42, z)
+      // ring the whole arena with light shafts so every heading gets rays
+      const a = (i / count) * Math.PI * 2 + rand(-0.25, 0.25)
+      const r = rand(4, 52)
+      mesh.position.set(Math.cos(a) * r, 20 - h * 0.42, -20 + Math.sin(a) * r)
       mesh.rotation.y = rand(0, Math.PI)
       mesh.rotation.z = rand(-0.16, 0.16)
       mesh.renderOrder = 5
@@ -94,9 +95,9 @@ export class Lighting {
     this.raysCreated = count
   }
 
-  /** Animated caustic sheet hovering just above the seabed */
+  /** Animated caustic sheet hovering just above the seabed — full 360° ring */
   buildCaustics() {
-    const geo = new THREE.PlaneGeometry(150, 130, 1, 1)
+    const geo = new THREE.PlaneGeometry(235, 235, 1, 1)
     geo.rotateX(-Math.PI / 2)
     const mat = new THREE.ShaderMaterial({
       transparent: true,
@@ -134,17 +135,17 @@ export class Lighting {
         }
         void main() {
           float t = uTime * 0.55;
-          float c = caustic(vUv * 2.6 + vec2(t * 0.06, t * 0.045), t);
+          float c = caustic(vUv * 22.0 + vec2(t * 0.06, t * 0.045), t);
           // fade toward the plane edges and with depth
-          float edge = smoothstep(0.0, 0.18, vUv.x) * smoothstep(1.0, 0.82, vUv.x)
-                     * smoothstep(0.0, 0.2, vUv.y) * smoothstep(1.0, 0.8, vUv.y);
-          float a = c * edge * uOpacity * (0.55 + uEnergy * 0.65);
-          vec3 col = vec3(0.5, 0.9, 1.05) * a;
+          float edge = smoothstep(0.0, 0.3, vUv.x) * smoothstep(1.0, 0.7, vUv.x)
+                     * smoothstep(0.0, 0.3, vUv.y) * smoothstep(1.0, 0.7, vUv.y);
+          float a = c * edge * uOpacity * (0.6 + uEnergy * 0.7);
+          vec3 col = vec3(0.55, 0.97, 1.08) * a * 0.95;
           gl_FragColor = vec4(col, a);
         }`,
     })
     const plane = new THREE.Mesh(geo, mat)
-    plane.position.set(0, SEABED_Y + 1.35, -22)
+    plane.position.set(0, SEABED_Y + 1.3, -20)
     plane.renderOrder = 4
     this.group.add(plane)
     this.causticMat = mat

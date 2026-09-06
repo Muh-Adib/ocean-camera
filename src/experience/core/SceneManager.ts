@@ -5,8 +5,8 @@ import * as THREE from 'three'
 import { PerformanceManager } from './PerformanceManager'
 import { sharedUniforms } from './sharedUniforms'
 
-const COLOR_DEEP = new THREE.Color('#02111f')
-const FOG_COLOR = new THREE.Color('#07293f')
+const COLOR_DEEP = new THREE.Color('#0a6e86')
+const FOG_COLOR = new THREE.Color('#25b2c6')
 
 export class SceneManager {
   renderer: THREE.WebGLRenderer
@@ -33,8 +33,8 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    // lighter fog than the old lagoon — the open ocean is worth seeing
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.016)
+    // bright lagoon haze — the reef reads clearly to ~90 m in every direction
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0132)
     this.scene.fog = this.fog
 
     // ---- camera ----
@@ -58,17 +58,17 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap))
   }
 
-  /** Deep-water gradient dome: darker below, teal light above */
+  /** Bright-lagoon gradient dome: glowing turquoise above, cyan depth below */
   buildBackgroundDome() {
-    const geo = new THREE.SphereGeometry(160, 24, 18)
+    const geo = new THREE.SphereGeometry(200, 24, 18)
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
       uniforms: {
-        uTop: { value: new THREE.Color('#10688c') },
-        uMid: { value: new THREE.Color('#093c58') },
-        uBottom: { value: new THREE.Color('#010a14') },
+        uTop: { value: new THREE.Color('#a8f0ee') },
+        uMid: { value: new THREE.Color('#2fb9cc') },
+        uBottom: { value: new THREE.Color('#0a5f76') },
         uEnergy: sharedUniforms.uEnergy,
       },
       vertexShader: /* glsl */`

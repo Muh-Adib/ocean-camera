@@ -41,13 +41,13 @@ export class Seabed {
     const pos = geo.attributes.position as THREE.BufferAttribute
     const colors = new Float32Array(pos.count * 3)
 
-    const sandA = new THREE.Color('#c8b58c')
-    const sandB = new THREE.Color('#9d8a67')
-    const sandDeep = new THREE.Color('#5f6250')
-    const kelpSand = new THREE.Color('#8a8a5e')     // olive drift under the kelp forest
-    const canyonSand = new THREE.Color('#54523f')   // shadowed canyon floor
-    const flatSand = new THREE.Color('#dbc9a0')     // bright shell-rich flats
-    const northSand = new THREE.Color('#6a7480')    // cold silty north plain
+    const sandA = new THREE.Color('#d8caa6')
+    const sandB = new THREE.Color('#c2b28c')
+    const sandDeep = new THREE.Color('#7e988f')
+    const kelpSand = new THREE.Color('#9a9a70')     // olive drift under the kelp forest
+    const canyonSand = new THREE.Color('#6a6852')   // shadowed canyon floor
+    const flatSand = new THREE.Color('#e2d4ac')     // bright shell-rich flats
+    const northSand = new THREE.Color('#7d95a0')    // cold silty north plain
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
@@ -60,7 +60,7 @@ export class Seabed {
       const t = (noise2(x * 0.08, n * 0.08) + 1) * 0.5
       const c = sandA.clone().lerp(sandB, t)
       const depthT = THREE.MathUtils.clamp((-worldZ - 20) / 75, 0, 1)
-      c.lerp(sandDeep, depthT * 0.8)
+      c.lerp(sandDeep, depthT * 0.55)
 
       const kelpT = THREE.MathUtils.clamp((-x - 26) / 22, 0, 1) * THREE.MathUtils.clamp((-worldZ - 26) / 22, 0, 1)
       c.lerp(kelpSand, kelpT * 0.5)

@@ -15,6 +15,7 @@ import { sharedUniforms } from './core/sharedUniforms'
 import { Seabed } from './environment/Seabed'
 import { RockSystem } from './environment/Rocks'
 import { CoralSystem } from './environment/CoralSystem'
+import { ReefArena } from './environment/ReefArena'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
@@ -89,11 +90,14 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const seabed = new Seabed(sceneMgr.scene, cfg.pebbleCount)
   const rocks = new RockSystem(sceneMgr.scene, seabed.heightAt, 64)
   const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity)
+  // the 360° coral colosseum — a reef wall around the sandy clearing so
+  // every heading (visitors circle the room) has full scenery
+  const arena = new ReefArena(sceneMgr.scene, seabed.heightAt)
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles]
+  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...arena.obstacles]
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
@@ -103,7 +107,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
 
   // ---------------- fish ----------------
-  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
+  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])
   const creatures = new SpecialCreatures(sceneMgr.scene)
   const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
@@ -135,7 +139,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- free swim (open-world exploration) ----------------
   const swim = new SwimController(sceneMgr.canvas, seabed.heightAt, {
-    x: 74, minZ: -96, maxZ: 18, maxY: 11.5, floorPad: 0.7,
+    radius: 94, centerX: 0, centerZ: -20, maxY: 11.5, floorPad: 0.7,
   })
   swim.capturePose = () => cameraRig.snapshotSwim()
   swim.onChange = (on) => {
@@ -452,6 +456,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
     fishCount: () => fish.count(),
+    arena: () => arena.stats(),
     swimMode: () => swim.active,
     forceShark: () => creatures.triggerPredator(),
     forceTurtle: () => creatures.triggerTurtle(),

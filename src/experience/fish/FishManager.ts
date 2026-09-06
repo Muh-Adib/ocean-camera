@@ -70,6 +70,19 @@ const SCHOOL_DEFS: SchoolDef[] = [
   // Zone G — the northern spires
   { species: 'angelfish', morph: 0, count: 4, anchor: [12, 2, -72], spawnRadius: 4, params: { maxSpeed: 1.5, cohW: 0.5, wanderW: 1.6 }, scale: [1.1, 1.4], response: 0.7 },
   { species: 'pufferfish', morph: 0, count: 3, anchor: [-14, -0.5, -58], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.2], response: 1.3 },
+  // Zone H — the 360° arena: residents all around the reef ring so every
+  // heading (visitors walk a full circle) has life in view
+  { species: 'tropical', morph: 0, count: 14, anchor: [10, 2.5, 26], spawnRadius: 5, params: { maxSpeed: 3.5, perceptionR: 3.6 }, scale: [0.65, 1.0], response: 1.15 },
+  { species: 'tropical', morph: 3, count: 12, anchor: [-24, 3, 18], spawnRadius: 4.5, params: { maxSpeed: 3.3 }, scale: [0.6, 0.95], response: 1.15 },
+  { species: 'tropical', morph: 1, count: 12, anchor: [44, 2, -34], spawnRadius: 5, params: { maxSpeed: 3.4 }, scale: [0.6, 0.95], response: 1.15 },
+  { species: 'tang', morph: 0, count: 10, anchor: [30, 3, 14], spawnRadius: 5.5, params: { maxSpeed: 2.1, cohW: 0.9 }, scale: [1.15, 1.5], response: 0.85 },
+  { species: 'minnow', morph: 0, count: 60, anchor: [-6, 5, 34], spawnRadius: 6, params: { maxSpeed: 4.2, maxForce: 12, sepW: 1.3, aliW: 2.6, cohW: 1.6, wanderW: 1.6, separationR: 0.65, perceptionR: 2.8 }, scale: [0.42, 0.58], response: 1.35 },
+  { species: 'butterflyfish', morph: 0, count: 8, anchor: [22, 1, 30], spawnRadius: 4.5, params: { maxSpeed: 1.9, cohW: 0.3, aliW: 0.25, wanderW: 3.0 }, scale: [0.95, 1.25], response: 0.8 },
+  { species: 'moorish', morph: 0, count: 4, anchor: [-40, 1, -6], spawnRadius: 4, params: { maxSpeed: 1.8, cohW: 0.55, wanderW: 2.0 }, scale: [1.1, 1.4], response: 0.85 },
+  { species: 'patin', morph: 0, count: 7, anchor: [-38, 3, 8], spawnRadius: 5, params: { maxSpeed: 2.0, cohW: 1.1, aliW: 1.0, wanderW: 2.0 }, scale: [1.2, 1.55], response: 0.95 },
+  { species: 'pufferfish', morph: 0, count: 3, anchor: [16, 0, 22], spawnRadius: 4, params: { maxSpeed: 1.15, cohW: 0.15, wanderW: 2.6, curiosity: 2.2 }, scale: [1.0, 1.2], response: 1.3 },
+  { species: 'angelfish', morph: 0, count: 4, anchor: [-14, 2, 26], spawnRadius: 4, params: { maxSpeed: 1.5, cohW: 0.5, wanderW: 1.6 }, scale: [1.1, 1.4], response: 0.7 },
+  { species: 'squirrel', morph: 0, count: 6, anchor: [8, -8, 28], spawnRadius: 3.5, params: { maxSpeed: 1.5, homeStrength: 1.2, homeRadius: 7, cohW: 0.4, wanderW: 3.0 }, scale: [1.0, 1.25], response: 0.75 },
 ]
 
 interface Entry {

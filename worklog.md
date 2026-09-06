@@ -936,3 +936,26 @@ Stage Summary:
 - Folder scanner pameran: pilih folder sekali → setiap scan baru otomatis jadi ikan di kolam sesi aktif, hands-free.
 - Control panel ditata ulang: pills vitals, FISH STUDIO 4 seksi, PROJECT collapsible, status bar.
 - logo.svg kini jadi favicon + app icon (SVG + PNG 180/512).
+
+---
+Task ID: 34
+Agent: main (Super Z)
+Task: "buat environment menjadi seperti pada gambar (referensi cam01-04 + wireframe Maya), bentuk 3D detail, dan view 360 derajat karena user berkeliling"
+
+Work Log:
+- Analisis 9 gambar referensi: render bawah laut dengan dinding karang melingkari clearing pasir; palet khas air turquoise-cyan terang, table coral sage/teal bertumpuk, bubble coral periwinkle-ungu, tube sponge magenta-ungu, finger coral cream, red whip merah, spiral whip cyan (khas!), rock dasar hijau lumut, caustics net di pasir.
+- MODUL BARU ReefArena.ts (environment/): "kolosseum karang 360°" berpusat (0,-20) — clearing pasir r<26; Ring A dinding karang utama r 26-34 (12 bommie, 4 celah pasir sebagai channel), Ring B sekunder r 47-57, Ring C siluet raksasa r 68-82 memudar ke kabut.
+- 7 keluarga karang baru prosedural sesuai referensi: makeTableStack (3-5 disc sage/teal bergelombang + trunk + strut), makeBubbleCoral (grape cluster 20-36 bola periwinkle/lavender), makeTubeSponge (3-7 tube magenta/ungu bibring gelap + disc hollow), makeFingerCoral (26-46 jari cream splayed), makeRedWhip (whip merah sinuous 2-4m), makeSpiralWhip (krozier spiral cyan — signature), makeAnemoneBig (lavender, host clownfish); greenMound mossy sebagai basis bommie.
+- Semua vertex-colored, merged per family (~9 draw call), shader sway pada whip/spiral/anemone; vertex haze: karang jauh dilerp ke biru horizon.
+- Stats arena: 51 table, 49 bubble, 52 sponge, 33 finger, 30 redwhip, 40 spiral, 9 anemone, 32 mound = 264 karang + 32 mound; obstacle collider untuk ikan.
+- ATMOSFER: SceneManager dome/fog dilerapkan turquoise terang (fog #25b2c6 d0.0132, dome top #a8f0ee mid #2fb9cc bottom #0a5f76, dome radius 200); Lighting: sun #dffaff 3.3, hemi #bceef2/#155a70 1.15, god rays dibagi melingkar r 4-52 sekitar pusat arena, caustics plane 235m penuh 360° dengan pattern halus (uv x22) agar menjadi net cahaya seperti referensi.
+- Seabed: pasir lebih terang hangat (#d8caa6/#c2b28c), tint dalam dikurangi 0.55; Rocks: tint hijau lumut #5f7a68.
+- SwimController: bounds melingkar BARU (radius 94 pusat (0,-20)) dengan slide di bibir arena; bounds box lama tetap didukung (field opsional).
+- FishManager: 12 sekolah baru Zone H mengelilingi arena (tropical gold/seafoam/blue, tang, minnow 60, butterfly, moorish, patin, puffer, angel, squirrel) di belakang/kiri/kanan kamera — ikan terlihat dari semua arah; anemone arena jadi home clownfish tambahan.
+- main.ts: wiring ReefArena + obstacle gabungan + QA hook __ocean.arena().
+- VERIFIKASI: bunx tsc --noEmit bersih; eslint 8 file bersih; agent-browser end-to-end: dive -> swim -> tp(0,3,-20) -> screenshot 4 arah (N/W/S/E via drag yaw 90°) — dinding karang tampak penuh di SEMUA arah; dev.log & page errors bersih.
+
+Stage Summary:
+- Dunia kini arena karang 360°: pengunjung yang berkeliling di ruang pamer melihat dinding karang padat bergaya referensi dari segala penjukuan, bukan hanya sisi depan kamera.
+- Palet & atmosfer mengikuti referensi: air turquoise terang, pasir terang bercaustic net, karang sage/ungu/magenta/cream/merah/cyan di atas mound hijau lumut.
+- Renang bebas kini dibatasi bibir arena melingkar (slide halus), ikan tersebar 360°.
