@@ -128,14 +128,18 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     : null
 
   // ---------------- screen vignette ----------------
-  // deep-blue depth-of-field feel: the arena's edges sink into shadow
-  const vignette = document.createElement('div')
-  vignette.style.cssText = [
-    'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:4',
-    'background:radial-gradient(ellipse 130% 125% at 50% 44%, rgba(1,10,20,0) 44%, rgba(1,10,20,0.38) 78%, rgba(1,9,18,0.62) 100%)',
-  ].join(';')
-  container.appendChild(vignette)
-  disposers.push(() => { vignette.remove() })
+  // deep-blue depth-of-field feel: the arena's edges sink into shadow.
+  // SKIPPED on the dedicated /output page — the projector gets the clean
+  // composite edge-to-edge (the in-world depth fade already carries the mood)
+  if (!outputOnly) {
+    const vignette = document.createElement('div')
+    vignette.style.cssText = [
+      'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:4',
+      'background:radial-gradient(ellipse 130% 125% at 50% 44%, rgba(1,10,20,0) 44%, rgba(1,10,20,0.38) 78%, rgba(1,9,18,0.62) 100%)',
+    ].join(';')
+    container.appendChild(vignette)
+    disposers.push(() => { vignette.remove() })
+  }
 
   // ---------------- fish ----------------
   const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])

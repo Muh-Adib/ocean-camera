@@ -1098,3 +1098,19 @@ Stage Summary:
 - 360 view kini BENAR-BENAR dipakai mengoreksi: QA camera (setView) hidup, dan hasil auditnya mengungkap + memperbaiki 4 cacat arah-arah: siluet hitam kertas → kabut biru dalam, zenit void → jendela cahaya Snell (bug normal terbalik), pasir putih → warm sand dalam, plus caustic menari di SELURUH permukaan karang dari segala arah.
 - 3 spesies baru berakar di semua ring (termasuk arc belakang kamera), palet koloni didiversifikasi — "tidak hanya depan, belakang pun penuh detail".
 - Arena kini sadar-tier (Stage 9): mobile/headless dapat budget ringan, desktop tetap 2.8M+ tris.
+
+---
+Task ID: 40
+Agent: main (Super Z)
+Task: "output canvas seharusnya full screen, saat ini output terpotong dan ada padding/margin hitam seharusnya full layar"
+
+Work Log:
+- AKAR MASALAH (3 lapis): (1) OutputManager.updateCamera memakai letterbox Math.min (contain) — rasio output canvas (1920×1080) vs rasio layar fisik (mis. 16:10 / proyektor 4:3) menghasilkan bar hitam atas-bawah; (2) preset default "flat-screen" meng-inset permukaan Main Screen ke 12%/10%/76%/80% kanvas — boot baru menampilkan margin hitam mengelilingi gambar APA PUN fit-mode-nya; (3) vignette CSS radial-gradient (screen-space) ikut menggelapkan tepi gambar di halaman /output.
+- SCREEN FIT MODE (OutputManager.updateCamera + ProjectionManager.screenFit): param baru 'contain' | 'cover' | 'stretch' — contain = letterbox lama (preview editor), cover = Math.max isi layar penuh aspek-asli crop tepi merata, stretch = frustum tepat 0..W × 0..H (peta output rect 1:1 ke layar, tanpa bar tanpa crop). Default SHOW = COVER; setting per-mesin (localStorage ocean-output-fit-v1, TIDAK ikut project — proyektor boleh beda rasio dari studio).
+- Tombol + kontrol: overlay /output dapat select FIT (COVER/STRETCH/CONTAIN) + tombol MATCH SCREEN (snap output canvas = window.innerWidth×innerHeight persis → pemetaan 1:1 piksel, nol crop nol distorsi); info line kini menampilkan mode fit; qaState + screenFit + output. Studio PROJECT tab "OUTPUT CANVAS & RATIO" juga dapat baris SCREEN FIT + MATCH SCREEN.
+- PRESET FULL-BLEED: flat-screen Main Screen kini rect(0,0,1,1) — gambar output = seluruh kanvas; inset bisa diatur manual via drag/numeric jika dinding fisik meminta.
+- VIGNETTE: tidak dibuat di mode outputOnly (main.ts) — proyektor menerima komposit bersih; depth-of-field tetap dari in-world fog/silhouette.
+- VERIFIKASI (agent-browser + analisis piksel PIL, viewport 1280×800 vs kanvas 1920×1080): stretch terukur bar 80/80/153/154 px = PERSIS prediksi teori utk surface inset preset lama (bukti kode fit benar); setelah clear storage + preset full-bleed + cover → nol bar di 8 tepi (FULLSCREEN OK); MATCH SCREEN → output 1280×800 ✓; studio live output (Enter) → FULLSCREEN OK 8 tepi; tsc bersih; eslint 6 file bersih; restart server membersihkan chunk basi saat diagnosis.
+
+Stage Summary:
+- Output proyeksi kini benar-benar full layar: cover default mematikan semua letterbox bar, preset full-bleed mematikan margin inset, vignette tidak lagi menggelapkan tepi /output, dan MATCH SCREEN memberikan opsi 1:1 piksel absolut. Editor preview tetap contain (overview utuh).

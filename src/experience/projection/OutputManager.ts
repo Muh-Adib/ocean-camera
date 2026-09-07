@@ -44,10 +44,32 @@ export class OutputManager {
     this.camera.position.set(0, 0, 5)
   }
 
-  /** fit the output space into the current view (letterbox) */
-  updateCamera(outputW: number, outputH: number, viewW: number, viewH: number) {
+  /**
+   * fit the output space into the current view.
+   *  - contain: letterbox (whole output visible, black bars) — editor previews
+   *  - cover:   fill the view, aspect-true, crop the overflow edges equally
+   *  - stretch: map the output rect across the ENTIRE view (no bars, no crop;
+   *             proportions distort when the aspects differ)
+   */
+  updateCamera(
+    outputW: number,
+    outputH: number,
+    viewW: number,
+    viewH: number,
+    fit: 'contain' | 'cover' | 'stretch' = 'contain',
+  ) {
     if (outputW <= 0 || outputH <= 0 || viewW <= 0 || viewH <= 0) return
-    const scale = Math.min(viewW / outputW, viewH / outputH)
+    if (fit === 'stretch') {
+      this.camera.left = 0
+      this.camera.right = outputW
+      this.camera.top = 0
+      this.camera.bottom = outputH
+      this.camera.updateProjectionMatrix()
+      return
+    }
+    const scale = fit === 'cover'
+      ? Math.max(viewW / outputW, viewH / outputH)
+      : Math.min(viewW / outputW, viewH / outputH)
     const halfW = viewW / scale / 2
     const halfH = viewH / scale / 2
     this.camera.left = outputW / 2 - halfW

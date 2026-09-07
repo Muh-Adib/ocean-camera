@@ -116,6 +116,18 @@ export interface ProjectionOutput {
   quality: QualityLevel // which hardware profile is active
 }
 
+/**
+ * How the composite output space maps onto the PHYSICAL screen showing it
+ * (per-machine display setting — the projector's aspect often differs from
+ * the studio's). Stored per browser, NOT inside the project.
+ *  - cover:   fill the screen completely, aspect-true, crop overflow edges
+ *  - stretch: fill the screen completely, map the output rect 1:1 onto the
+ *             screen (distorts when aspects differ — ideal once output size
+ *             matches the screen via MATCH SCREEN)
+ *  - contain: letterbox — whole output visible, black bars (editor previews)
+ */
+export type ScreenFit = 'contain' | 'cover' | 'stretch'
+
 /** resolved settings actually used by the render pipeline this frame */
 export interface ResolvedQuality {
   renderScale: number

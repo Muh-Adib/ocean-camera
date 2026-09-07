@@ -24,7 +24,7 @@ import { ScreenLink, cleanSessionId, type HandFrame } from '../remote/RemoteLink
 import { phoneOrigin } from '../remote/lanOrigin'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
-import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
 export interface ProjectionDeps {
@@ -51,6 +51,12 @@ const RELAY_HEARTBEAT = 4000
 const LIVE_FRESH_MS = 70000
 /** localStorage key for this browser's active show session */
 const TANK_SESSION_KEY = 'ocean-tank-session'
+/**
+ * per-MACHINE display setting: how the composite maps onto this screen
+ * (the projector's aspect often differs from the studio's — never synced)
+ */
+const SCREEN_FIT_KEY = 'ocean-output-fit-v1'
+const SCREEN_FITS: ScreenFit[] = ['contain', 'cover', 'stretch']
 
 export class ProjectionManager {
   /** studio open — the render pipeline is ours */
@@ -65,6 +71,12 @@ export class ProjectionManager {
   showFrustums = true
 
   output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced' }
+  /**
+   * how the live composite maps onto THIS screen. COVER is the show default:
+   * edge-to-edge picture with no black bars; the projector's screen is not
+   * always the same aspect as the configured output canvas.
+   */
+  screenFit: ScreenFit = 'cover'
 
   readonly surfaces = new SurfaceManager()
   private cameras: CameraManager
@@ -127,6 +139,10 @@ export class ProjectionManager {
   phoneOn = false
 
   constructor(private deps: ProjectionDeps) {
+    try {
+      const saved = localStorage.getItem(SCREEN_FIT_KEY) as ScreenFit | null
+      if (saved && SCREEN_FITS.includes(saved)) this.screenFit = saved
+    } catch { /* private mode — keep the default */ }
     this.cameras = new CameraManager(deps.sceneMgr.scene)
     this.outputMgr = new OutputManager(this.blend, this.calib)
     this.outputMgr.maxTexSize = Math.min(deps.sceneMgr.renderer.capabilities.maxTextureSize || 4096, 8192)
@@ -574,12 +590,20 @@ export class ProjectionManager {
             <option value="ultra">ULTRA</option>
           </select>
         </label>
+        <label class="pm-out-field">FIT
+          <select id="pm-out-fit" class="pm-select pm-select-sm">
+            <option value="cover">COVER — FULL SCREEN</option>
+            <option value="stretch">STRETCH — FULL SCREEN</option>
+            <option value="contain">CONTAIN — LETTERBOX</option>
+          </select>
+        </label>
         <label class="pm-out-field">PATTERN
           <select id="pm-out-pattern" class="pm-select pm-select-sm">
             ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
           </select>
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-match" title="Set the output canvas to this screen's exact resolution — 1:1 pixels">MATCH SCREEN</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
         ${missingSession
           ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'
@@ -601,6 +625,10 @@ export class ProjectionManager {
     el.querySelector('#pm-out-quality')?.addEventListener('change', (e) => {
       this.setQuality((e.target as HTMLSelectElement).value as QualityLevel)
     })
+    el.querySelector('#pm-out-fit')?.addEventListener('change', (e) => {
+      this.setScreenFit((e.target as HTMLSelectElement).value as ScreenFit)
+    })
+    el.querySelector('#pm-out-match')?.addEventListener('click', () => this.matchScreen())
     el.querySelector('#pm-out-pattern')?.addEventListener('change', (e) => {
       this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
     })
@@ -627,7 +655,9 @@ export class ProjectionManager {
     const info = this.overlay.querySelector('#pm-out-info')
     const sel = this.overlay.querySelector('#pm-out-pattern') as HTMLSelectElement | null
     const qsel = this.overlay.querySelector('#pm-out-quality') as HTMLSelectElement | null
+    const fsel = this.overlay.querySelector('#pm-out-fit') as HTMLSelectElement | null
     const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
+    if (fsel) fsel.value = this.screenFit
     if (info) {
       const n = this.surfaces.surfaces.filter((s) => s.enabled).length
       const rt = this.effectiveRT()
@@ -635,7 +665,7 @@ export class ProjectionManager {
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
       const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
       const live = this.liveLinked ? (this.liveFresh() ? 'LIVE LINK · ' : 'HOLDING · ') : ''
-      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()} · ${this.screenFit.toUpperCase()}${rtTxt}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
@@ -945,6 +975,32 @@ export class ProjectionManager {
     this.broadcastSoon()
     this.scheduleAutosave()
     this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  /**
+   * Screen fit for the LIVE output on THIS machine (contain / cover / stretch).
+   * A per-browser display setting on purpose: the projector machine may show
+   * the same project through a very different aspect than the studio.
+   */
+  setScreenFit(fit: ScreenFit) {
+    if (!SCREEN_FITS.includes(fit)) return
+    this.screenFit = fit
+    try { localStorage.setItem(SCREEN_FIT_KEY, fit) } catch { /* private mode */ }
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  /**
+   * Snap the output canvas to THIS screen's exact size — after this the
+   * composite maps 1:1 onto the physical display: no bars, no crop, no
+   * distortion, regardless of the fit mode.
+   */
+  matchScreen() {
+    const w = Math.round(Math.max(320, Math.min(16384, window.innerWidth)))
+    const h = Math.round(Math.max(240, Math.min(8640, window.innerHeight)))
+    this.setOutputSize(w, h)
+    this.deps.toast(`Output canvas matched to this screen — ${w}×${h}`, 2800)
   }
 
   setRenderScale(scale: number) {
@@ -1090,9 +1146,9 @@ export class ProjectionManager {
       r.setRenderTarget(null)
     }
 
-    // 2) screen pass
+    // 2) screen pass — fit mode fills the physical screen (no black bars)
     if (this.outputLive) {
-      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight)
+      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight, this.screenFit)
       this.outputMgr.renderComposite(r)
       return
     }
@@ -1200,6 +1256,8 @@ export class ProjectionManager {
       active: this.active,
       outputLive: this.outputLive,
       liveLinked: this.liveLinked,
+      screenFit: this.screenFit,
+      output: { ...this.output },
       relay: this.relayInfo(),
       surfaces: this.surfaces.surfaces.map((s) => ({
         id: s.id, name: s.name, enabled: s.enabled, locked: s.locked,
@@ -1207,7 +1265,6 @@ export class ProjectionManager {
         camera: { ...s.camera }, corners: s.warp.corners,
       })),
       selected: this.surfaces.selected?.name ?? null,
-      output: { ...this.output },
       quality: this.qualityLabel(),
       frameCostMs: Math.round(this.frameCost * 10) / 10,
       rtPerSurface: this.surfaces.surfaces

@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------
 import gsap from 'gsap'
 import type { ProjectionManager } from './ProjectionManager'
-import type { ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import type { ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
 import { QUALITY_PROFILES } from './ProjectionTypes'
 import { OutputNodeEditor } from './OutputNodeEditor'
 import { CameraManager } from './CameraManager'
@@ -471,6 +471,33 @@ export class ProjectionEditorUI {
       }, 'pm-btn-sm'))
     }
     gCanvas.appendChild(ratioRow)
+
+    // ---- screen fit — how the live output maps onto the screen showing it ----
+    const fitRow = document.createElement('div')
+    fitRow.className = 'pm-row'
+    fitRow.appendChild(this.labelEl('SCREEN FIT'))
+    const fsel = document.createElement('select')
+    fsel.className = 'pm-select pm-select-sm'
+    const fitOpts: [ScreenFit, string][] = [
+      ['cover', 'COVER — full screen, crop overflow'],
+      ['stretch', 'STRETCH — full screen, no crop'],
+      ['contain', 'CONTAIN — letterbox bars'],
+    ]
+    for (const [v, label] of fitOpts) {
+      const o = document.createElement('option')
+      o.value = v
+      o.textContent = label
+      fsel.appendChild(o)
+    }
+    fsel.value = this.pm.screenFit
+    fsel.addEventListener('change', () => this.pm.setScreenFit(fsel.value as ScreenFit))
+    fitRow.appendChild(fsel)
+    fitRow.appendChild(this.btn('MATCH SCREEN', () => {
+      this.pm.matchScreen()
+      this.showTab('project')
+    }, 'pm-btn-sm'))
+    gCanvas.appendChild(fitRow)
+    body.appendChild(this.hint('COVER fills the screen edge-to-edge with no black bars (slight edge crop when aspects differ). MATCH SCREEN snaps the output canvas to this screen\'s exact resolution for a perfect 1:1 picture.'))
 
     // ---- output quality — sized to the machine driving the show ----
     const gQuality = this.collap(body, 'OUTPUT QUALITY', true)
