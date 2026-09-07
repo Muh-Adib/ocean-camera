@@ -16,24 +16,25 @@ export interface QualityConfig {
   lightRayCount: number
   seaweedBlades: number
   coralDensity: number
+  coralDetail: number
   pebbleCount: number
 }
 
 export const QUALITY: Record<Tier, QualityConfig> = {
   high: {
     tier: 'high', dpr: 2, fishScale: 1,
-    microCount: 700, planktonCount: 220, bubbleCount: 90, burstPool: 340,
-    lightRayCount: 12, seaweedBlades: 260, coralDensity: 1, pebbleCount: 150,
+    microCount: 700, planktonCount: 220, bubbleCount: 150, burstPool: 340,
+    lightRayCount: 12, seaweedBlades: 260, coralDensity: 1, coralDetail: 1, pebbleCount: 150,
   },
   medium: {
     tier: 'medium', dpr: 1.5, fishScale: 0.7,
-    microCount: 420, planktonCount: 140, bubbleCount: 60, burstPool: 240,
-    lightRayCount: 8, seaweedBlades: 180, coralDensity: 0.72, pebbleCount: 100,
+    microCount: 420, planktonCount: 140, bubbleCount: 90, burstPool: 240,
+    lightRayCount: 8, seaweedBlades: 180, coralDensity: 0.72, coralDetail: 0.7, pebbleCount: 100,
   },
   low: {
     tier: 'low', dpr: 1, fishScale: 0.45,
-    microCount: 260, planktonCount: 90, bubbleCount: 40, burstPool: 150,
-    lightRayCount: 5, seaweedBlades: 120, coralDensity: 0.5, pebbleCount: 60,
+    microCount: 260, planktonCount: 90, bubbleCount: 55, burstPool: 150,
+    lightRayCount: 5, seaweedBlades: 120, coralDensity: 0.5, coralDetail: 0.45, pebbleCount: 60,
   },
 }
 

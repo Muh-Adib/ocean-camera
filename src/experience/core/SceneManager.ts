@@ -6,7 +6,9 @@ import { PerformanceManager } from './PerformanceManager'
 import { sharedUniforms } from './sharedUniforms'
 
 const COLOR_DEEP = new THREE.Color('#02111f')
-const FOG_COLOR = new THREE.Color('#07293f')
+// deep-blue silhouette fog: distant geometry darkens toward navy instead
+// of washing out — the reference's depth-of-field blue falloff
+const FOG_COLOR = new THREE.Color('#031828')
 
 export class SceneManager {
   renderer: THREE.WebGLRenderer
@@ -33,8 +35,8 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    // lighter fog than the old lagoon — the open ocean is worth seeing
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.016)
+    // the arena's far edges sink into blue silhouette — denser, darker fog
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0185)
     this.scene.fog = this.fog
 
     // ---- camera ----
@@ -58,7 +60,8 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap))
   }
 
-  /** Deep-water gradient dome: darker below, teal light above */
+  /** Deep-water gradient dome: darker below, teal light above,
+   *  horizon band slightly lighter so distant silhouettes read */
   buildBackgroundDome() {
     const geo = new THREE.SphereGeometry(160, 24, 18)
     const mat = new THREE.ShaderMaterial({
@@ -66,8 +69,8 @@ export class SceneManager {
       depthWrite: false,
       fog: false,
       uniforms: {
-        uTop: { value: new THREE.Color('#10688c') },
-        uMid: { value: new THREE.Color('#093c58') },
+        uTop: { value: new THREE.Color('#1384a8') },
+        uMid: { value: new THREE.Color('#0a4260') },
         uBottom: { value: new THREE.Color('#010a14') },
         uEnergy: sharedUniforms.uEnergy,
       },
@@ -86,6 +89,9 @@ export class SceneManager {
           vec3 c = h > 0.0
             ? mix(uMid, uTop, pow(h, 0.75))
             : mix(uMid, uBottom, pow(-h, 0.6));
+          // depth-of-field falloff: darken toward the lower rim of the
+          // arena so the far reef sinks into blue silhouette
+          c *= mix(0.5, 1.06, smoothstep(-0.55, 0.28, h));
           c *= 0.82 + uEnergy * 0.35;                 // ecosystem energy brightens the water
           gl_FragColor = vec4(c, 1.0);
           #include <colorspace_fragment>
@@ -96,6 +102,47 @@ export class SceneManager {
     dome.renderOrder = -10
     this.scene.add(dome)
     return dome
+  }
+
+  /** Image-based lighting from the water dome — every standard
+   *  material (coral, rock, fish, sponge) gains real PBR response */
+  buildEnvironment() {
+    const pmrem = new THREE.PMREMGenerator(this.renderer)
+    const temp = new THREE.Scene()
+    const geo = new THREE.SphereGeometry(90, 32, 20)
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      uniforms: {
+        uTop: { value: new THREE.Color('#1384a8') },
+        uMid: { value: new THREE.Color('#0a4260') },
+        uBottom: { value: new THREE.Color('#010a14') },
+      },
+      vertexShader: /* glsl */`
+        varying vec3 vWorld;
+        void main() {
+          vWorld = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: /* glsl */`
+        uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uBottom;
+        varying vec3 vWorld;
+        void main() {
+          float h = normalize(vWorld).y;
+          vec3 c = h > 0.0
+            ? mix(uMid, uTop, pow(h, 0.75))
+            : mix(uMid, uBottom, pow(-h, 0.6));
+          gl_FragColor = vec4(c, 1.0);
+          #include <colorspace_fragment>
+        }`,
+    })
+    const dome = new THREE.Mesh(geo, mat)
+    temp.add(dome)
+    const rt = pmrem.fromScene(temp, 0, 0.1, 200)
+    this.scene.environment = rt.texture
+    this.scene.environmentIntensity = 0.42
+    pmrem.dispose()
+    geo.dispose()
+    mat.dispose()
   }
 
   render() { this.renderer.render(this.scene, this.camera) }

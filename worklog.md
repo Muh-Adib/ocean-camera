@@ -734,3 +734,37 @@ Work Log:
 
 Stage Summary:
 - Texture ikan hasil scan kini = GAMBAR IKANNYA SAJA: frame, meja, background, dan bayangan dipotong total; bagian tak diwarnai di dalam ikan otomatis terwarnai dari warna sekitarnya; pupil/insang/jari-jari dipertahankan; tidak ada lagi bagian putih pada ikan — gambar mewarnai model penuh tepi-ke-tepi.
+
+---
+Task ID: 27
+Agent: main (Super Z)
+Task: "buat lebih mirip lagi, detailing + banyak poly hingga jutaan ribu agar realistic + gelembung dari sponge + menggelapkan ujung arena jadi siluet biru (depth of field referensi)" — long running task, jadwal perbaikan detailing satu per satu, terutama bentuk terumbu karang & table coral; cek ulang total 3D env; pastikan material behaviour & interaction (referensi: reef padat di atas struktur kapur tengah, staghorn, brain, sea fan, anemone, caustics, deep blue)
+
+Work Log:
+- AUDIT: seluruh generator coral lama terbukti draft — branch = cylinder 7×3 seg halus, table = disc 28 seg polos, fan = plane + alphaMap (mati saat dilihat dari samping — melanggar syarat 360°), brain = ripple sinus kasar; 0 struktur kapur sentral; bubbles acak tanpa sumber; fog terang (#07293f) membuat jarak "susul" bukan siluet; tanpa IBL (material flat).
+- STAGE 1a — LimestoneReef.ts (BARU): 7 menara karst (icosphere detail 4, ridged-fbm erosion + ledge shelves) tertinggi 8.4 m di jantung taman karang (14.5,−26) + rubble skirt; vertex-color limestone dengan lumut/rust; 50 growth spots (normal.y ≥ 0.62, dedupe 1.2 m) diekspos agar karang BERAKAR di struktur — fix bug double-translate yang membuat spots = 0 (sampling kini sebelum geo.translate, filter localY ≥ 1.2).
+- STAGE 1b — STAGHORN v2: multi-trunk (2-4), recursion depth 3, radial 9×4 seg, BOW organik + rugositas axial (corallite rings sin(a·9+f·34) + noise), ujung pale (#ffe9c9), palet 7 warna.
+- STAGE 1c — TABLE CORAL v2 (prioritas user): disc lens 96×14 seg — undulasi 3 oktaf + radial fold ridges + scalloped rim 26 lobes + polyp rows (sin(d·36+a·6)) + rim dip; crown 6-9 under-struts; stem S-curve; growth bands + rim pucat.
+- STAGE 1d — BRAIN v2: sphere 64×42, labirin gyri dua medan meander silang (sin(x·13+2.8·sin(z·7+y·4)) × sin(z·12+2.4·sin(x·6−y·3.5))), lembah gelap ×0.58 / puncak terang, noise mikro.
+- STAGE 1e — SEA FAN v2 = 3D SUNGGUHAN: pohon cabang in-plane (depth 4) + RUNGS mesh antar cabang saudara (gorgonian net), cup z += x²·0.32, tip pucat — bukan lagi plane alphaMap; tetap sway via uv.y.
+- STAGE 1f — tube (rib + rim lip + throat gelap), soft (polyp bumps), anemone (3 ring tentacle 82 total, bend fy², tip bulb glow), boulder (icosa detail 2 + noise ganda).
+- PLACEMENT: 24 cluster (n +60%), karang menempel 50 limestone spots (bobot branch/table/brain), PATHS 4 koridor lane renang — karang di-skip radius 2.6 m (alur alami ikan, sesuai referensi "natural pathways").
+- STAGE 2a — Sponges.ts (BARU): 6 barrel sponge (lathe bulge 40 seg, 14-20 rib vertikal, interior throat gelap, rim lip torus) + 5 cluster tube sponge (lean acak, rib, rim, throat) + 3 encrusting patch; 3 sponge tumbuh DI limestone spots; palet ungu/emas/merah/merah muda HSL.
+- STAGE 2b — Bubbles.ts emitter API: pool 120 slot headroom, addEmitter() klaim 6 slot/emitter (total 14 emitter × ~0.7-1.8 bubble/s), pop → respawn di osculum masing-masing; tetap didorong gesture field; burstCluster event utk ambient.
+- STAGE 3 — SILUET BIRU TEPING ARENA: fog #07293f→#031828 density 0.016→0.0185 (geometri jauh gelap ke navy); dome shader falloff mix(0.5,1.06,smoothstep(−0.55,0.28,h)) + uTop lebih terang (#1384a8) sehingga siluet jauh KONTRAS terhadap air lebih terang di belakangnya (persis look referensi); vignette DOM radial-gradient (center transparan → rgba(1,9,18,.62) sudut) di main + /output.
+- STAGE 4 — PBR: SceneManager.buildEnvironment() PMREM dari kubah gradien → scene.environment (intensity 0.42) — SEMUA MeshStandardMaterial (karang/batu/ikan/sponge) kini punya respons IBL nyata; sun 3.0→2.6, hemi 1.0→0.85 (kompensasi); PerformanceManager coralDetail per tier (1 / 0.7 / 0.45) — segment & recursion turun bertahap; bubbleCount 90→150.
+- QA HOOKS BARU: __ocean.stats() (tris/calls/coralTris/limestoneSpots/spongeEmitters/tier) + __ocean.revealNow() (skip intro GSAP instan — headless RAF throttle membuat timeline kinclong; overlay di-suppress berulang 9 s krn runLoadingSequence async bisa re-show).
+- VERIFIKASI headless (agent-browser): tsc + eslint bersih; boot tanpa page error; stats: 1.748.490 tris total (medium tier!), coralTris 451.502, 71-87 draw calls, limestoneSpots 50, spongeEmitters 14; /output komposit render penuh (QR, ikan, karang, siluet biru jelas); screenshot: download/screenshots/reef-v2-{entrance,garden,hero,column,output}.png — kolom gelembung naik di atas barrel sponge ungu, table coral nempel di ledingan kapur, staghort multi-trunk dgn tips pale, menara jauh jadi siluet navy.
+- CATATAN headless-only: intro GSAP lambat krn RAF throttle (bukan bug produksi — alur intro tidak diubah); kamera QA sempat "masuk batu" saat tp di dalam radius menara (wajar, collision kamera swim tidak menghalangi tp).
+
+JADWAL LONG-RUNNING DETAILING (lanjutan sesi berikut, urutan prioritas):
+- Stage 5 (NEXT): table coral v3 — jaringan polip lebih dalam (valley gelap antar ridge), tepi lebih tebal; staghorn v3 — cabang lebih halus (recursion 4 di tier high, radius tip lebih kecil), corymbose bush shape.
+- Stage 6: caustics PROYEKSI ke permukaan karang (injeksi shader caustic ke material coral/rock, bukan hanya plane di seabed).
+- Stage 7: spesies baru — gorgonian whip, fire coral plate, clam bed, feather star (semua prosedural high-detail).
+- Stage 8: penguat pathway — school blue tang + parrotfish berpatroli di PATHS koridor (FishManager anchor mengikuti lane).
+- Stage 9: budget perf — verifikasi tier low di mobile nyata, LOD jarak jauh, push tier high ke ~2.5M tris.
+
+Stage Summary:
+- Environment lulus dari DRAFT ke model = karang punya anatomi asli (rugositas axial, gyri labirin, rim scallop, rung mesh), semuanya berakar pada struktur kapur sentral dengan lane renang alami, sponge memunculkan gelembung kontinu dari osculum, teping arena tenggelam ke siluet biru (fog gelap + dome falloff + vignette), dan seluruh material merespons cahaya lewat IBL PMREM.
+- Total scene 1,75 juta triangle pada tier medium (headless) — target "jutaan ribu poly" terpenuhi; tier high akan lebih padat lagi.
+- Poly budget terukur via __ocean.stats(); jadwal detailing 5 tahap berikutnya tercatat di atas untuk eksekusi satu per satu.

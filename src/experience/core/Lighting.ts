@@ -17,12 +17,12 @@ export class Lighting {
   private lightEnergy = { value: 1 }
 
   constructor(scene: THREE.Scene) {
-    this.sun = new THREE.DirectionalLight('#c8ecff', 3.0)
+    this.sun = new THREE.DirectionalLight('#c8ecff', 2.6)
     this.sun.position.set(6, 42, 8)
     this.sun.castShadow = false
     scene.add(this.sun)
 
-    this.ambient = new THREE.HemisphereLight('#a8dce8', '#0d2b3e', 1.0)
+    this.ambient = new THREE.HemisphereLight('#a8dce8', '#0d2b3e', 0.85)
     scene.add(this.ambient)
 
     // faint fill from the front so fish bellies never go fully black
@@ -162,14 +162,20 @@ export class Lighting {
     gsap.to(this.causticMat.uniforms.uOpacity, { value: 1.0, duration: 5, ease: 'power2.inOut' })
   }
 
+  /** QA: skip the cinematic fade — full light instantly */
+  revealNow() {
+    this.rayMats.forEach((m) => { m.uniforms.uOpacity.value = 0.5 })
+    this.causticMat.uniforms.uOpacity.value = 1.0
+  }
+
   /** dynamic ecosystem event: subtle light energy shift */
   pulseEnergy() {
     const target = rand(0.8, 1.25)
     gsap.to(this.lightEnergy, {
       value: target, duration: 6, ease: 'power2.inOut',
       onUpdate: () => {
-        this.sun.intensity = 3.0 * this.lightEnergy.value
-        this.ambient.intensity = 1.0 * this.lightEnergy.value
+        this.sun.intensity = 2.6 * this.lightEnergy.value
+        this.ambient.intensity = 0.85 * this.lightEnergy.value
       },
     })
   }

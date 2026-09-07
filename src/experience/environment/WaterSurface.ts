@@ -114,6 +114,11 @@ export class WaterSurface {
     gsap.to(this.mat.uniforms.uOpacity, { value: 1, duration: 5, ease: 'power2.inOut' })
   }
 
+  /** QA: skip the cinematic fade */
+  revealNow() {
+    this.mat.uniforms.uOpacity.value = 1
+  }
+
   dispose() {
     this.mesh.geometry.dispose()
     this.mat.dispose()

@@ -15,6 +15,8 @@ import { sharedUniforms } from './core/sharedUniforms'
 import { Seabed } from './environment/Seabed'
 import { RockSystem } from './environment/Rocks'
 import { CoralSystem } from './environment/CoralSystem'
+import { LimestoneReef } from './environment/LimestoneReef'
+import { SpongeSystem } from './environment/Sponges'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
@@ -81,6 +83,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const lighting = new Lighting(sceneMgr.scene)
   lighting.buildGodRays(cfg.lightRayCount)
   lighting.buildCaustics()
+  sceneMgr.buildEnvironment()          // image-based lighting → real PBR response
 
   // ---------------- interaction state (needed early by systems) ----
   const field = new InteractionField()
@@ -88,19 +91,39 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // ---------------- environment ----------------
   const seabed = new Seabed(sceneMgr.scene, cfg.pebbleCount)
   const rocks = new RockSystem(sceneMgr.scene, seabed.heightAt, 64)
-  const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity)
+  // the central limestone structure first — corals root on its ledges
+  const limestone = new LimestoneReef(sceneMgr.scene, seabed.heightAt, cfg.coralDetail)
+  const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity, {
+    detail: cfg.coralDetail,
+    attach: limestone.growthSpots,
+  })
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles]
+  const sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
+  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles]
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
   const bubbles = new BubbleSystem(sceneMgr.scene, cfg.bubbleCount, seabed.heightAt, {
     pos: field.point, dir: field.dir, strength: sharedUniforms.uFieldStrength, radius: 11,
   })
+  // sponge oscula trickle bubbles continuously
+  for (const e of sponges.emitters) {
+    bubbles.addEmitter(e.pos, { rate: e.rate, size: e.size, speed: e.speed })
+  }
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
+
+  // ---------------- screen vignette ----------------
+  // deep-blue depth-of-field feel: the arena's edges sink into shadow
+  const vignette = document.createElement('div')
+  vignette.style.cssText = [
+    'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:4',
+    'background:radial-gradient(ellipse 130% 125% at 50% 44%, rgba(1,10,20,0) 44%, rgba(1,10,20,0.38) 78%, rgba(1,9,18,0.62) 100%)',
+  ].join(';')
+  container.appendChild(vignette)
+  disposers.push(() => { vignette.remove() })
 
   // ---------------- fish ----------------
   const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
@@ -452,6 +475,37 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
     fishCount: () => fish.count(),
+    /** QA: skip all intro theatrics instantly (headless test helper) */
+    revealNow: () => {
+      entered = true
+      gsap.globalTimeline.getChildren(true, true, true).forEach((t) => {
+        try { (t as gsap.core.Animation).progress(1).kill() } catch { /* noop */ }
+      })
+      const hideOverlays = () => {
+        for (const id of ['ocean-intro', 'ocean-loading']) {
+          const el = document.getElementById(id)
+          if (el) { el.style.opacity = '0'; el.style.display = 'none' }
+        }
+      }
+      hideOverlays()
+      // the async boot loading sequence may re-show the intro AFTER this
+      // call — keep suppressing for a few seconds (headless QA only)
+      for (const ms of [400, 1200, 2500, 4000, 6000, 9000]) setTimeout(hideOverlays, ms)
+      lighting.revealNow()
+      surface.revealNow()
+      ui.showHUD()
+      return 'REVEALED'
+    },
+    /** renderer + environment stats (poly budget verification) */
+    stats: () => ({
+      tris: Math.round(sceneMgr.renderer.info.render.triangles),
+      calls: sceneMgr.renderer.info.render.calls,
+      geometries: sceneMgr.renderer.info.memory.geometries,
+      coralTris: Math.round(coral.polyCount),
+      limestoneSpots: limestone.growthSpots.length,
+      spongeEmitters: sponges.emitters.length,
+      tier: cfg.tier,
+    }),
     swimMode: () => swim.active,
     forceShark: () => creatures.triggerPredator(),
     forceTurtle: () => creatures.triggerTurtle(),
@@ -566,6 +620,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       container.innerHTML = ''
       decor.dispose()
       biomes.dispose()
+      limestone.dispose()
+      sponges.dispose()
       feeding.dispose()
       void particles
     },
