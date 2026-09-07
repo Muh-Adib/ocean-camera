@@ -19,6 +19,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, noise2 } from '../utils/math'
+import { injectCaustic } from './causticInject'
 import type { Obstacle } from './Rocks'
 import type { GrowthSpot } from './LimestoneReef'
 
@@ -585,6 +586,9 @@ function makeBoulderCoral(rng: Rng, detail: number): THREE.BufferGeometry {
 // ---------------- shader sway injection ----------------
 function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cacheKey: string) {
   mat.onBeforeCompile = (shader) => {
+    // Stage 6: caustic light dance on garden corals too — the 360°
+    // garden shimmers from every heading, not just the arena wall
+    injectCaustic(shader, { scale: 0.45, strength: 0.5 })
     shader.uniforms.uTime = sharedUniforms.uTime
     shader.uniforms.uFieldPos = sharedUniforms.uFieldPos
     shader.uniforms.uFieldDir = sharedUniforms.uFieldDir
@@ -616,7 +620,13 @@ function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cache
       }
     `)
   }
-  mat.customProgramCacheKey = () => cacheKey
+  mat.customProgramCacheKey = () => `coral-sway-v2-${cacheKey}`
+}
+
+/** caustic-only material wrapper for non-sway coral families */
+function injectCausticInto(mat: THREE.Material, key: string) {
+  mat.onBeforeCompile = (shader) => { injectCaustic(shader, { scale: 0.45, strength: 0.5 }) }
+  mat.customProgramCacheKey = () => `coral-cau-${key}`
 }
 
 // ---------------- system ----------------
@@ -804,7 +814,8 @@ export class CoralSystem {
       const fam = FAMILIES[key]
       const merged = mergeGeometries(list, false)!
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.0 })
-      if (fam.sway) addSway(mat, fam.sway[0], fam.sway[1], `coral-sway-${key}`)
+      if (fam.sway) addSway(mat, fam.sway[0], fam.sway[1], key)
+      else injectCausticInto(mat, key)
       const mesh = new THREE.Mesh(merged, mat)
       mesh.castShadow = false
       this.group.add(mesh)

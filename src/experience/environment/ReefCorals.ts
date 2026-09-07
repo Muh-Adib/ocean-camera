@@ -74,7 +74,17 @@ export function taperTube(geo: THREE.BufferGeometry, curve: THREE.Curve<THREE.Ve
 // =================================================================
 export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = []
-  const palette = ['#4f9068', '#387a6f', '#5d966d', '#468a72', '#6ca277']
+  // colony-level palette families — real reefs mix green tables with
+  // warm ochre, rosy-mauve and steel-blue colonies (reference: rich
+  // coral saturation, not a single mint tone)
+  const VARIANTS = [
+    ['#4f9068', '#387a6f', '#5d966d', '#468a72', '#6ca277'],   // classic green
+    ['#a08048', '#8a7a4a', '#9a8a55', '#7a6a40', '#a88a50'],   // warm ochre
+    ['#b87a6a', '#a86858', '#c08a78', '#98584a', '#b06f60'],   // rosy mauve
+    ['#4a9a8a', '#3d8a80', '#58a894', '#35796f', '#63b0a0'],   // steel teal
+    ['#8a6a9a', '#7a588a', '#9a7aa8', '#6a4a7a', '#a588b5'],   // lavender
+  ]
+  const palette = pickF(VARIANTS, rng)
   const base = new THREE.Color(pickF(palette, rng))
   const rimC = base.clone().lerp(new THREE.Color('#b9dcae'), 0.34)   // pale growing rim
   const trunkCol = new THREE.Color('#877a5c')
@@ -674,9 +684,17 @@ export function makeGreenMound(rng: Rng, size: number, det: Det): THREE.BufferGe
     p.setXYZ(i, v.x, Math.max(0.02, v.y) * 0.62, v.z)   // flatten into a dome
   }
   geo.computeVertexNormals()
-  const rock = new THREE.Color('#4d6555')
-  const algae = new THREE.Color('#6d8f6a')
-  const teal = new THREE.Color('#3f6b60')
+  // mound rock varies per colony: mossy green, warm sandstone, or
+  // plum-grey — breaks the single-hue wall without shouting
+  const MOUND_VARIANTS = [
+    ['#4d6555', '#6d8f6a', '#3f6b60'],   // mossy green (classic)
+    ['#6a5f4a', '#8a7d5e', '#575043'],   // warm sandstone
+    ['#5a5468', '#76708a', '#48445a'],   // plum grey
+  ]
+  const MV = pickF(MOUND_VARIANTS, rng)
+  const rock = new THREE.Color(MV[0])
+  const algae = new THREE.Color(MV[1])
+  const teal = new THREE.Color(MV[2])
   const pos = geo.attributes.position as THREE.BufferAttribute
   const arr = new Float32Array(pos.count * 3)
   const c = new THREE.Color()
@@ -794,6 +812,229 @@ export function makeStaghornBush(rng: Rng, det: Det): THREE.BufferGeometry {
       0.075 + rng() * 0.025,
       depth,
     )
+  }
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
+}
+
+// =================================================================
+// STAGE 7 — NEW SPECIES (360° distribution)
+// =================================================================
+
+// -----------------------------------------------------------------
+// FIRE CORAL PLATE — layered mustard blades (Millepora). Vertical
+// wavy blades rise from an encrusting base; pale growing rims, dark
+// Bronze between layers. Vivid against the green reef — a key
+// saturation accent from every heading.
+// -----------------------------------------------------------------
+export function makeFirePlate(rng: Rng, det: Det): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const palette = ['#c8963c', '#d8a04a', '#b87f2e', '#d4913f', '#c26a2a']
+  const base = new THREE.Color(pickF(palette, rng))
+  const rimC = new THREE.Color('#f2e2b0')            // pale growing edge
+  const crustC = new THREE.Color('#8a6028')
+
+  // encrusting base plate hugging the ground
+  const crust = new THREE.CylinderGeometry(0.62, 0.7, 0.14, det === 2 ? 40 : 24, 1)
+  crust.scale(1, 1, 0.8)
+  crust.translate(0, 0.04, 0)
+  parts.push(paint(crust, crustC, 0.22, rng, 0.05))
+
+  // 2-4 wavy vertical blades, flattened along x, each fanning a
+  // different direction so the colony reads from all sides
+  const blades = det === 2 ? 3 + (rng() < 0.5 ? 1 : 0) : 2 + (rng() < 0.6 ? 1 : 0)
+  for (let b = 0; b < blades; b++) {
+    const az = (b / blades) * Math.PI * 2 + rng() * 0.8
+    const h = 0.75 + rng() * 0.65
+    const lean = rand(0.12, 0.3, rng)
+    const seg = det === 2 ? 14 : det === 1 ? 10 : 7
+    const blade = new THREE.CylinderGeometry(0.045, 0.3, h, det === 2 ? 12 : 8, seg)
+    const bp = blade.attributes.position as THREE.BufferAttribute
+    const buv = blade.attributes.uv as THREE.BufferAttribute
+    for (let i = 0; i < bp.count; i++) {
+      const x = bp.getX(i), y = bp.getY(i), z = bp.getZ(i)
+      const t = (y + h / 2) / h                       // 0 base → 1 tip
+      // flatten the blade (x thin), wavy edges along height
+      const wave = 1 + Math.sin(t * 9 + b * 2.2) * 0.34
+      const edge = Math.sin(t * 5.5 + az * 3) * 0.16
+      bp.setX(i, x * 0.24 * wave + edge * t)
+      // lean outward + S-curve along height
+      bp.setZ(i, z * wave * 0.85 + Math.sin(t * 2.6 + b) * 0.14 * t + lean * t * t)
+      // pale rim toward the tip; ripples along the face
+      if (t > 0.82) {
+        // tip flag handled by paint below via y; add wavy top edge
+        bp.setY(i, y + Math.sin(x * 22 + z * 17 + b * 5) * 0.028 * (t - 0.82) / 0.18)
+      }
+      void buv
+    }
+    blade.computeVertexNormals()
+    blade.translate(0, h / 2, 0)
+    blade.rotateY(az)
+    blade.translate(Math.cos(az) * 0.16, 0.06, Math.sin(az) * 0.16)
+    // gradient: dark base → mustard → pale tip
+    paint(blade, base, 0.14, rng, 0.1)
+    tintGradient(blade, base.clone().multiplyScalar(0.62), rimC, 0.55)
+    parts.push(blade)
+  }
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
+}
+
+/** vertical gradient tinter — bottom → top colour lerp (fire-plate rim) */
+function tintGradient(geo: THREE.BufferGeometry, bottom: THREE.Color, top: THREE.Color, mixTop = 0.8) {
+  geo.computeBoundingBox()
+  const bb = geo.boundingBox!
+  const h = Math.max(0.001, bb.max.y - bb.min.y)
+  const col = geo.attributes.color as THREE.BufferAttribute
+  const c = new THREE.Color()
+  for (let i = 0; i < col.count; i++) {
+    const t = (geo.attributes.position.getY(i) - bb.min.y) / h
+    c.copy(bottom).lerp(top, t * t * mixTop)
+    col.setXYZ(i, col.getX(i) * c.r, col.getY(i) * c.g, col.getZ(i) * c.b)
+  }
+}
+
+// -----------------------------------------------------------------
+// GIANT CLAM — ribbed shell pair hinged open with a vivid iridescent
+// mantle lip between them (teal / cobalt / violet). Reads as a
+// jewel on the reef wall from all headings.
+// -----------------------------------------------------------------
+export function makeClam(rng: Rng, det: Det): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const shellC = new THREE.Color(pickF(['#d8d2c0', '#cfc4ac', '#e0d6c2'], rng))
+  const mantleC = new THREE.Color(pickF(['#20c0b0', '#3898d8', '#7058c8', '#28b890', '#3878c0'], rng))
+  const seg = det === 2 ? 48 : det === 1 ? 32 : 20
+
+  // bottom valve — squashed ribbed bowl
+  const bottom = new THREE.SphereGeometry(0.55, seg, det === 2 ? 22 : 14, 0, Math.PI * 2, 0, Math.PI / 2)
+  {
+    const p = bottom.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i)
+      const a = Math.atan2(z, x)
+      const r = Math.hypot(x, z)
+      const rib = 1 + Math.sin(a * 9) * 0.075 + Math.sin(a * 27 + 1.4) * 0.022
+      p.setX(i, x * rib)
+      p.setZ(i, z * rib)
+      p.setY(i, -y * 0.55 + (r > 0.01 ? (1 - Math.min(1, r / 0.55)) * 0.1 : 0))
+    }
+    bottom.computeVertexNormals()
+  }
+  parts.push(paint(bottom, shellC.clone().multiplyScalar(0.9), 0.12, rng, 0.08))
+
+  // top valve — same ribbed bowl, hinged open at the back
+  const top = new THREE.SphereGeometry(0.55, seg, det === 2 ? 22 : 14, 0, Math.PI * 2, 0, Math.PI / 2)
+  {
+    const p = top.attributes.position as THREE.BufferAttribute
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i)
+      const a = Math.atan2(z, x)
+      const r = Math.hypot(x, z)
+      const rib = 1 + Math.sin(a * 9 + 0.3) * 0.075 + Math.sin(a * 27 + 2) * 0.022
+      p.setX(i, x * rib)
+      p.setZ(i, z * rib * 0.9)
+      p.setY(i, y * 0.5 + 0.02 + (r > 0.01 ? (1 - Math.min(1, r / 0.55)) * 0.06 : 0))
+    }
+    top.computeVertexNormals()
+    top.rotateX(-0.42 - rng() * 0.14)                 // gape open
+    top.translate(0, 0.3, -0.06)
+  }
+  parts.push(paint(top, shellC, 0.12, rng, 0.1))
+
+  // mantle — iridescent lip spilling between the valves
+  const mantle = new THREE.TorusGeometry(0.4, 0.13, det === 2 ? 12 : 8, seg)
+  mantle.rotateX(Math.PI / 2)
+  mantle.scale(1, 0.42, 0.92)
+  mantle.translate(0, 0.22, 0.02)
+  paint(mantle, mantleC, 0.2, rng, 0.25)
+  // bright fluorescent flecks around the mantle edge
+  const flecks = det === 2 ? 26 : det === 1 ? 16 : 9
+  for (let f = 0; f < flecks; f++) {
+    const a = (f / flecks) * Math.PI * 2 + rng() * 0.3
+    const fl = new THREE.SphereGeometry(0.035 + rng() * 0.03, 6, 5)
+    fl.scale(1, 0.45, 1)
+    fl.translate(Math.cos(a) * 0.42, 0.26 + rng() * 0.05, Math.sin(a) * 0.38)
+    parts.push(paint(fl, mantleC.clone().lerp(new THREE.Color('#aefce8'), 0.55), 0.25, rng, 0.3))
+  }
+  parts.push(mantle)
+
+  // byssal opening shadow at the hinge
+  const hinge = new THREE.SphereGeometry(0.16, 10, 8)
+  hinge.scale(1, 0.4, 0.7)
+  hinge.translate(0, 0.16, -0.34)
+  parts.push(paint(hinge, shellC.clone().multiplyScalar(0.45), 0.15, rng, 0))
+
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
+}
+
+// -----------------------------------------------------------------
+// FEATHER STAR (crinoid) — a stalked calyx crowned with 9-14
+// feathered arms curling up into the current. Warm sunset palette
+// (amber / scarlet / rose) — a small but eye-catching accent.
+// -----------------------------------------------------------------
+export function makeFeatherStar(rng: Rng, det: Det): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const base = new THREE.Color(pickF(['#e07030', '#d8952e', '#c84028', '#e8b040', '#b83878', '#d85838'], rng))
+  const tipC = base.clone().lerp(new THREE.Color('#ffe8b0'), 0.5)
+
+  // cirri — little claws gripping the rock
+  const claws = det === 0 ? 5 : 8
+  for (let c = 0; c < claws; c++) {
+    const a = (c / claws) * Math.PI * 2 + rng() * 0.5
+    const claw = new THREE.CylinderGeometry(0.012, 0.02, 0.22, 5, 1)
+    claw.translate(0, 0.05, 0)
+    claw.rotateX(1.15)
+    claw.rotateY(a)
+    claw.translate(Math.cos(a) * 0.05, 0.02, Math.sin(a) * 0.05)
+    parts.push(paint(claw, base.clone().multiplyScalar(0.75), 0.2, rng, 0))
+  }
+  // stalk + calyx
+  const stalk = new THREE.CylinderGeometry(0.022, 0.03, 0.3, 7, 2)
+  stalk.translate(0, 0.15, 0)
+  parts.push(paint(stalk, base.clone().multiplyScalar(0.8), 0.15, rng, 0.05))
+  const calyx = new THREE.ConeGeometry(0.09, 0.14, det === 2 ? 12 : 8, 2)
+  calyx.translate(0, 0.34, 0)
+  parts.push(paint(calyx, base, 0.12, rng, 0.1))
+
+  // feathered arms — tapered tubes curling outward-up with pinnules
+  const arms = det === 2 ? 11 + Math.floor(rng() * 4) : det === 1 ? 9 : 7
+  for (let a = 0; a < arms; a++) {
+    const az = (a / arms) * Math.PI * 2 + rng() * 0.4
+    const len = 0.5 + rng() * 0.3
+    const curl = rand(0.9, 1.5, rng)
+    const pts: THREE.Vector3[] = []
+    for (let s = 0; s <= 6; s++) {
+      const t = s / 6
+      const ang = curl * t
+      // rise then spiral outward-up, tip curling back in
+      pts.push(new THREE.Vector3(
+        Math.sin(ang * 1.4) * len * 0.42 * t + Math.sin(ang) * 0.1,
+        0.36 + Math.sin(ang * 0.9) * len * 0.62 * t,
+        Math.cos(ang * 1.4) * len * 0.2 * t,
+      ))
+    }
+    const curve = new THREE.CatmullRomCurve3(pts)
+    const arm = new THREE.TubeGeometry(curve, det === 2 ? 22 : 12, 0.022, det === 2 ? 7 : 5, false)
+    taperTube(arm, curve, 0.18, true)
+    arm.rotateY(az)
+    parts.push(paint(arm, base, 0.16, rng, 0.18))
+
+    // pinnules — feather barbs along the arm curve, both sides
+    if (det >= 1) {
+      const n = det === 2 ? 12 : 8
+      for (let s = 1; s <= n; s++) {
+        const t = s / (n + 1)
+        const pt = curve.getPoint(t)
+        const tan = curve.getTangent(t)
+        const side = s % 2 === 0 ? 1 : -1
+        const pin = new THREE.CylinderGeometry(0.004, 0.009, 0.1 * (1 - t * 0.5), 4, 1)
+        pin.translate(0, 0.05 * (1 - t * 0.5), 0)
+        pin.rotateZ(side * 1.15)
+        // orient along arm azimuth
+        pin.rotateY(-Math.atan2(tan.z, tan.x))
+        pin.translate(pt.x, pt.y, pt.z)
+        pin.rotateY(az)
+        parts.push(paint(pin, base.clone().lerp(tipC, t * 0.6), 0.14, rng, 0.2))
+      }
+    }
   }
   return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
 }

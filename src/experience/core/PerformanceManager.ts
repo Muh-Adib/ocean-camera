@@ -62,6 +62,11 @@ export class PerformanceManager {
     if (mobile && !tablet) tier = 'low'
     else if (tablet || cores <= 4 || mem <= 3) tier = 'medium'
 
+    // QA escape hatch: ?tier=low|medium|high forces a tier so headless
+    // software-GL audits (and low-RAM devices) can cap the poly budget
+    const forced = new URLSearchParams(location.search).get('tier')
+    if (forced === 'low' || forced === 'medium' || forced === 'high') tier = forced
+
     const cfg = { ...QUALITY[tier] }
     cfg.dpr = clamp(window.devicePixelRatio || 1, 1, cfg.dpr)
     this.config = cfg

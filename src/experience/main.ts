@@ -100,8 +100,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     attach: limestone.growthSpots,
   })
   // the 360° coral colosseum — a reef wall around the sandy clearing so
-  // every heading (visitors circle the room) has full scenery
-  const arena = new ReefArena(sceneMgr.scene, seabed.heightAt)
+  // every heading (visitors circle the room) has full scenery.
+  // Ring detail scales with the device tier (Stage 9 LOD budget)
+  const arena = new ReefArena(sceneMgr.scene, seabed.heightAt, cfg.tier)
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
@@ -501,12 +502,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       }
       hideOverlays()
       // the async boot loading sequence may re-show the intro AFTER this
-      // call — keep suppressing for a few seconds (headless QA only)
-      for (const ms of [400, 1200, 2500, 4000, 6000, 9000]) setTimeout(hideOverlays, ms)
+      // call — keep suppressing for a while (headless QA sweeps are long)
+      for (const ms of [400, 1200, 2500, 4000, 6000, 9000, 15000, 25000, 40000, 60000]) setTimeout(hideOverlays, ms)
       // headless QA drives the camera — make sure input listeners exist
       // even though the normal DIVE-IN flow was skipped
       pointer.enable()
       swim.enable()
+      // 360° QA sweeps drive the swim rig directly (setView) — activate it
+      // so pushSwimPose actually owns the camera pose (enable() alone only
+      // attaches listeners and the rig keeps drifting around HOME)
+      if (!swim.active) swim.setActive(true)
       lighting.revealNow()
       surface.revealNow()
       ui.showHUD()
@@ -559,7 +564,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     },
     /** QA: teleport AND aim the swim camera — setView(yaw, pitch, x, y, z) */
     setView: (...args: unknown[]) => {
-      if (!swim.active) return false
+      // 360° sweeps may call setView before/without revealNow — self-activate
+      if (!swim.active) { swim.enable(); swim.setActive(true) }
       if (args.length >= 5) swim.position.set(Number(args[2]), Number(args[3]), Number(args[4]))
       if (args.length >= 1) swim.yaw = Number(args[0])
       if (args.length >= 2) swim.pitch = Number(args[1])

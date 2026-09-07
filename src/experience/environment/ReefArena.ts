@@ -23,10 +23,11 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, fbm2 } from '../utils/math'
 import { injectSilhouette } from './depthSilhouette'
+import { injectCaustic } from './causticInject'
 import {
   makeTableStack, makeBubbleCoral, makeTubeSponge, makeFingerCoral,
   makeRedWhip, makeSpiralWhip, makeAnemoneBig, makeGreenMound,
-  makeStaghornBush,
+  makeStaghornBush, makeFirePlate, makeClam, makeFeatherStar,
   paint, pickF, rand, type Rng, type Det,
 } from './ReefCorals'
 import type { Obstacle } from './Rocks'
@@ -88,6 +89,10 @@ const MATSPEC: Record<string, MatSpec> = {
   redwhip: { rough: 0.62, clear: 0.25, clearRough: 0.35 },
   spiral:  { rough: 0.6, clear: 0.3, clearRough: 0.35 },
   anemone: { rough: 0.55 },
+  // stage 7 species
+  fireplate: { rough: 0.58, clear: 0.3, clearRough: 0.3 },   // wet hydrocoran sheen
+  clam:      { rough: 0.3, clear: 0.7, clearRough: 0.18 },   // glossy nacre shell
+  feather:   { rough: 0.66 },
 }
 
 function arenaMaterial(key: string, spec: MatSpec, sway: [number, number] | undefined): THREE.Material {
@@ -102,8 +107,11 @@ function arenaMaterial(key: string, spec: MatSpec, sway: [number, number] | unde
   if (spec.side) mat.side = spec.side
   mat.onBeforeCompile = (shader) => {
     if (sway) swayInjections(shader, sway[0], sway[1])
+    // Stage 6: the water-caustic light dance now lives ON the reef
+    // surfaces themselves — every heading sees shimmering walls
+    injectCaustic(shader, { scale: 0.45, strength: 0.52 })
     // the deep-blue silhouette: distant reef melts into dark shapes
-    injectSilhouette(shader, { start: 46, end: 105, k: 0.8, color: '#0d4266' })
+    injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
   }
   mat.customProgramCacheKey = () => `arena-${key}`
   return mat
@@ -127,6 +135,11 @@ const FAMILIES: Record<string, FamilySpec> = {
   redwhip: { make: (r, d) => makeRedWhip(r, d), sway: [0.05, 0.8] },
   spiral:  { make: (r, d) => makeSpiralWhip(r, d), sway: [0.045, 0.9] },
   anemone: { make: (r, d) => makeAnemoneBig(r, d), sway: [0.03, 1.4] },
+  // stage 7 — new species, distributed around the FULL circle so
+  // every heading (front AND behind the camera) gets them
+  fireplate: { make: (r, d) => makeFirePlate(r, d), collide: 0.5 },
+  clam:      { make: (r, d) => makeClam(r, d), collide: 0.45 },
+  feather:   { make: (r, d) => makeFeatherStar(r, d), sway: [0.035, 1.2] },
 }
 
 interface Mound { x: number; z: number; R: number; H: number }
@@ -146,10 +159,21 @@ export class ReefArena {
   piecePos: Record<string, THREE.Vector3[]> = {}
   tris = 0
 
-  constructor(scene: THREE.Scene, private heightAt: (x: number, z: number) => number) {
+  constructor(scene: THREE.Scene, private heightAt: (x: number, z: number) => number, tier: 'high' | 'medium' | 'low' = 'high') {
+    // Stage 9 — tier-scaled ring detail: the colosseum previously built
+    // at FULL poly on every device (2.8M+ tris) which swamps phones and
+    // software renderers. Heroes stay rich on low tiers; far rings and
+    // fillers degrade first — silhouettes still read perfectly.
+    this.det = tier === 'low'
+      ? { hero: 1, mid: 0, far: 0, filler: 0, rubble: false }
+      : tier === 'medium'
+        ? { hero: 2, mid: 1, far: 0, filler: 1, rubble: true }
+        : { hero: 2, mid: 1, far: 0, filler: 1, rubble: true }
     this.build()
     scene.add(this.group)
   }
+
+  private det: { hero: Det; mid: Det; far: Det; filler: Det; rubble: boolean }
 
   /** ground height including any bommie mound sitting at (x,z) */
   private moundAt: Mound[] = []
@@ -204,7 +228,7 @@ export class ReefArena {
       this.moundAt.push({ x, z, R: R * 0.98, H })
       if (R > 1.6) this.obstacles.push({ x, y: this.heightAt(x, z) + H * 0.5, z, r: R * 0.92 })
       // rubble scattered around near-ring mound feet
-      if (det === 2) {
+      if (det === 2 && this.det.rubble) {
         const n = 5 + Math.floor(rng() * 5)
         for (let i = 0; i < n; i++) {
           const a = rng() * Math.PI * 2
@@ -232,30 +256,35 @@ export class ReefArena {
 
       const R = rand(2.4, 3.6, rng)
       const H = rand(1.8, 3.6, rng)
-      addMound(x, z, R, H, 2)
+      addMound(x, z, R, H, this.det.hero)
 
       // hero table stack right on the crown
-      place('table', x + rand(-0.6, 0.6, rng), z + rand(-0.6, 0.6, rng), rand(1.9, 2.8, rng), 0.3, 2)
-      if (rng() < 0.5) place('table', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(1.1, 1.6, rng), 0.1, 1)
+      place('table', x + rand(-0.6, 0.6, rng), z + rand(-0.6, 0.6, rng), rand(1.9, 2.8, rng), 0.3, this.det.hero)
+      if (rng() < 0.5) place('table', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(1.1, 1.6, rng), 0.1, this.det.mid)
       // v3: hero staghorn bushes — the signature reference species,
       // previously absent from the arena wall entirely
-      place('staghorn', x + rand(-1.3, 1.3, rng), z + rand(-1.3, 1.3, rng), rand(1.5, 2.3, rng), 0.12, 2)
-      if (rng() < 0.55) place('staghorn', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.1, 1.7, rng), 0.1, 1)
+      place('staghorn', x + rand(-1.3, 1.3, rng), z + rand(-1.3, 1.3, rng), rand(1.5, 2.3, rng), 0.12, this.det.hero)
+      if (rng() < 0.55) place('staghorn', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.1, 1.7, rng), 0.1, this.det.mid)
       // entourage around the flank
-      place('bubble', x + rand(-1.9, 1.9, rng), z + rand(-1.9, 1.9, rng), rand(1.3, 2.0, rng), 0.1, 2)
-      place('bubble', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.1, 1.7, rng), 0.1, 1)
-      place('sponge', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.2, 1.9, rng), 0.1, 2)
-      place('sponge', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.1, 1.7, rng), 0.1, 1)
-      place('finger', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.4, 2.2, rng), 0.1, 2)
-      place('finger', x + rand(-2.4, 2.4, rng), z + rand(-2.4, 2.4, rng), rand(1.0, 1.5, rng), 0.08, 1)
-      place(rng() < 0.55 ? 'redwhip' : 'spiral', x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(1.2, 1.8, rng), 0.1, 2)
-      if (rng() < 0.7) place('spiral', x + rand(-2.3, 2.3, rng), z + rand(-2.3, 2.3, rng), rand(1.1, 1.7, rng), 0.1, 1)
-      if (rng() < 0.55) place('redwhip', x + rand(-2.3, 2.3, rng), z + rand(-2.3, 2.3, rng), rand(1.1, 1.7, rng), 0.1, 1)
+      place('bubble', x + rand(-1.9, 1.9, rng), z + rand(-1.9, 1.9, rng), rand(1.3, 2.0, rng), 0.1, this.det.hero)
+      place('bubble', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.1, 1.7, rng), 0.1, this.det.mid)
+      place('sponge', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.2, 1.9, rng), 0.1, this.det.hero)
+      place('sponge', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.1, 1.7, rng), 0.1, this.det.mid)
+      place('finger', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.4, 2.2, rng), 0.1, this.det.hero)
+      place('finger', x + rand(-2.4, 2.4, rng), z + rand(-2.4, 2.4, rng), rand(1.0, 1.5, rng), 0.08, this.det.mid)
+      place(rng() < 0.55 ? 'redwhip' : 'spiral', x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(1.2, 1.8, rng), 0.1, this.det.hero)
+      if (rng() < 0.7) place('spiral', x + rand(-2.3, 2.3, rng), z + rand(-2.3, 2.3, rng), rand(1.1, 1.7, rng), 0.1, this.det.mid)
+      if (rng() < 0.55) place('redwhip', x + rand(-2.3, 2.3, rng), z + rand(-2.3, 2.3, rng), rand(1.1, 1.7, rng), 0.1, this.det.mid)
       if (rng() < 0.8) {
-        place('anemone', x + rand(-1.7, 1.7, rng), z + rand(-1.7, 1.7, rng), rand(0.9, 1.3, rng), 0.1, 2)
+        place('anemone', x + rand(-1.7, 1.7, rng), z + rand(-1.7, 1.7, rng), rand(0.9, 1.3, rng), 0.1, this.det.hero)
         const ap = new THREE.Vector3(x, this.heightAt(x, z) + 0.5, z)
         this.anemonePositions.push(ap)
       }
+      // stage 7 accents — every hero bommie gets a fire plate + odds of
+      // a clam and a feather star (spread across ALL slots = 360°)
+      place('fireplate', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(1.1, 1.7, rng), 0.08, this.det.hero)
+      if (rng() < 0.45) place('clam', x + rand(-1.9, 1.9, rng), z + rand(-1.9, 1.9, rng), rand(0.8, 1.3, rng), 0.05, this.det.hero)
+      if (rng() < 0.65) place('feather', x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(1.0, 1.6, rng), 0.04, this.det.hero)
       // small table accents at the foot
       if (rng() < 0.6) place('table', x + rand(-3, 3, rng), z + rand(-3, 3, rng), rand(0.8, 1.2, rng), 0.06, 1)
     }
@@ -270,15 +299,18 @@ export class ReefArena {
       const z = CZ + Math.sin(a) * r
       const R = rand(1.2, 1.9, rng)
       const H = rand(0.9, 1.7, rng)
-      addMound(x, z, R, H, 1)
-      place(rng() < 0.4 ? 'table' : 'finger', x + rand(-0.7, 0.7, rng), z + rand(-0.7, 0.7, rng), rand(1.1, 1.7, rng), 0.12, 1)
-      if (rng() < 0.45) place('staghorn', x + rand(-1.1, 1.1, rng), z + rand(-1.1, 1.1, rng), rand(1.0, 1.6, rng), 0.1, 1)
-      place(pickF(['bubble', 'sponge'], rng), x + rand(-1.5, 1.5, rng), z + rand(-1.5, 1.5, rng), rand(1.0, 1.5, rng), 0.08, 1)
-      place(pickF(['spiral', 'redwhip', 'finger'], rng), x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(0.9, 1.4, rng), 0.06, 1)
-      place(pickF(['sponge', 'bubble'], rng), x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.9, 1.4, rng), 0.06, 1)
-      if (rng() < 0.5) place('bubble', x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.8, 1.2, rng), 0.06, 1)
+      addMound(x, z, R, H, this.det.mid)
+      place(rng() < 0.4 ? 'table' : 'finger', x + rand(-0.7, 0.7, rng), z + rand(-0.7, 0.7, rng), rand(1.1, 1.7, rng), 0.12, this.det.mid)
+      if (rng() < 0.45) place('staghorn', x + rand(-1.1, 1.1, rng), z + rand(-1.1, 1.1, rng), rand(1.0, 1.6, rng), 0.1, this.det.mid)
+      place(pickF(['bubble', 'sponge'], rng), x + rand(-1.5, 1.5, rng), z + rand(-1.5, 1.5, rng), rand(1.0, 1.5, rng), 0.08, this.det.mid)
+      place(pickF(['spiral', 'redwhip', 'finger'], rng), x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(0.9, 1.4, rng), 0.06, this.det.mid)
+      place(pickF(['sponge', 'bubble'], rng), x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.9, 1.4, rng), 0.06, this.det.mid)
+      if (rng() < 0.5) place('bubble', x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.8, 1.2, rng), 0.06, this.det.mid)
       // anti-bolong densify: one more mid colony per sub-ring slot
-      place(pickF(['finger', 'redwhip', 'spiral', 'bubble'], rng), x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(0.9, 1.5, rng), 0.06, 1)
+      place(pickF(['finger', 'redwhip', 'spiral', 'bubble'], rng), x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(0.9, 1.5, rng), 0.06, this.det.mid)
+      // stage 7 accents for the sub-ring too
+      if (rng() < 0.5) place('fireplate', x + rand(-1.4, 1.4, rng), z + rand(-1.4, 1.4, rng), rand(0.9, 1.4, rng), 0.06, this.det.mid)
+      if (rng() < 0.45) place('feather', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(0.9, 1.4, rng), 0.04, this.det.mid)
     }
 
     // ---------- between the rings — scattered filler colonies ----------
@@ -287,7 +319,7 @@ export class ReefArena {
       const r = 36 + rng() * 9
       const x = CX + Math.cos(a) * r
       const z = CZ + Math.sin(a) * r
-      place(pickF(['bubble', 'sponge', 'finger', 'spiral', 'redwhip', 'staghorn', 'staghorn'], rng), x, z, rand(0.8, 1.4, rng), 0.06, 1)
+      place(pickF(['bubble', 'sponge', 'finger', 'spiral', 'redwhip', 'staghorn', 'staghorn', 'fireplate', 'clam'], rng), x, z, rand(0.8, 1.4, rng), 0.06, this.det.filler)
     }
 
     // ---------- clearing edge — low foreground accents framing the sand ----------
@@ -297,7 +329,7 @@ export class ReefArena {
       const x = CX + Math.cos(a) * r
       const z = CZ + Math.sin(a) * r
       const kind = pickF(['bubble', 'sponge', 'spiral', 'finger'], rng)
-      place(kind, x, z, rand(0.9, 1.4, rng), 0.05, 1)
+      place(kind, x, z, rand(0.9, 1.4, rng), 0.05, this.det.filler)
       if (kind === 'anemone') this.anemonePositions.push(new THREE.Vector3(x, this.heightAt(x, z) + 0.4, z))
     }
 
@@ -309,7 +341,7 @@ export class ReefArena {
         const r = 26 + i * rand(5, 7.5, rng)
         const x = CX + Math.cos(a) * r
         const z = CZ + Math.sin(a) * r
-        place(pickF(['redwhip', 'spiral', 'bubble'], rng), x, z, rand(0.7, 1.15, rng), 0.05, i < 2 ? 1 : 0)
+        place(pickF(['redwhip', 'spiral', 'bubble'], rng), x, z, rand(0.7, 1.15, rng), 0.05, i < 2 ? this.det.mid : this.det.far)
       }
     }
 
@@ -322,16 +354,19 @@ export class ReefArena {
 
       const R = rand(3.2, 4.6, rng)
       const H = rand(2.2, 3.8, rng)
-      addMound(x, z, R, H, 1)
+      addMound(x, z, R, H, this.det.mid)
 
-      place('table', x + rand(-0.8, 0.8, rng), z + rand(-0.8, 0.8, rng), rand(2.8, 4.0, rng), 0.4, 1)
-      place('staghorn', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.8, 2.6, rng), 0.12, 1)
-      place('bubble', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.6, 2.4, rng), 0.1, 1)
-      place('sponge', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.5, 2.2, rng), 0.1, 1)
-      place('finger', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.7, 2.6, rng), 0.1, 1)
-      place(rng() < 0.5 ? 'redwhip' : 'spiral', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.5, 2.2, rng), 0.1, 1)
-      place(pickF(['bubble', 'sponge', 'spiral'], rng), x + rand(-3.2, 3.2, rng), z + rand(-3.2, 3.2, rng), rand(1.2, 1.8, rng), 0.08, 1)
-      if (rng() < 0.6) place('table', x + rand(-3.6, 3.6, rng), z + rand(-3.6, 3.6, rng), rand(1.3, 2.0, rng), 0.08, 0)
+      place('table', x + rand(-0.8, 0.8, rng), z + rand(-0.8, 0.8, rng), rand(2.8, 4.0, rng), 0.4, this.det.mid)
+      place('staghorn', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.8, 2.6, rng), 0.12, this.det.mid)
+      place('fireplate', x + rand(-2.4, 2.4, rng), z + rand(-2.4, 2.4, rng), rand(1.6, 2.4, rng), 0.1, this.det.mid)
+      if (rng() < 0.55) place('clam', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.1, 1.7, rng), 0.06, this.det.mid)
+      if (rng() < 0.6) place('feather', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.2, 1.9, rng), 0.05, this.det.mid)
+      place('bubble', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.6, 2.4, rng), 0.1, this.det.mid)
+      place('sponge', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.5, 2.2, rng), 0.1, this.det.mid)
+      place('finger', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.7, 2.6, rng), 0.1, this.det.mid)
+      place(rng() < 0.5 ? 'redwhip' : 'spiral', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.5, 2.2, rng), 0.1, this.det.mid)
+      place(pickF(['bubble', 'sponge', 'spiral'], rng), x + rand(-3.2, 3.2, rng), z + rand(-3.2, 3.2, rng), rand(1.2, 1.8, rng), 0.08, this.det.mid)
+      if (rng() < 0.6) place('table', x + rand(-3.6, 3.6, rng), z + rand(-3.6, 3.6, rng), rand(1.3, 2.0, rng), 0.08, this.det.far)
     }
 
     // ---------- ring C — distant giant silhouettes fading into the blue ----------
@@ -343,10 +378,10 @@ export class ReefArena {
 
       const R = rand(4.5, 6.5, rng)
       const H = rand(3.5, 6, rng)
-      addMound(x, z, R, H, 0)
-      place('table', x, z, rand(3.8, 5.2, rng), 0.5, 0)
-      if (rng() < 0.7) place('sponge', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.0, 3.0, rng), 0.1, 0)
-      if (rng() < 0.6) place('finger', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.2, 3.2, rng), 0.1, 0)
+      addMound(x, z, R, H, this.det.far)
+      place('table', x, z, rand(3.8, 5.2, rng), 0.5, this.det.far)
+      if (rng() < 0.7) place('sponge', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.0, 3.0, rng), 0.1, this.det.far)
+      if (rng() < 0.6) place('finger', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.2, 3.2, rng), 0.1, this.det.far)
     }
 
     // ---------- backfill ridge — continuous 360° reef wall (anti-bolong) ----------
@@ -434,7 +469,8 @@ export class ReefArena {
       this.tris += (idx.length / 3)
       const ridgeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01, side: THREE.DoubleSide })
       ridgeMat.onBeforeCompile = (shader) => {
-        injectSilhouette(shader, { start: 46, end: 105, k: 0.8, color: '#0d4266' })
+        injectCaustic(shader, { scale: 0.4, strength: 0.4 })
+        injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       ridgeMat.customProgramCacheKey = () => 'arena-ridge'
       this.group.add(new THREE.Mesh(ridge, ridgeMat))
@@ -472,7 +508,8 @@ export class ReefArena {
       this.tris += merged.attributes.position.count / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01 })
       mat.onBeforeCompile = (shader) => {
-        injectSilhouette(shader, { start: 46, end: 105, k: 0.8, color: '#0d4266' })
+        injectCaustic(shader, { scale: 0.4, strength: 0.42 })
+        injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       mat.customProgramCacheKey = () => 'arena-mound'
       this.group.add(new THREE.Mesh(merged, mat))
@@ -484,7 +521,8 @@ export class ReefArena {
       this.tris += merged.attributes.position.count / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.02 })
       mat.onBeforeCompile = (shader) => {
-        injectSilhouette(shader, { start: 46, end: 105, k: 0.8, color: '#0d4266' })
+        injectCaustic(shader, { scale: 0.5, strength: 0.45 })
+        injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       mat.customProgramCacheKey = () => 'arena-rubble'
       this.group.add(new THREE.Mesh(merged, mat))

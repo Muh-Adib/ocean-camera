@@ -8,6 +8,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32, noise2 } from '../utils/math'
+import { addCaustic } from './causticInject'
 import type { Obstacle } from './Rocks'
 import type { GrowthSpot } from './LimestoneReef'
 
@@ -228,17 +229,19 @@ export class SpongeSystem {
       placeSponge(i === 1 ? 'barrel' : 'tube', spot.pos.x, spot.pos.z, 0.55 + rng() * 0.3, spot.pos.y - 0.05)
     }
 
-    const addMesh = (list: THREE.BufferGeometry[]) => {
+    const addMesh = (list: THREE.BufferGeometry[], key: string) => {
       if (!list.length) return
       const merged = mergeGeometries(list, false)!
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.0 })
+      // wet sponge surfaces shimmer with the water-caustic dance too
+      addCaustic(mat, { scale: 0.5, strength: 0.55 }, `sponge-cau-${key}`)
       const mesh = new THREE.Mesh(merged, mat)
       this.group.add(mesh)
       this.meshes.push(mesh)
     }
-    addMesh(barrelGeos)
-    addMesh(tubeGeos)
-    addMesh(crustGeos)
+    addMesh(barrelGeos, 'barrel')
+    addMesh(tubeGeos, 'tube')
+    addMesh(crustGeos, 'crust')
   }
 
   dispose() {

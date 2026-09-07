@@ -66,10 +66,14 @@ export class SceneManager {
       depthWrite: false,
       fog: false,
       uniforms: {
-        uTop: { value: new THREE.Color('#a8f0ee') },
-        uMid: { value: new THREE.Color('#2fb9cc') },
-        uBottom: { value: new THREE.Color('#0a5f76') },
+        // deeper lagoon blues (reference: "deep blue water tones") — a
+        // softer horizon contrast lets far reef read as HAZY blue depth
+        // instead of hard black cutouts
+        uTop: { value: new THREE.Color('#96e2e4') },
+        uMid: { value: new THREE.Color('#249dbd') },
+        uBottom: { value: new THREE.Color('#084f66') },
         uEnergy: sharedUniforms.uEnergy,
+        uTime: sharedUniforms.uTime,
       },
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -80,6 +84,7 @@ export class SceneManager {
       fragmentShader: /* glsl */`
         uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uBottom;
         uniform float uEnergy;
+        uniform float uTime;
         varying vec3 vWorld;
         void main() {
           float h = normalize(vWorld).y;              // -1 .. 1
@@ -89,6 +94,17 @@ export class SceneManager {
           // depth-of-field falloff: darken toward the lower rim of the
           // arena so the far reef sinks into blue silhouette
           c *= mix(0.5, 1.06, smoothstep(-0.55, 0.28, h));
+          // — 360° correction: looking UP must read as LIGHT, not void —
+          // a soft zenith glow + slow caustic veils so the overhead
+          // direction carries the sun even when the surface plane is
+          // outside the (pitch-clamped) view frustum
+          float zen = pow(max(h, 0.0), 2.4);
+          vec2 dp = normalize(vWorld).xz * 3.1;
+          float vt = uTime * 0.32;
+          float veil = sin(dp.x * 1.7 + vt)
+                     * sin(dp.y * 1.9 - vt * 1.23 + sin(dp.x * 0.8 + vt * 0.7) * 1.4);
+          veil = pow(max(veil, 0.0), 1.6);
+          c += vec3(0.42, 0.78, 0.9) * zen * (0.3 + 0.3 * veil) * (0.8 + uEnergy * 0.4);
           c *= 0.82 + uEnergy * 0.35;                 // ecosystem energy brightens the water
           gl_FragColor = vec4(c, 1.0);
           #include <colorspace_fragment>
@@ -110,9 +126,9 @@ export class SceneManager {
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       uniforms: {
-        uTop: { value: new THREE.Color('#a8f0ee') },
-        uMid: { value: new THREE.Color('#2fb9cc') },
-        uBottom: { value: new THREE.Color('#0a5f76') },
+        uTop: { value: new THREE.Color('#96e2e4') },
+        uMid: { value: new THREE.Color('#249dbd') },
+        uBottom: { value: new THREE.Color('#084f66') },
       },
       vertexShader: /* glsl */`
         varying vec3 vWorld;

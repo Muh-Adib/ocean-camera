@@ -10,6 +10,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32, noise2, fbm2 } from '../utils/math'
+import { addCaustic } from './causticInject'
 import type { Obstacle } from './Rocks'
 
 export interface GrowthSpot {
@@ -189,6 +190,9 @@ export class LimestoneReef {
     const towerMat = new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.94, metalness: 0.0,
     })
+    // caustic light dances over the limestone towers — the hero centre
+    // shimmers from every side (360°), not just the camera-facing face
+    addCaustic(towerMat, { scale: 0.4, strength: 0.48 }, 'limestone-tower')
     const towerMesh = new THREE.Mesh(towerMeshGeo, towerMat)
     this.group.add(towerMesh)
     this.meshes.push(towerMesh)
@@ -198,6 +202,7 @@ export class LimestoneReef {
       const rubbleMat = new THREE.MeshStandardMaterial({
         vertexColors: true, roughness: 0.97, metalness: 0.0,
       })
+      addCaustic(rubbleMat, { scale: 0.5, strength: 0.42 }, 'limestone-rubble')
       const rubbleMesh = new THREE.Mesh(rubbleGeo, rubbleMat)
       this.group.add(rubbleMesh)
       this.meshes.push(rubbleMesh)

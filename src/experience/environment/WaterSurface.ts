@@ -56,7 +56,7 @@ export class WaterSurface {
           float e = 1.4;
           float hx = wave(pos.xz + vec2(e, 0.0), t) - wave(pos.xz - vec2(e, 0.0), t);
           float hz = wave(pos.xz + vec2(0.0, e), t) - wave(pos.xz - vec2(0.0, e), t);
-          vNrm = normalize(vec3(-hx, 2.0 * e, -hz));
+          vNrm = normalize(vec3(-hx, -2.0 * e, -hz));   // face DOWN toward the diver (underside!)
           vec4 wp = modelMatrix * vec4(pos, 1.0);
           vWorld = wp.xyz;
           gl_Position = projectionMatrix * viewMatrix * wp;
@@ -96,7 +96,9 @@ export class WaterSurface {
 
           float edge = smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x)
                      * smoothstep(0.0, 0.16, vUv.y) * smoothstep(1.0, 0.84, vUv.y);
-          float a = uOpacity * edge * (0.42 + win * 0.55);
+          // 360° correction: raise the base so the shimmering ceiling
+          // reads from mid-slopes too, not only straight overhead
+          float a = uOpacity * edge * (0.52 + win * 0.5);
           gl_FragColor = vec4(col, a);
           #include <colorspace_fragment>
         }`,
