@@ -156,6 +156,16 @@ function buildBody(): THREE.BufferGeometry {
     n.setXYZ(a, nx / l, ny / l, nz / l)
     n.setXYZ(b, nx / l, ny / l, nz / l)
   }
+  // close the snout with a fan cap (ring 0)
+  const { top: sTop, bot: sBot } = statAt(0)
+  const cySnout = (wy(sTop) + wy(sBot)) / 2
+  const snoutCenterIdx = pos.length / 3
+  pos.push(0, cySnout, wz(0) + 0.005)
+  uv.push(0, 0)
+  for (let j = 0; j < RAD; j++) {
+    idx.push(snoutCenterIdx, j, j + 1)
+  }
+
   // close the peduncle with a fan cap (hidden inside the tail root)
   const { top: pTop, bot: pBot } = statAt(PED_X)
   const cyC = (wy(pTop) + wy(pBot)) / 2
@@ -207,25 +217,70 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   parts.push(finShell(TAIL))
   parts.push(finShell(ANAL))
 
-  // paired fins — the drawing shows one of each; the 3D fish wears
-  // a mirrored pair so it reads as a real fish from every side.
-  // Each fin rotates around its own DRAWN base arc, and the flare is
-  // kept gentle so the side view stays identical to the drawing.
+  // paired fins — mirrored pair with exact sagittal symmetry.
+  // Each fin rotates around its own drawn base arc, seated at the flank surface.
   const pecBase: [number, number] = [0.272, 0.672]   // drawn base arc centre
   const pelBase: [number, number] = [0.345, 0.885]   // drawn pelvic root on the belly
-  for (const side of [1, -1] as const) {
-    const pec = finShell(PECTORAL)
-    pec.translate(-wz(pecBase[0]), -wy(pecBase[1]), 0)
-    pec.rotateY(side * -0.55)
-    pec.translate(wz(pecBase[0]), wy(pecBase[1]), side * 0.03)
-    parts.push(pec)
 
-    const pel = finShell(PELVIC)
-    pel.translate(-wz(pelBase[0]), -wy(pelBase[1]), 0)
-    pel.rotateY(side * -0.26)
-    pel.translate(wz(pelBase[0]), wy(pelBase[1]), side * 0.05)
-    parts.push(pel)
+  // Pectoral fins
+  const pecZ = wz(pecBase[0])
+  const pecY = wy(pecBase[1])
+  const pecSx = surfaceXAt(pecBase[0], pecY)
+
+  const rightPec = finShell(PECTORAL)
+  rightPec.translate(0, -pecY, -pecZ)
+
+  // assign paddle weights (0 at base origin -> 1 at fin edge)
+  const pecPos = rightPec.attributes.position
+  const paddleArr = new Float32Array(pecPos.count)
+  const maxPecDist = 0.16
+  for (let i = 0; i < pecPos.count; i++) {
+    const d = Math.hypot(pecPos.getX(i), pecPos.getY(i), pecPos.getZ(i))
+    paddleArr[i] = Math.min(1, Math.max(0, d / maxPecDist))
   }
+  rightPec.setAttribute('aPecPaddle', new THREE.BufferAttribute(paddleArr, 1))
+
+  rightPec.rotateY(-0.5)
+  rightPec.translate(pecSx * 0.82, pecY, pecZ)
+  parts.push(rightPec)
+
+  const leftPec = rightPec.clone()
+  leftPec.scale(-1, 1, 1)
+  if (leftPec.index) {
+    const arr = leftPec.index.array as Uint16Array | Uint32Array
+    for (let i = 0; i < arr.length; i += 3) {
+      const tmp = arr[i]
+      arr[i] = arr[i + 1]
+      arr[i + 1] = tmp
+    }
+  }
+  leftPec.computeVertexNormals()
+  parts.push(leftPec)
+
+  // Pelvic fins
+  const pelZ = wz(pelBase[0])
+  const pelY = wy(pelBase[1])
+  const pelSx = surfaceXAt(pelBase[0], pelY)
+
+  const rightPel = finShell(PELVIC)
+  rightPel.translate(0, -pelY, -pelZ)
+  rightPel.rotateY(-0.22)
+  rightPel.rotateX(-0.35)
+  rightPel.translate(pelSx * 0.65, pelY, pelZ)
+  parts.push(rightPel)
+
+  const leftPel = rightPel.clone()
+  leftPel.scale(-1, 1, 1)
+  if (leftPel.index) {
+    const arr = leftPel.index.array as Uint16Array | Uint32Array
+    for (let i = 0; i < arr.length; i += 3) {
+      const tmp = arr[i]
+      arr[i] = arr[i + 1]
+      arr[i + 1] = tmp
+    }
+  }
+  leftPel.computeVertexNormals()
+  parts.push(leftPel)
 
   // real 3D eyes seated where the pupil was drawn
   const eyeZ = wz(EYE.x)
@@ -236,7 +291,13 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   parts.push(...makeEyeParts(-1, sx, eyeY, eyeZ, eyeR, '#232a31'))
 
   const merged = mergeGeometries(
-    parts.map((p) => (p.index ? p.toNonIndexed() : p)),
+    parts.map((p) => {
+      const g = p.index ? p.toNonIndexed() : p
+      if (!g.attributes.aPecPaddle) {
+        g.setAttribute('aPecPaddle', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1))
+      }
+      return g
+    }),
     false,
   )!
   return { geometry: merged }

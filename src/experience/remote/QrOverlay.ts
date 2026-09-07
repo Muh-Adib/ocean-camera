@@ -10,6 +10,7 @@
 // phone leaves (unless the operator dismissed it for this session).
 // ---------------------------------------------------------------
 import QRCode from 'qrcode'
+import { cleanSessionId } from './RemoteLink'
 import type { ProjectionSurface } from '../projection/ProjectionTypes'
 import './remote.css'
 
@@ -31,6 +32,8 @@ export class QrOverlay {
   dismissed = false
   /** phone currently linked (driven by ScreenLink presence) */
   phoneOn = false
+  /** show session — deep-link tag for the fallback card */
+  session = 'main'
   /** set by ProjectionManager — true while the wall QR has a host surface */
   hasWallHost: (() => boolean) | null = null
   private timer = 0
@@ -61,7 +64,23 @@ export class QrOverlay {
     })
 
     // draw the QR once — the URL is this page's own origin + /control-mobile
-    const url = `${location.origin}/control-mobile`
+    this.drawQr()
+
+    this.timer = window.setInterval(() => this.tick(), TICK_MS)
+  }
+
+  /** switch the session tag — redraws the fallback card's code */
+  setSession(id: string) {
+    const clean = cleanSessionId(id)
+    if (clean === this.session) return
+    this.session = clean
+    this.drawQr()
+  }
+
+  private drawQr() {
+    const url = this.session === 'main'
+      ? `${location.origin}/control-mobile`
+      : `${location.origin}/control-mobile?s=${this.session}`
     if (this.canvas) {
       QRCode.toCanvas(this.canvas, url, {
         width: 220,
@@ -72,8 +91,6 @@ export class QrOverlay {
         if (this.hint) this.hint.textContent = url
       })
     }
-
-    this.timer = window.setInterval(() => this.tick(), TICK_MS)
   }
 
   /** recompute position/size from the current surfaces (called on a timer) */

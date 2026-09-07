@@ -7,6 +7,13 @@ export const metadata: Metadata = {
     "An immersive 3D underwater ecosystem. Move your hand — swipes, pushes and open palms create currents that fish, plankton, seaweed and light all respond to. Camera video is processed locally and never uploaded.",
   keywords: ["3D ocean", "Three.js", "hand tracking", "interactive experience", "underwater", "WebGL"],
   authors: [{ name: "Living Ocean" }],
+  icons: {
+    icon: [
+      { url: "/logo.svg", type: "image/svg+xml" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+  },
   openGraph: {
     title: "The Living Ocean",
     description: "Move your hand — watch the ocean respond.",

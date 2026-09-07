@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------
 // ProjectionEditorUI — professional projection-mapping studio
 // chrome: surfaces rack (left), live properties (right), tabbed
-// dock (output / warp / camera / blend / calibration / project),
-// and the fullscreen OUTPUT toggle. Animated with GSAP.
+// dock (output / warp / camera / blend / calibration / fish / project),
+// a live STATUS BAR, and the fullscreen OUTPUT toggle. Animated with GSAP.
 // ---------------------------------------------------------------
 import gsap from 'gsap'
 import type { ProjectionManager } from './ProjectionManager'
@@ -14,8 +14,11 @@ import { PRESETS } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
 import { downloadFishTemplate, TEMPLATE_URL } from '../fish/FishTemplate'
 import { processFishImage } from '../fish/FishScan'
+import { FolderSync } from '../fish/FolderSync'
 
 const AIM_TARGET: [number, number, number] = [0, 1.4, -8]
+/** remembered show sessions for the FISH-studio chips */
+const SESSIONS_HISTORY_KEY = 'ocean-tank-sessions'
 
 export class ProjectionEditorUI {
   root: HTMLElement
@@ -45,6 +48,7 @@ export class ProjectionEditorUI {
     this.root.innerHTML = `
       <header class="pm-topbar">
         <div class="pm-brand">PROJECTION MAPPING<span>OCEAN · MULTI-SURFACE OUTPUT</span></div>
+        <div class="pm-pills" id="pm-pills"></div>
         <div class="pm-top-group">
           <label class="pm-label" for="pm-preset">PRESET</label>
           <select id="pm-preset" class="pm-select"></select>
@@ -83,11 +87,12 @@ export class ProjectionEditorUI {
           <button data-tab="camera" class="pm-tab">CAMERA</button>
           <button data-tab="blend" class="pm-tab">BLEND</button>
           <button data-tab="calibration" class="pm-tab">CALIBRATION</button>
+          <button data-tab="fish" class="pm-tab pm-tab-fish">FISH STUDIO</button>
           <button data-tab="project" class="pm-tab">PROJECT</button>
-          <button data-tab="fish" class="pm-tab">FISH</button>
         </div>
         <div class="pm-tab-body" id="pm-tab-body"></div>
-      </div>`
+      </div>
+      <footer class="pm-statusbar" id="pm-statusbar"></footer>`
 
     // fullscreen output chrome (visible only in output mode)
     this.chrome = document.createElement('div')
@@ -107,6 +112,11 @@ export class ProjectionEditorUI {
     this.nodeEditor.onFullscreen = () => this.toggleFullscreenEditor()
     this.compositeCanvas.width = 480
     this.compositeCanvas.height = 270
+
+    // live folder sync (exhibition scanner) — one instance per studio
+    this.folderSync = new FolderSync()
+    this.folderSync.onDesign = (design) => this.postFish({ action: 'add', design })
+
     // tab switching
     this.root.querySelectorAll('.pm-tab').forEach((t) => {
       t.addEventListener('click', () => this.showTab((t as HTMLElement).dataset.tab!))
@@ -400,6 +410,7 @@ export class ProjectionEditorUI {
 
   private buildProjectPane() {
     const { body } = this.pane('PROJECT — output & files')
+    const gCanvas = this.collap(body, 'OUTPUT CANVAS & RATIO', true)
     const resRow = document.createElement('div')
     resRow.className = 'pm-row'
     resRow.appendChild(this.labelEl('OUTPUT RESOLUTION'))
@@ -432,7 +443,7 @@ export class ProjectionEditorUI {
       this.showTab('project')
     })
     resRow.appendChild(rsel)
-    body.appendChild(resRow)
+    gCanvas.appendChild(resRow)
 
     // ---- free output canvas size + ratio (Resolume-style master aspect) ----
     const whRow = document.createElement('div')
@@ -443,7 +454,7 @@ export class ProjectionEditorUI {
     whRow.appendChild(this.numField('CANVAS H', this.pm.output.height, 4, (v) => {
       this.pm.setOutputSize(this.pm.output.width, Math.max(240, Math.min(8640, v)))
     }, 240, 8640))
-    body.appendChild(whRow)
+    gCanvas.appendChild(whRow)
 
     const ratioRow = document.createElement('div')
     ratioRow.className = 'pm-btn-row'
@@ -459,9 +470,10 @@ export class ProjectionEditorUI {
         this.showTab('project')
       }, 'pm-btn-sm'))
     }
-    body.appendChild(ratioRow)
+    gCanvas.appendChild(ratioRow)
 
     // ---- output quality — sized to the machine driving the show ----
+    const gQuality = this.collap(body, 'OUTPUT QUALITY', true)
     const qRow = document.createElement('div')
     qRow.className = 'pm-row'
     qRow.appendChild(this.labelEl('OUTPUT QUALITY'))
@@ -487,7 +499,7 @@ export class ProjectionEditorUI {
       this.showTab('project')   // rebuild so slider/readout match the new profile
     })
     qRow.appendChild(qsel)
-    body.appendChild(qRow)
+    gQuality.appendChild(qRow)
 
     if (this.pm.output.quality === 'custom') {
       const sRow = document.createElement('div')
@@ -508,7 +520,7 @@ export class ProjectionEditorUI {
         this.pm.setRenderScale(Number(slider.value) / 100)
       })
       sRow.append(slider, sVal)
-      body.appendChild(sRow)
+      gQuality.appendChild(sRow)
     } else {
       const rt = this.pm.effectiveRT()
       const read = document.createElement('div')
@@ -518,11 +530,12 @@ export class ProjectionEditorUI {
       lines.push(`GPU frame: ${this.pm.frameCost.toFixed(1)} ms · ${this.pm.surfaces.surfaces.filter((s) => s.enabled).length} camera(s) render the shared scene`)
       if (this.pm.output.quality === 'auto') lines.push('AUTO keeps adjusting the scale from live frame cost — no action needed')
       read.innerHTML = lines.map((l) => `<span>${l}</span>`).join('')
-      body.appendChild(read)
+      gQuality.appendChild(read)
     }
-    body.appendChild(this.hint(`Quality profiles set how many real pixels each surface renders before warping. ${QUALITY_PROFILES.balanced.hint}. AUTO measures frame cost and moves between ~30% and 95% on its own — pick PERFORMANCE on weak machines or ULTRA when the projector wall deserves every pixel.`))
+    gQuality.appendChild(this.hint(`Quality profiles set how many real pixels each surface renders before warping. ${QUALITY_PROFILES.balanced.hint}. AUTO measures frame cost and moves between ~30% and 95% on its own — pick PERFORMANCE on weak machines or ULTRA when the projector wall deserves every pixel.`))
 
-    body.appendChild(this.sepEl())
+    // ---- project files ----
+    const gFiles = this.collap(body, 'PROJECT FILES — save / export / import', false)
     const fileRow = document.createElement('div')
     fileRow.className = 'pm-btn-row'
     fileRow.appendChild(this.btn('EXPORT .JSON', () => this.pm.project.exportFile()))
@@ -531,7 +544,7 @@ export class ProjectionEditorUI {
       if (ok) this.pm.depsToast('Projection project imported', 2600)
       else this.pm.depsToast('Import failed — not a valid projection project', 3200)
     }))
-    body.appendChild(fileRow)
+    gFiles.appendChild(fileRow)
 
     const saveRow = document.createElement('div')
     saveRow.className = 'pm-btn-row'
@@ -542,12 +555,11 @@ export class ProjectionEditorUI {
       this.pm.applyPreset('flat-screen', { history: false })
       this.pm.depsToast('Project reset', 2000)
     }))
-    body.appendChild(saveRow)
-    body.appendChild(this.hint('Projects autosave to this browser. Export writes ocean-projection.project.json for other machines and shows.'))
+    gFiles.appendChild(saveRow)
+    gFiles.appendChild(this.hint('Projects autosave to this browser. Export writes ocean-projection.project.json for other machines and shows.'))
 
     // ---- output sessions — published setups with permanent /output?s= links ----
-    body.appendChild(this.sepEl())
-    body.appendChild(this.labelEl('OUTPUT SESSIONS — SHAREABLE OUTPUT LINKS'))
+    const gSessions = this.collap(body, 'OUTPUT SESSIONS — SHAREABLE OUTPUT LINKS', true)
     const pubRow = document.createElement('div')
     pubRow.className = 'pm-row'
     const sessName = document.createElement('input')
@@ -561,11 +573,11 @@ export class ProjectionEditorUI {
       this.showTab('project')
     }, 'pm-btn-sm')
     pubRow.append(sessName, pubBtn)
-    body.appendChild(pubRow)
+    gSessions.appendChild(pubRow)
 
     const sessions = this.pm.listSessions()
     if (!sessions.length) {
-      body.appendChild(this.hint('Publish the current setup to get a permanent output link. COPY LINK gives a PORTABLE URL — the whole show rides inside the link itself, so the projector machine opens these exact settings with no studio open, no shared browser, nothing else needed. Publish again with the same name to update the link in place.'))
+      gSessions.appendChild(this.hint('Publish the current setup to get a permanent output link. COPY LINK gives a PORTABLE URL — the whole show rides inside the link itself, so the projector machine opens these exact settings with no studio open, no shared browser, nothing else needed. Publish again with the same name to update the link in place.'))
     } else {
       const list = document.createElement('div')
       list.className = 'pm-session-list'
@@ -605,13 +617,12 @@ export class ProjectionEditorUI {
         row.append(label, when, tools)
         list.appendChild(row)
       }
-      body.appendChild(list)
-      body.appendChild(this.hint('COPY LINK puts the projector URL on the clipboard. LOAD restores the session here so you can keep editing it — publish again with the same name to refresh its link.'))
+      gSessions.appendChild(list)
+      gSessions.appendChild(this.hint('COPY LINK puts the projector URL on the clipboard. LOAD restores the session here so you can keep editing it — publish again with the same name to refresh its link.'))
     }
 
     // ---- phone QR on the wall — which surface carries the invitation ----
-    body.appendChild(this.sepEl())
-    body.appendChild(this.labelEl('PHONE QR ON WALL'))
+    const gQr = this.collap(body, 'PHONE REMOTE — WALL QR HOST', false)
     const qrSel = document.createElement('select')
     qrSel.className = 'pm-select'
     const fillQr = () => {
@@ -632,17 +643,33 @@ export class ProjectionEditorUI {
     }
     fillQr()
     qrSel.addEventListener('change', () => this.pm.setQrHost(qrSel.value))
-    body.appendChild(qrSel)
-    body.appendChild(this.hint('While no phone is connected, a live QR rides ON this surface\u2019s picture — warped with the wall, so it reads perfectly straight on the physical wall and follows every move, morph and preset. It vanishes the moment a phone links and returns when the phone leaves.'))
+    gQr.appendChild(qrSel)
+    gQr.appendChild(this.hint('While no phone is connected, a live QR rides ON this surface\u2019s picture — warped with the wall, so it reads perfectly straight on the physical wall and follows every move, morph and preset. It vanishes the moment a phone links and returns when the phone leaves. The QR deep-links the CURRENT show session.'))
   }
 
-  // ------------------------------------------------------------ FISH tab — painted fish import
+  // ------------------------------------------------------------ FISH STUDIO tab — sessions, scans, folder sync, tank
   private fishDesigns: { id: string; name: string; url: string }[] = []
   private fishBusy = false
+  private folderSync!: FolderSync
+
+  // ---- show session helpers (localStorage history for the chips) ----
+  private sessionHistory(): string[] {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SESSIONS_HISTORY_KEY) || '[]') as unknown
+      if (Array.isArray(raw)) return raw.filter((s): s is string => typeof s === 'string' && !!s).slice(0, 10)
+    } catch { /* corrupt — ignore */ }
+    return []
+  }
+
+  private rememberSession(id: string) {
+    const list = this.sessionHistory().filter((s) => s !== id)
+    list.unshift(id)
+    try { localStorage.setItem(SESSIONS_HISTORY_KEY, JSON.stringify(list.slice(0, 10))) } catch { /* noop */ }
+  }
 
   private async loadFishDesigns() {
     try {
-      const res = await fetch('/api/fish?full=1', { cache: 'no-store' })
+      const res = await fetch(`/api/fish?full=1&session=${encodeURIComponent(this.pm.tankSession)}`, { cache: 'no-store' })
       if (!res.ok) return
       const data = await res.json() as { designs?: { id: string; name: string; url: string }[] }
       this.fishDesigns = Array.isArray(data.designs) ? data.designs : []
@@ -654,7 +681,7 @@ export class ProjectionEditorUI {
       const res = await fetch('/api/fish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...body, session: this.pm.tankSession }),
       })
       const data = await res.json() as { ok?: boolean; error?: string }
       if (!data.ok) this.pm.depsToast(data.error || 'Fish tank refused the design', 3200)
@@ -667,23 +694,55 @@ export class ProjectionEditorUI {
 
   private buildFishPane() {
     const { body } = this.pane('FISH STUDIO — COLOUR A FISH, IT SWIMS IN THE OCEAN')
+    const session = this.pm.tankSession
 
-    // ---- step 1: template ----
+    // ================= SHOW SESSION — isolation =================
+    body.appendChild(this.sectionEl('SHOW SESSION — tank & phone remote are isolated per session'))
+    const chipRow = document.createElement('div')
+    chipRow.className = 'pm-btn-row pm-btn-row-wrap'
+    const chips = new Set<string>(['main', session, ...this.sessionHistory()])
+    for (const id of chips) {
+      const chip = this.btn(id.toUpperCase(), () => {
+        if (id === this.pm.tankSession) return
+        this.rememberSession(id)
+        this.pm.setTankSession(id)
+        this.showTab('fish')
+      }, 'pm-btn-sm' + (id === session ? ' pm-btn-active' : ''))
+      chip.title = id === session ? 'Active session' : `Switch to session “${id}”`
+      chipRow.appendChild(chip)
+    }
+    const newInput = document.createElement('input')
+    newInput.type = 'text'
+    newInput.className = 'pm-input pm-input-sm'
+    newInput.maxLength = 24
+    newInput.placeholder = 'new session id…'
+    const newBtn = this.btn('CREATE', () => {
+      const id = newInput.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24)
+      if (!id) return
+      this.rememberSession(id)
+      this.pm.setTankSession(id)
+      this.showTab('fish')
+    }, 'pm-btn-sm')
+    chipRow.append(newInput, newBtn)
+    body.appendChild(chipRow)
+    body.appendChild(this.hint(`Active: “${session.toUpperCase()}”. Only this session's scans swim in the tank, and only phones linked to this session (QR deep-link) can steer the screens — perfect when several shows share one server.`))
+
+    // ================= SCAN & IMPORT =================
+    body.appendChild(this.sepEl())
+    body.appendChild(this.sectionEl('SCAN & IMPORT — sheet in, fish out'))
     const tplRow = document.createElement('div')
-    tplRow.className = 'pm-btn-row'
+    tplRow.className = 'pm-btn-row pm-fish-tpl-row'
     tplRow.appendChild(this.btn('DOWNLOAD TEMPLATE', async () => {
       const ok = await downloadFishTemplate()
       this.pm.depsToast(ok ? 'Template saved — print it, colour it, snap a photo' : 'Template could not be loaded', 3600)
     }, 'pm-btn-sm'))
-    body.appendChild(tplRow)
     const tplPrev = document.createElement('img')
     tplPrev.src = TEMPLATE_URL
     tplPrev.alt = 'The official fish template'
-    tplPrev.className = 'pm-fish-tpl'
-    body.appendChild(tplPrev)
-    body.appendChild(this.hint('1 · DOWNLOAD TEMPLATE gives you the official fish sheet (nose left, tail right). Print it, colour it with crayons, markers or paint — bold, bright colours read best on the reef.'))
+    tplPrev.className = 'pm-fish-tpl pm-fish-tpl-mini'
+    tplRow.appendChild(tplPrev)
+    body.appendChild(tplRow)
 
-    // ---- step 2: import ----
     const importRow = document.createElement('div')
     importRow.className = 'pm-btn-row'
 
@@ -727,7 +786,7 @@ export class ProjectionEditorUI {
       this.fishBusy = false
       status.textContent = ''
       if (ok) {
-        this.pm.depsToast(`${ok} fish released into the ocean — they swim in on every screen`, 3800)
+        this.pm.depsToast(`${ok} fish released into session “${session}” — they swim in on every screen`, 3800)
         this.pm.fishTank?.poke()
       }
       await this.loadFishDesigns()
@@ -737,16 +796,23 @@ export class ProjectionEditorUI {
     folderInput.addEventListener('change', () => void handleFiles(folderInput.files))
 
     importRow.appendChild(this.btn('IMPORT PHOTO / SCAN', () => photoInput.click(), 'pm-btn-sm'))
-    importRow.appendChild(this.btn('IMPORT FOLDER', () => folderInput.click(), 'pm-btn-sm'))
+    importRow.appendChild(this.btn('IMPORT FOLDER (ONCE)', () => folderInput.click(), 'pm-btn-sm'))
     importRow.append(photoInput, folderInput)
     body.appendChild(importRow)
     body.appendChild(status)
-    body.appendChild(this.hint('2 · IMPORT PHOTO picks one or more photos; IMPORT FOLDER scans a whole local folder and releases every image it finds. Lay the sheet flat, shoot straight on in good light — the drawing is found automatically.'))
-    body.appendChild(this.hint('Every picture spawns 1–3 of that fish. While a painted fish swims, the regular reef fish step aside so the hand-made ones carry the show.'))
+    body.appendChild(this.hint('One-off imports: pick photos or a whole folder — each picture spawns 1–3 fish. The scan crops EXACTLY to the drawn fish (frame, table and background never enter the texture). While a painted fish swims, the regular reef fish step aside.'))
 
-    // ---- step 3: the tank ----
+    // ================= LIVE FOLDER SYNC (exhibition scanner) =================
     body.appendChild(this.sepEl())
-    body.appendChild(this.labelEl('IN THE TANK'))
+    body.appendChild(this.sectionEl('LIVE FOLDER SYNC — scanner machine drops scans, the pool fills itself'))
+    body.appendChild(this.buildFolderSyncPanel())
+
+    // ================= TANK =================
+    body.appendChild(this.sepEl())
+    const tankHead = document.createElement('div')
+    tankHead.className = 'pm-panel-head pm-panel-head-sm'
+    tankHead.textContent = `IN THE TANK — SESSION “${session.toUpperCase()}”`
+    body.appendChild(tankHead)
     const grid = document.createElement('div')
     grid.className = 'pm-fish-grid'
     for (const d of this.fishDesigns) {
@@ -776,15 +842,73 @@ export class ProjectionEditorUI {
     }
     body.appendChild(grid)
     if (!this.fishDesigns.length) {
-      body.appendChild(this.hint('The tank is empty — imported fish appear here and instantly start swimming on the main ocean and every output screen.'))
+      body.appendChild(this.hint('The tank is empty for this session — imported fish appear here and instantly start swimming on the main ocean and every output screen.'))
     } else {
-      body.appendChild(this.hint(`${this.fishDesigns.length} design${this.fishDesigns.length === 1 ? '' : 's'} · a small school of each swims on every screen of the show. Remove one and it disappears everywhere too.`))
+      const clearRow = document.createElement('div')
+      clearRow.className = 'pm-btn-row'
+      clearRow.appendChild(this.btn('CLEAR TANK (THIS SESSION)', async () => {
+        if (await this.postFish({ action: 'clear' })) {
+          this.pm.fishTank?.poke()
+          await this.loadFishDesigns()
+          this.showTab('fish')
+        }
+      }, 'pm-btn-sm pm-btn-danger'))
+      body.appendChild(clearRow)
     }
 
     void this.loadFishDesigns().then(() => {
-      // repaint the grid once the full list arrives (first open)
-      if (grid.isConnected && !grid.childElementCount && this.fishDesigns.length) this.showTab('fish')
+      // repaint the grid once the fetch lands — session switches start from
+      // the previous session's list, so repaint whenever the fresh list
+      // differs from what is on screen (guard prevents an infinite loop)
+      if (this.activeTab !== 'fish' || !grid.isConnected) return
+      const rendered = [...grid.querySelectorAll('.pm-fish-cell img')].map((img) => (img as HTMLImageElement).src)
+      const fresh = this.fishDesigns.map((d) => d.url)
+      const same = rendered.length === fresh.length && rendered.every((s, i) => s === fresh[i])
+      if (!same) this.showTab('fish')
     })
+  }
+
+  /** the LIVE FOLDER SYNC panel — pick once, scans flow in all show long */
+  private buildFolderSyncPanel(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'pm-sync'
+    const fs = this.folderSync
+
+    const statusLine = document.createElement('div')
+    statusLine.className = 'pm-sync-status'
+    const btnRow = document.createElement('div')
+    btnRow.className = 'pm-btn-row'
+
+    const pickBtn = this.btn('CHOOSE FOLDER & WATCH', () => { void fs.pickAndWatch() }, 'pm-btn-sm')
+    const resumeBtn = this.btn('RESUME WATCHING', () => { void fs.resume() }, 'pm-btn-sm')
+    const stopBtn = this.btn('STOP', () => fs.stop(), 'pm-btn-sm pm-btn-danger')
+    btnRow.append(pickBtn, resumeBtn, stopBtn)
+
+    const render = () => {
+      const st = fs.state
+      const icon = st.status === 'watching' ? '●' : st.status === 'needs-permission' ? '◐' : st.status === 'error' ? '▲' : '○'
+      const head = `${icon} ${st.status.toUpperCase()}${st.folderName ? ` — “${st.folderName}”` : ''}`
+      const stats = `imported ${st.imported}${st.skipped ? ` · skipped ${st.skipped}` : ''}${st.lastFileName ? ` · last: ${st.lastFileName}` : ''}${st.lastError ? ` · ${st.lastError}` : ''}`
+      statusLine.innerHTML = `<span class="pm-sync-head">${head}</span><span class="pm-sync-stats">${stats}</span>`
+      statusLine.classList.toggle('pm-sync-live', st.status === 'watching')
+      statusLine.classList.toggle('pm-sync-warn', st.status === 'needs-permission' || st.status === 'error')
+      pickBtn.style.display = st.status === 'watching' || st.status === 'needs-permission' ? 'none' : ''
+      resumeBtn.style.display = st.status === 'needs-permission' ? '' : 'none'
+      stopBtn.style.display = st.status === 'watching' ? '' : 'none'
+      if (!FolderSync.supported) {
+        statusLine.innerHTML = '<span class="pm-sync-head">○ FOLDER WATCH NEEDS CHROME / EDGE</span><span class="pm-sync-stats">This browser has no File System Access API — one-off imports above still work.</span>'
+        pickBtn.style.display = 'none'
+        resumeBtn.style.display = 'none'
+        stopBtn.style.display = 'none'
+      }
+      if (st.imported > 0) this.pm.fishTank?.poke()
+    }
+    fs.onChange = render
+    render()
+
+    wrap.append(statusLine, btnRow)
+    wrap.appendChild(this.hint('Point this at the folder the scanner machine saves into (choose once — the folder is remembered). Every new photo that lands in it is scanned and released into the CURRENT session automatically, hands-free. After a page reload one click on RESUME re-grants access.'))
+    return wrap
   }
 
   // ------------------------------------------------------------ surfaces list
@@ -1079,6 +1203,22 @@ export class ProjectionEditorUI {
     return d
   }
 
+  /** collapsible group inside a pane — returns the content container */
+  private collap(parent: HTMLElement, title: string, open = false): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'pm-collap' + (open ? ' pm-collap-open' : '')
+    const head = document.createElement('button')
+    head.className = 'pm-collap-head'
+    head.type = 'button'
+    head.innerHTML = `<span class="pm-collap-arrow">\u25be</span>${title}`
+    const content = document.createElement('div')
+    content.className = 'pm-collap-body'
+    head.addEventListener('click', () => box.classList.toggle('pm-collap-open'))
+    box.append(head, content)
+    parent.appendChild(box)
+    return content
+  }
+
   private sepEl(): HTMLElement {
     const d = document.createElement('div')
     d.className = 'pm-sep'
@@ -1203,7 +1343,9 @@ export class ProjectionEditorUI {
   }
 
   private tick() {
-    if (!this.pm.active || this.pm.outputLive || document.hidden) return
+    if (!this.pm.active) return
+    this.updatePills()
+    if (this.pm.outputLive || document.hidden) return
     // adaptive back-off: GPU readbacks stall weak pipelines — skip while frames are slow
     if (this.pm.frameCost > 34) return
     // selected camera preview (right panel)
@@ -1226,6 +1368,38 @@ export class ProjectionEditorUI {
     }
   }
 
+  // ------------------------------------------------------------ live status chrome
+  /** topbar pills: GPU cost · quality · phone · session — the show's vitals */
+  private updatePills() {
+    const pills = this.root.querySelector('#pm-pills') as HTMLElement | null
+    if (!pills) return
+    const gpu = `${this.pm.frameCost.toFixed(1)}ms`
+    const q = this.pm.qualityLabel().toUpperCase()
+    const phones = this.pm.phoneOn ? 'PHONE LIVE' : 'NO PHONE'
+    const tank = this.pm.fishTank
+    const session = this.pm.tankSession.toUpperCase()
+    const next = `${gpu}|${q}|${phones}|${session}`
+    if (pills.dataset.sig === next) return
+    pills.dataset.sig = next
+    pills.innerHTML = ''
+    pills.appendChild(this.pill(gpu, 'pm-pill-dim'))
+    pills.appendChild(this.pill(q, 'pm-pill-dim'))
+    pills.appendChild(this.pill(phones, this.pm.phoneOn ? 'pm-pill-live' : 'pm-pill-dim'))
+    pills.appendChild(this.pill(`SESSION · ${session}`, 'pm-pill-accent'))
+    if (tank) {
+      const info = tank.info()
+      const n = info.designs?.length ?? 0
+      pills.appendChild(this.pill(`${n} FISH`, 'pm-pill-dim'))
+    }
+  }
+
+  private pill(text: string, cls: string): HTMLElement {
+    const el = document.createElement('span')
+    el.className = `pm-pill ${cls}`
+    el.textContent = text
+    return el
+  }
+
   private pokeChrome() {
     if (!this.pm.outputLive) return
     this.chrome.classList.add('pm-chrome-visible')
@@ -1237,6 +1411,7 @@ export class ProjectionEditorUI {
   dispose() {
     window.clearInterval(this.previewTimer)
     window.clearTimeout(this.chromeTimer)
+    this.folderSync.dispose()
     this.disposers.forEach((d) => d())
     this.disposers = []
     this.nodeEditor.dispose()

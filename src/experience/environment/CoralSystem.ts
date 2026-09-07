@@ -636,6 +636,11 @@ export class CoralSystem {
     }
 
     for (const cl of clusters) {
+      // the 360° high-detail ReefArena owns everything within its
+      // colosseum + haze margins — draft corals would clutter the
+      // clearing and the reef wall, so the legacy system stays out
+      // beyond 64 m from the arena centre (0, -20)
+      if (Math.hypot(cl.x - 0, cl.z + 20) < 64) continue
       this.clusterCenters.push(new THREE.Vector3(cl.x, this.heightAt(cl.x, cl.z), cl.z))
       const n = Math.max(1, Math.round(cl.n * density))
       for (let i = 0; i < n; i++) {

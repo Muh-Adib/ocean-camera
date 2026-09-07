@@ -156,6 +156,8 @@ export interface ProjectionProject {
   surfaces: ProjectionSurface[]
   /** which surface carries the phone-connection QR — 'auto' = largest enabled surface */
   qr?: { host: string }
+  /** active show session — isolates the fish tank + phone remote per venue */
+  tank?: { session?: string }
 }
 
 export const PROJECT_VERSION = 2

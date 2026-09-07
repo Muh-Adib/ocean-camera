@@ -17,12 +17,14 @@ import { RockSystem } from './environment/Rocks'
 import { CoralSystem } from './environment/CoralSystem'
 import { LimestoneReef } from './environment/LimestoneReef'
 import { SpongeSystem } from './environment/Sponges'
+import { ReefArena } from './environment/ReefArena'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
 import { Biomes } from './environment/Biomes'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
+import { SpongeBubbles } from './particles/SpongeBubbles'
 import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
 import { SpecialCreatures } from './fish/SpecialCreatures'
@@ -97,12 +99,15 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     detail: cfg.coralDetail,
     attach: limestone.growthSpots,
   })
+  // the 360° coral colosseum — a reef wall around the sandy clearing so
+  // every heading (visitors circle the room) has full scenery
+  const arena = new ReefArena(sceneMgr.scene, seabed.heightAt)
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
   const sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles]
+  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
@@ -114,6 +119,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     bubbles.addEmitter(e.pos, { rate: e.rate, size: e.size, speed: e.speed })
   }
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
+  // fine bubble streams rising out of every tube-sponge osculum
+  const spongeBubbles = arena.spongeLips.length
+    ? new SpongeBubbles(sceneMgr.scene, arena.spongeLips, {
+      pos: field.point, strength: sharedUniforms.uFieldStrength, radius: 11,
+    }, Math.min(210, Math.max(90, Math.round(arena.spongeLips.length * 0.7))))
+    : null
 
   // ---------------- screen vignette ----------------
   // deep-blue depth-of-field feel: the arena's edges sink into shadow
@@ -126,7 +137,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   disposers.push(() => { vignette.remove() })
 
   // ---------------- fish ----------------
-  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
+  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])
   const creatures = new SpecialCreatures(sceneMgr.scene)
   const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
@@ -158,7 +169,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- free swim (open-world exploration) ----------------
   const swim = new SwimController(sceneMgr.canvas, seabed.heightAt, {
-    x: 74, minZ: -96, maxZ: 18, maxY: 11.5, floorPad: 0.7,
+    radius: 94, centerX: 0, centerZ: -20, maxY: 11.5, floorPad: 0.7,
   })
   swim.capturePose = () => cameraRig.snapshotSwim()
   swim.onChange = (on) => {
@@ -439,6 +450,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     creatures.update(dt, elapsed)
     feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
+    spongeBubbles?.update(dt, elapsed)
     bursts.update(dt)
     dynamicEvents(dt)
 
@@ -504,8 +516,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       coralTris: Math.round(coral.polyCount),
       limestoneSpots: limestone.growthSpots.length,
       spongeEmitters: sponges.emitters.length,
+      arena: arena.stats(),
       tier: cfg.tier,
     }),
+    arena: () => arena.stats(),
     swimMode: () => swim.active,
     forceShark: () => creatures.triggerPredator(),
     forceTurtle: () => creatures.triggerTurtle(),
@@ -564,6 +578,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       relay: () => projection.relayInfo(),
       /** phone remote diagnostics (WebSocket link, rig pose, QR) */
       remote: () => projection.remoteInfo(),
+      /** QA: switch the show session (tank + phone isolation) */
+      session: (id: string) => { projection.setTankSession(String(id)); return projection.tankSession },
       /** QA: force the remote rig offsets (headless tests) */
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */

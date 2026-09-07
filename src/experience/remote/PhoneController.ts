@@ -15,17 +15,22 @@
 //     everything is removed again when it goes off.
 // ---------------------------------------------------------------
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
-import { PhoneLink } from './RemoteLink'
+import { PhoneLink, cleanSessionId } from './RemoteLink'
 import './remote.css'
 
 const WASM_PATH = '/mediapipe/wasm'
 const MODEL_PATH = '/mediapipe/models/hand_landmarker.task'
-const SEND_HZ = 30
+const SEND_HZ = 40
 const DEAD = 0.07
 
 type Stick = { vx: number; vy: number }
 
 export function mountPhoneController(root: HTMLElement): () => void {
+  // the wall QR can deep-link a SHOW SESSION (?s=<id>) — this phone then
+  // only steers screens of that session (exhibition isolation)
+  const params = new URLSearchParams(window.location.search)
+  const session = cleanSessionId(params.get('s'))
+
   root.innerHTML = `
     <div class="rm-app">
       <header class="rm-head">
@@ -70,6 +75,13 @@ export function mountPhoneController(root: HTMLElement): () => void {
       <div class="rm-note" id="rm-note">waiting for the ocean…</div>
     </div>`
 
+  if (session !== 'main') {
+    const tag = document.createElement('div')
+    tag.className = 'rm-session-tag'
+    tag.textContent = `SESSION · ${session.toUpperCase()}`
+    root.querySelector('.rm-head')?.appendChild(tag)
+  }
+
   const $ = <T extends HTMLElement>(id: string) => root.querySelector('#' + id) as T
   const dot = $('rm-dot')
   const note = $('rm-note')
@@ -79,7 +91,7 @@ export function mountPhoneController(root: HTMLElement): () => void {
   const overlay = $('rm-overlay') as HTMLCanvasElement
   const camStatus = $('rm-cam-status')
 
-  const link = new PhoneLink()
+  const link = new PhoneLink(session)
   link.onState = (live) => {
     dot.classList.toggle('on', live)
     note.textContent = live ? 'connected — steer the ocean' : 'reconnecting to the ocean…'

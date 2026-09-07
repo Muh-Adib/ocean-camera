@@ -433,6 +433,24 @@ export function makeHull(spec: BodySpec): Hull {
       idx.push(a0, b0, a1, b0, b1, a1)
     }
   }
+
+  // close the tail peduncle with an end cap fan (normal pointing -Z)
+  const rearCenterIdx = pos.length / 3
+  pos.push(0, 0, -0.5 * L)
+  uv.push(0.5, 0)
+  for (let j = 0; j < RAD; j++) {
+    idx.push(rearCenterIdx, j + 1, j)
+  }
+
+  // close the snout with an end cap fan (normal pointing +Z)
+  const frontCenterIdx = pos.length / 3
+  pos.push(0, 0, 0.5 * L)
+  uv.push(0.5, 1)
+  const lastRingBase = (RINGS - 1) * (RAD + 1)
+  for (let j = 0; j < RAD; j++) {
+    idx.push(frontCenterIdx, lastRingBase + j, lastRingBase + j + 1)
+  }
+
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2))
@@ -598,13 +616,14 @@ export function makeRayFin(
  * cup (curled backward), darker ray columns, translucent tip.
  * Grows from the origin along +x, then placed with rotations.
  */
-export function makePectoralFan(size: number, color: THREE.Color, rays = 6): THREE.BufferGeometry {
+export function makePectoralFan(size: number, color: THREE.Color, rays = 6, isPaddle = false): THREE.BufferGeometry {
   const ROWS = [0, 0.4, 0.75, 1]
   const L = size * 1.3
   const tipC = color.clone().lerp(new THREE.Color('#eaf4f6'), 0.5)
   const rayC = color.clone().multiplyScalar(0.72)
 
   const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
+  const paddles: number[] = []
   for (let k = 0; k < rays; k++) {
     const psi = ((k / (rays - 1)) * 2 - 1) * 0.55              // fan spread
     const lenK = L * (1 - Math.abs(psi) * 0.4)
@@ -619,6 +638,7 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6): THR
       const c = f > 0.55 ? cRow : cRow.clone().lerp(rayC, 0.5)
       cols.push(c.r, c.g, c.b)
       uvs.push(WHITE_UV, WHITE_UV)
+      paddles.push(isPaddle ? f : 0)
     }
   }
   for (let k = 0; k < rays - 1; k++) {
@@ -634,26 +654,51 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6): THR
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3))
   g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3))
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2))
+  g.setAttribute('aPecPaddle', new THREE.Float32BufferAttribute(paddles, 1))
   g.setIndex(idx)
   g.computeVertexNormals()
   return g
 }
 
-/** pectoral fin rooted inside the flank at the hull surface */
+/** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry and active paddle */
 function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
-  const g = makePectoralFan(size, color, 6)
-  g.rotateY(side * -0.9)
-  g.rotateZ(side * 0.5)
-  g.translate(side * rAt * 0.74, y, z)
+  const g = makePectoralFan(size, color, 6, true)
+  g.rotateY(-0.75)
+  g.rotateZ(0.28)
+  g.translate(rAt * 0.78, y, z)
+  if (side === -1) {
+    g.scale(-1, 1, 1)
+    if (g.index) {
+      const arr = g.index.array as Uint16Array | Uint32Array
+      for (let i = 0; i < arr.length; i += 3) {
+        const tmp = arr[i]
+        arr[i] = arr[i + 1]
+        arr[i + 1] = tmp
+      }
+    }
+    g.computeVertexNormals()
+  }
   return g
 }
 
-/** paired pelvic fins on the belly, rooted at the hull surface */
+/** paired pelvic fins on the belly with exact bilateral symmetry */
 function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
-  const g = makePectoralFan(size, color, 5)
-  g.rotateY(side * -0.5)
-  g.rotateX(-0.85)                 // sweep downward
-  g.translate(side * rAt * 0.4, y, z)
+  const g = makePectoralFan(size, color, 5, false)
+  g.rotateY(-0.4)
+  g.rotateX(-0.8)
+  g.translate(rAt * 0.42, y, z)
+  if (side === -1) {
+    g.scale(-1, 1, 1)
+    if (g.index) {
+      const arr = g.index.array as Uint16Array | Uint32Array
+      for (let i = 0; i < arr.length; i += 3) {
+        const tmp = arr[i]
+        arr[i] = arr[i + 1]
+        arr[i + 1] = tmp
+      }
+    }
+    g.computeVertexNormals()
+  }
   return g
 }
 
@@ -714,11 +759,11 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     tex: { back: '#8f8f8f', belly: '#c8c8c8', grayscale: true, bands: [{ v: 0.5, w: 0.1, color: 'rgba(255,255,255,0.55)', soft: true }] },
   },
   angelfish: {
-    body: { profile: [0.015, 0.07, 0.14, 0.2, 0.23, 0.19, 0.115, 0.05, 0.015], w: 0.28, h: 1.75, len: 0.5 },
+    body: { profile: [0.015, 0.07, 0.15, 0.21, 0.23, 0.19, 0.12, 0.05, 0.015], w: 0.24, h: 1.95, len: 0.48 },
     tail: [0.3, 0.2, 0.25],
-    dorsal: [[0.18, 0.1], [0.0, 0.4], [-0.3, 0.34], [-0.58, 0.02]],
-    anal: [[0.05, 0.1], [-0.1, 0.36], [-0.42, 0.02]],
-    pectoral: 0.13, eyeR: 0.045, eyeIris: '#22323c',
+    dorsal: [[0.18, 0.12], [0.0, 0.55], [-0.3, 0.48], [-0.58, 0.02]],
+    anal: [[0.05, 0.12], [-0.1, 0.5], [-0.42, 0.02]],
+    pectoral: 0.15, eyeR: 0.045, eyeIris: '#22323c',
     finColor: '#31414f', tailColor: '#3d5566',
     tex: {
       back: '#e9e2c8', belly: '#f4efd9',
@@ -730,11 +775,11 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   butterflyfish: {
-    body: { profile: [0.012, 0.06, 0.12, 0.165, 0.19, 0.155, 0.095, 0.05, 0.03], w: 0.3, h: 1.35, len: 0.48 },
+    body: { profile: [0.012, 0.06, 0.12, 0.165, 0.19, 0.155, 0.095, 0.05, 0.03], w: 0.26, h: 1.45, len: 0.46 },
     tail: [0.18, 0.13, 0.15],
     dorsal: [[0.16, 0.06], [-0.05, 0.16], [-0.3, 0.1]],
     anal: [[0.0, 0.1], [-0.25, 0.08]],
-    pectoral: 0.12, eyeR: 0.042, eyeIris: '#6a4a1a',
+    pectoral: 0.13, eyeR: 0.042, eyeIris: '#6a4a1a',
     finColor: '#e8c860', tailColor: '#e8c860',
     tex: {
       back: '#f0cf4e', belly: '#f7e89a',
@@ -747,10 +792,10 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   clownfish: {
-    body: { profile: [0.02, 0.08, 0.145, 0.185, 0.2, 0.16, 0.1, 0.045, 0.02], w: 0.5, h: 1.1, len: 0.42 },
-    tail: [0.16, 0.13, 0.1],
+    body: { profile: [0.02, 0.08, 0.16, 0.21, 0.22, 0.18, 0.12, 0.05, 0.02], w: 0.48, h: 1.15, len: 0.44 },
+    tail: [0.16, 0.14, 0.02],
     dorsal: [[0.14, 0.05], [-0.02, 0.1], [-0.18, 0.04]],
-    pectoral: 0.13, eyeR: 0.048, eyeIris: '#b07a2a',
+    pectoral: 0.16, eyeR: 0.048, eyeIris: '#b07a2a',
     finColor: '#ff8c2e', tailColor: '#ff9a44',
     tex: {
       back: '#e8621a', belly: '#ff9440',
@@ -763,11 +808,11 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   tang: {
-    body: { profile: [0.02, 0.085, 0.16, 0.2, 0.22, 0.18, 0.11, 0.05, 0.015], w: 0.32, h: 1.5, len: 0.75 },
-    tail: [0.22, 0.18, 0.35],
+    body: { profile: [0.02, 0.085, 0.16, 0.21, 0.22, 0.18, 0.11, 0.05, 0.015], w: 0.28, h: 1.55, len: 0.72 },
+    tail: [0.22, 0.19, 0.2],
     dorsal: [[0.24, 0.07], [0.0, 0.12], [-0.26, 0.08], [-0.4, 0.04]],
     anal: [[0.05, 0.08], [-0.2, 0.1], [-0.38, 0.03]],
-    pectoral: 0.16, eyeR: 0.042, eyeIris: '#1a2a38',
+    pectoral: 0.18, eyeR: 0.044, eyeIris: '#1a2a38',
     finColor: '#f2d24a', tailColor: '#f2d24a',
     tex: {
       back: '#2438c8', belly: '#3a55dd',
@@ -775,20 +820,20 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   pufferfish: {
-    // globefish — nearly spherical: blunt snout, fat belly, thick
-    // peduncle; length ≈ height so the silhouette reads as a ball
-    body: { profile: [0.075, 0.2, 0.275, 0.315, 0.335, 0.325, 0.28, 0.2, 0.115], w: 1.04, h: 1.0, len: 0.4 },
-    tail: [0.11, 0.09, 0.05],
-    dorsal: [[0.02, 0.07], [-0.12, 0.05]],
-    anal: [[0.0, 0.06], [-0.12, 0.04]],
-    pectoral: 0.11, eyeR: 0.062, eyeIris: '#4a5a68',
-    finColor: '#c8b482', tailColor: '#c8b482',
+    // porcupinefish / pufferfish — globular spherical egg tapering smoothly
+    // into slender caudal peduncle; big round friendly eyes, cute beak
+    body: { profile: [0.035, 0.09, 0.20, 0.38, 0.50, 0.52, 0.46, 0.34, 0.10], w: 1.05, h: 1.02, len: 0.56 },
+    tail: [0.15, 0.12, 0.04],
+    dorsal: [[0.02, 0.08], [-0.14, 0.05]],
+    anal: [[0.0, 0.07], [-0.14, 0.04]],
+    pectoral: 0.16, eyeR: 0.056, eyeIris: '#4a3818',
+    finColor: '#d6c498', tailColor: '#d6c498',
     tex: {
-      back: '#c9b384', belly: '#e8dcc0',
-      spots: { color: '#4a3f2a', n: 16, r: 3.4 },
+      back: '#b8a67c', belly: '#f0e8d4',
+      spots: { color: '#3d3422', n: 18, r: 3.2 },
     },
     spikes: true,
-    spikeLen: 0.11,
+    spikeLen: 0.038,
   },
   moorish: {
     // Moorish idol — tall compressed body, trailing dorsal filament,
@@ -797,7 +842,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     tail: [0.24, 0.16, 0.3],
     dorsal: [[0.2, 0.12], [0.05, 0.48], [-0.2, 0.42], [-0.4, 0.3], [-0.58, 0.03]],
     anal: [[0.05, 0.1], [-0.1, 0.3], [-0.32, 0.08]],
-    pectoral: 0.12, eyeR: 0.042, eyeIris: '#241a12',
+    pectoral: 0.13, eyeR: 0.042, eyeIris: '#241a12',
     finColor: '#2a2e34', tailColor: '#2a2e34',
     tex: {
       back: '#f2f0e6', belly: '#ffffff',
@@ -839,11 +884,11 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     // ikan patin — silver catfish: broad blunt head, deep mirror flanks,
     // long low dorsal/anal paddles, big pectoral wings, forked tail,
     // twin barbels draping from the upper lip
-    body: { profile: [0.02, 0.09, 0.155, 0.19, 0.2, 0.18, 0.145, 0.09, 0.04], w: 0.6, h: 1.18, len: 0.85 },
-    tail: [0.26, 0.22, 0.8],
+    body: { profile: [0.02, 0.09, 0.16, 0.19, 0.2, 0.18, 0.145, 0.09, 0.04], w: 0.52, h: 1.12, len: 0.90 },
+    tail: [0.28, 0.24, 0.85],
     dorsal: [[0.12, 0.05], [-0.04, 0.075], [-0.2, 0.055], [-0.36, 0.02]],
     anal: [[-0.02, 0.05], [-0.22, 0.055], [-0.42, 0.015]],
-    pectoral: 0.26, eyeR: 0.034, eyeIris: '#243038',
+    pectoral: 0.28, eyeR: 0.034, eyeIris: '#243038',
     finColor: '#96a6b0', tailColor: '#a7b6c0',
     tex: {
       back: '#8fa6b4', belly: '#eef4f7',
@@ -937,40 +982,71 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   parts.push(...makeEyeParts(1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
   parts.push(...makeEyeParts(-1, skinX, eyeY, eyeZ, eyeR, def.eyeIris))
 
-  // pufferfish spikes — seated at the hull surface and RADIATING
-  // outward (axis = local surface normal). Each vertex carries an
-  // `aSpike` apex weight (0 base → 1 tip) so the defence shader can
-  // anchor the base to the inflating skin while the tip extends.
+  // pufferfish cute fused parrot beak with upper & lower dental plates
+  if (key === 'pufferfish') {
+    const beakColor = new THREE.Color('#8a7652')
+    // Upper dental plate
+    const beakUpper = new THREE.SphereGeometry(0.024, 12, 8)
+    beakUpper.scale(1.3, 0.65, 0.85)
+    beakUpper.translate(0, -bbs.h * 0.030, bbs.len * 0.492)
+    setUniformUV(beakUpper)
+    paintColors(beakUpper, beakColor)
+    parts.push(beakUpper)
+
+    // Lower dental plate
+    const beakLower = new THREE.SphereGeometry(0.020, 10, 7)
+    beakLower.scale(1.2, 0.55, 0.80)
+    beakLower.translate(0, -bbs.h * 0.065, bbs.len * 0.490)
+    setUniformUV(beakLower)
+    paintColors(beakLower, beakColor.clone().multiplyScalar(0.90))
+    parts.push(beakLower)
+  }
+
+  // pufferfish spines — Fibonacci spiral distribution along the spherical body.
+  // When relaxed (aPuff = 0), spines sit flush against the skin as cute small nubs.
+  // When defensive display triggers (aPuff > 0), spines erect along surface normals.
   if (def.spikes) {
-    const rng = mulberry32(7)
-    const spikeLen = def.spikeLen ?? 0.07
-    for (let i = 0; i < 78; i++) {
-      const a = rng() * Math.PI * 2
-      const y = (rng() - 0.35) * 0.3
-      const t = 0.25 + rng() * 0.45
-      const z = (-0.5 + t) * 2 * bbs.len * 0.9
-      const yAbs = y * bbs.h + Math.abs(y) * 0.2
-      // keep the orbit clear — no spike stabs the eye
-      if (Math.hypot(z - eyeZ, yAbs - eyeY) < eyeR * 1.7) continue
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5)) // ~2.39996 rad
+    const spikeLen = def.spikeLen ?? 0.038
+    const spikeRadius = 0.007
+    for (let i = 0; i < 96; i++) {
+      const tNorm = (i + 0.5) / 96
+      // restrict spines to the spherical body portion (t from 0.18 to 0.82)
+      const t = 0.18 + tNorm * 0.64
+      const z = (-0.5 + t) * bbs.len
+      const phi = i * goldenAngle
+      const cy = Math.sin(phi)
+      const cx = Math.cos(phi)
       const profR = radiusAt(z)
-      // cross-section shrinks toward the ridge/belly — pull the base in with it
-      const yHalf = Math.max(1e-4, profR * bbs.h)
-      const shrink = Math.sqrt(Math.max(0.15, 1 - (yAbs / yHalf) * (yAbs / yHalf)))
-      const px = Math.cos(a) * profR * bbs.w * 0.96 * shrink
-      // outward direction = elliptic surface normal at the base point
-      const dir = new THREE.Vector3(px / (profR * bbs.w + 1e-5), yAbs / yHalf, 0).normalize()
-      const spike = new THREE.ConeGeometry(0.016, spikeLen, 4)
+
+      const y = cy * profR * bbs.h * 0.96
+      const x = cx * profR * bbs.w * 0.96
+
+      // Keep clear of eyes, mouth, and fins
+      if (Math.hypot(z - eyeZ, y - eyeY) < eyeR * 1.8) continue
+      if (Math.hypot(z - eyeZ, y + eyeY) < eyeR * 1.8) continue
+      if (Math.abs(x) < 0.025 && (z < -bbs.len * 0.1 || z > bbs.len * 0.38)) continue
+
+      // 3D Ellipsoid normal direction
+      const nx = x / Math.max(1e-4, bbs.w * bbs.w)
+      const ny = y / Math.max(1e-4, bbs.h * bbs.h)
+      const nz = (z + bbs.len * 0.06) / Math.max(1e-4, (bbs.len * 0.5) * (bbs.len * 0.5))
+      const dir = new THREE.Vector3(nx, ny, nz).normalize()
+
+      // Neat 6-sided smooth cone
+      const spike = new THREE.ConeGeometry(spikeRadius, spikeLen, 6)
       setUniformUV(spike)
-      // apex weight BEFORE any transform: base ring 0 → tip 1
       const sw = new Float32Array(spike.attributes.position.count)
       for (let k = 0; k < sw.length; k++) {
         sw[k] = clamp((spike.attributes.position.getY(k) + spikeLen / 2) / spikeLen, 0, 1)
       }
       spike.setAttribute('aSpike', new THREE.BufferAttribute(sw, 1))
-      spike.translate(0, spikeLen * 0.5 - 0.02, 0)      // base buried 0.02 in the skin
+
+      // Base buried so when aPuff = 0 only neat small nubs peek out
+      spike.translate(0, spikeLen * 0.5 - spikeLen * 0.76, 0)
       spike.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir))
-      spike.translate(px, yAbs, z)
-      paintColors(spike, new THREE.Color('#b8a478'))
+      spike.translate(x, y, z)
+      paintColors(spike, new THREE.Color('#c2b28c'))
       spikeSet.add(spike)
       parts.push(spike)
     }
@@ -979,7 +1055,10 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
   const merged = mergeGeometries(
     parts.map((p) => {
       const g = p.index ? p.toNonIndexed() : p
-      // every part must carry the attribute set — body verts never move
+      // every part must carry the attribute set — body verts never paddle
+      if (!g.attributes.aPecPaddle) {
+        g.setAttribute('aPecPaddle', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1))
+      }
       if (def.spikes && !g.attributes.aSpike) {
         g.setAttribute('aSpike', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count), 1))
       }
@@ -1015,22 +1094,40 @@ export function makeFishMaterial(
     shader.vertexShader = `
       uniform float uTime, uSwimAmp, uSwimFreq;
       attribute float aPhase;
+      attribute float aPecPaddle;
       ${opts.puff ? 'attribute float aPuff;\n      attribute float aSpike;' : ''}
     ` + shader.vertexShader
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `
       #include <begin_vertex>
       {
-        float tTail = clamp((0.28 - position.z) / 0.85, 0.0, 1.0);
-        tTail *= tTail;
-        transformed.x += sin(uTime * uSwimFreq + aPhase - position.z * 2.4) * uSwimAmp * tTail;
-        transformed.x += sin(uTime * uSwimFreq * 0.5 + aPhase) * uSwimAmp * 0.06;
-        // fin membrane flutter — tall fin tips ripple softly out of phase
-        float finMask = smoothstep(0.55, 1.4, abs(transformed.y)) * (1.0 - tTail);
-        transformed.x += sin(uTime * uSwimFreq * 1.35 + aPhase * 1.7) * uSwimAmp * 0.4 * finMask;
-        ${opts.puff ? `// defence display: hull inflates radially, spines ride the skin
-        float coreFall = 1.0 - smoothstep(0.14, 0.3, abs(position.z));
-        float hullGrow = aPuff * 0.17 * coreFall;
-        transformed.xyz += normalize(position + vec3(1e-4)) * (hullGrow + aPuff * aSpike * 0.34);` : ''}
+        // 1. Natural spine traveling wave (head to tail along -z)
+        float wave = sin(uTime * uSwimFreq - position.z * 3.4 + aPhase);
+
+        // Continuous envelope: subtle counter-yaw at head (0.16), flexible mid-body, maximum tail sweep (1.0)
+        float tailFactor = clamp((0.18 - position.z) / 0.72, 0.0, 1.0);
+        float bodyEnvelope = 0.16 + 0.84 * (tailFactor * tailFactor);
+        transformed.x += wave * uSwimAmp * bodyEnvelope;
+
+        // Subtle secondary undulation along body for organic elasticity
+        transformed.x += sin(uTime * uSwimFreq * 0.5 + aPhase) * uSwimAmp * 0.05;
+
+        // 2. Active pectoral fin paddling ("badannya juga bergerak untuk mendayung")
+        // Powered directly by aPecPaddle attribute (0 at skin root -> 1 at tip)
+        float paddlePhase = uTime * uSwimFreq * 1.25 + aPhase;
+        float paddleStroke = sin(paddlePhase);
+        // Power stroke sweeps backward (-z) and flares outward; recovery stroke feathers forward
+        transformed.z += paddleStroke * 0.085 * aPecPaddle;
+        transformed.x += sign(position.x) * (abs(paddleStroke) * 0.065 + 0.02) * aPecPaddle;
+        transformed.y += cos(paddlePhase) * 0.025 * aPecPaddle;
+
+        // 3. Dorsal / anal fin tips flutter rippling out of phase
+        float finMask = smoothstep(0.45, 1.2, abs(transformed.y)) * (1.0 - tailFactor * 0.5);
+        transformed.x += sin(uTime * uSwimFreq * 1.35 - position.z * 3.0 + aPhase * 1.5) * uSwimAmp * 0.35 * finMask;
+
+        ${opts.puff ? `// defence display: hull inflates radially, spines erect neatly
+        float coreFall = 1.0 - smoothstep(0.12, 0.32, abs(position.z));
+        float hullGrow = aPuff * 0.18 * coreFall;
+        transformed.xyz += normalize(position + vec3(1e-4)) * (hullGrow + aPuff * aSpike * 0.065);` : ''}
       }
     `)
     shader.fragmentShader = `

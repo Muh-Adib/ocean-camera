@@ -5,10 +5,8 @@ import * as THREE from 'three'
 import { PerformanceManager } from './PerformanceManager'
 import { sharedUniforms } from './sharedUniforms'
 
-const COLOR_DEEP = new THREE.Color('#02111f')
-// deep-blue silhouette fog: distant geometry darkens toward navy instead
-// of washing out — the reference's depth-of-field blue falloff
-const FOG_COLOR = new THREE.Color('#031828')
+const COLOR_DEEP = new THREE.Color('#0a6e86')
+const FOG_COLOR = new THREE.Color('#25b2c6')
 
 export class SceneManager {
   renderer: THREE.WebGLRenderer
@@ -35,8 +33,8 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    // the arena's far edges sink into blue silhouette — denser, darker fog
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0185)
+    // bright lagoon haze — the reef reads clearly to ~90 m in every direction
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0132)
     this.scene.fog = this.fog
 
     // ---- camera ----
@@ -60,18 +58,17 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, cap))
   }
 
-  /** Deep-water gradient dome: darker below, teal light above,
-   *  horizon band slightly lighter so distant silhouettes read */
+  /** Bright-lagoon gradient dome: glowing turquoise above, cyan depth below */
   buildBackgroundDome() {
-    const geo = new THREE.SphereGeometry(160, 24, 18)
+    const geo = new THREE.SphereGeometry(200, 24, 18)
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       fog: false,
       uniforms: {
-        uTop: { value: new THREE.Color('#1384a8') },
-        uMid: { value: new THREE.Color('#0a4260') },
-        uBottom: { value: new THREE.Color('#010a14') },
+        uTop: { value: new THREE.Color('#a8f0ee') },
+        uMid: { value: new THREE.Color('#2fb9cc') },
+        uBottom: { value: new THREE.Color('#0a5f76') },
         uEnergy: sharedUniforms.uEnergy,
       },
       vertexShader: /* glsl */`
@@ -113,9 +110,9 @@ export class SceneManager {
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       uniforms: {
-        uTop: { value: new THREE.Color('#1384a8') },
-        uMid: { value: new THREE.Color('#0a4260') },
-        uBottom: { value: new THREE.Color('#010a14') },
+        uTop: { value: new THREE.Color('#a8f0ee') },
+        uMid: { value: new THREE.Color('#2fb9cc') },
+        uBottom: { value: new THREE.Color('#0a5f76') },
       },
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -139,7 +136,7 @@ export class SceneManager {
     temp.add(dome)
     const rt = pmrem.fromScene(temp, 0, 0.1, 200)
     this.scene.environment = rt.texture
-    this.scene.environmentIntensity = 0.42
+    this.scene.environmentIntensity = 0.3
     pmrem.dispose()
     geo.dispose()
     mat.dispose()

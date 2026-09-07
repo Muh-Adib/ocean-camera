@@ -18,6 +18,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import QRCode from 'qrcode'
+import { cleanSessionId } from './RemoteLink'
 import type { ProjectionSurface } from '../projection/ProjectionTypes'
 
 /** card side as a fraction of the output viewport height (¼ of the screen) */
@@ -27,6 +28,8 @@ const CARD = 512
 export class WallQr {
   /** which surface carries the QR: 'auto' (largest enabled) or a surface id */
   host = 'auto'
+  /** show session — a non-main session deep-links /control-mobile?s=<id> */
+  session = 'main'
   /** phone linked → hide (driven by ScreenLink presence) */
   phoneOn = false
   /** operator dismissed it for this page session */
@@ -66,9 +69,19 @@ export class WallQr {
     this.redraw()
   }
 
+  /** switch the session tag — redraws the code so the phone joins the right room */
+  setSession(id: string) {
+    const clean = cleanSessionId(id)
+    if (clean === this.session) return
+    this.session = clean
+    this.redraw()
+  }
+
   /** (re)draw the clean quarter-screen QR card for the current URL */
   private redraw() {
-    this.url = `${location.origin}/control-mobile`
+    this.url = this.session === 'main'
+      ? `${location.origin}/control-mobile`
+      : `${location.origin}/control-mobile?s=${this.session}`
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
 

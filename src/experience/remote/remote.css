@@ -250,3 +250,14 @@
   .rm-cam { min-height: 38vh; }
   .rm-deck { gap: 4vw; }
 }
+
+/* session tag — the phone shows which show/venue it steers */
+.rm-session-tag {
+  font: 700 10px/1 var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.12em;
+  color: #ffd47f;
+  border: 1px solid rgba(255, 212, 127, 0.45);
+  border-radius: 999px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}

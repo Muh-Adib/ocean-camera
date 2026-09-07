@@ -19,6 +19,9 @@ export interface ProjectHost {
   /** which surface carries the phone QR ('auto' = largest enabled) */
   qrHost: string
   setQrHost(host: string): void
+  /** active show session — rides the serialized project so outputs follow */
+  tankSession: string
+  setTankSession(id: string, opts?: { silent?: boolean }): void
 }
 
 /** one published output session — a full project snapshot under a stable id */
@@ -194,6 +197,7 @@ export class ProjectManager {
       output: { ...this.host.output },
       surfaces: this.host.surfaces.serialize(),
       qr: { host: this.host.qrHost },
+      tank: { session: this.host.tankSession },
     }
   }
 
@@ -224,6 +228,10 @@ export class ProjectManager {
     // QR host setting — 'auto' or a surface id (fall back to auto when stale)
     const qh = typeof p.qr?.host === 'string' ? p.qr.host : 'auto'
     this.host.setQrHost(qh === 'auto' || surfaces.some((s) => s.id === qh) ? qh : 'auto')
+    // show session — silent: loading must never echo a state change back
+    if (typeof p.tank?.session === 'string') {
+      this.host.setTankSession(p.tank.session, { silent: true })
+    }
     return true
   }
 
