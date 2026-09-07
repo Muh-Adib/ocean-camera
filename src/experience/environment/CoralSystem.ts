@@ -57,8 +57,8 @@ function tint(geo: THREE.BufferGeometry, tintCol: THREE.Color) {
 // ---------------- family detail tiers ----------------
 interface Tier { rs: number; hs: number; depth: number; tipSeg: [number, number]; trunks: number }
 function tierFor(detail: number): Tier {
-  if (detail >= 0.9) return { rs: 9, hs: 4, depth: 3, tipSeg: [10, 7], trunks: 3 }
-  if (detail >= 0.6) return { rs: 7, hs: 3, depth: 3, tipSeg: [8, 6], trunks: 2 }
+  if (detail >= 0.9) return { rs: 10, hs: 4, depth: 4, tipSeg: [10, 7], trunks: 4 }
+  if (detail >= 0.6) return { rs: 7, hs: 3, depth: 3, tipSeg: [8, 6], trunks: 3 }
   return { rs: 6, hs: 2, depth: 2, tipSeg: [6, 5], trunks: 2 }
 }
 
@@ -103,23 +103,55 @@ function makeStaghorn(rng: Rng, detail: number): THREE.BufferGeometry {
     const branchCol = base.clone().offsetHSL((rng() - 0.5) * 0.02, 0, (rng() - 0.5) * 0.09)
     geoms.push(paint(cyl, branchCol, 0.2, rng, 0.14))
     if (depth <= 0) {
-      const tip = new THREE.SphereGeometry(radius * 1.12, tier.tipSeg[0], tier.tipSeg[1])
+      const tip = new THREE.SphereGeometry(radius * 0.9, tier.tipSeg[0], tier.tipSeg[1])
       tip.translate(end.x, end.y, end.z)
       geoms.push(paint(tip, base.clone().lerp(tipCol, 0.62), 0.1, rng, 0))
       return
     }
-    const children = rng() < 0.5 ? 2 : 3
+    // v3: 2 children in the upper levels keeps recursion-4 affordable;
+    // the wider 2-3 spread happens only near the tips (corymbose look)
+    const children = depth >= 3 ? 2 : rng() < 0.5 ? 3 : 2
     for (let i = 0; i < children; i++) {
       const nd = dir.clone()
       const axis = new THREE.Vector3(rng() - 0.5, rng() - 0.5, rng() - 0.5).normalize()
       nd.applyAxisAngle(axis, 0.32 + rng() * 0.5)
       nd.y = Math.abs(nd.y) * 0.6 + 0.3
       nd.normalize()
-      grow(end, nd, len * (0.7 + rng() * 0.16), radius * 0.72, depth - 1)
+      grow(end, nd, len * (0.7 + rng() * 0.16), radius * 0.66, depth - 1)
     }
   }
 
   // several spreading trunks from a wide base — reads as ONE colony
+  // v3: corymbose base plate + short nubs so the colony reads as a
+  // proper bush from every angle (not a bundle of bare sticks)
+  if (detail >= 0.6) {
+    const plate = new THREE.SphereGeometry(0.34, detail >= 0.9 ? 16 : 12, detail >= 0.9 ? 9 : 7)
+    plate.scale(1.3, 0.26, 1.3)
+    {
+      const pp = plate.attributes.position as THREE.BufferAttribute
+      const v = new THREE.Vector3()
+      for (let i = 0; i < pp.count; i++) {
+        v.fromBufferAttribute(pp, i)
+        const n = noise2(v.x * 7 + 2, (v.y + v.z) * 7)
+        pp.setXYZ(i, v.x * (1 + n * 0.12), v.y, v.z * (1 + n * 0.12))
+      }
+      plate.computeVertexNormals()
+    }
+    geoms.push(paint(plate, base.clone().multiplyScalar(0.5), 0.2, rng, 0.05))
+    const nubs = detail >= 0.9 ? 12 : 7
+    for (let i = 0; i < nubs; i++) {
+      const a = rng() * Math.PI * 2
+      const d = Math.sqrt(rng()) * 0.4
+      const nl = 0.08 + rng() * 0.14
+      const nub = new THREE.CylinderGeometry(0.013, 0.022, nl, 5, 1)
+      nub.translate(0, nl / 2, 0)
+      nub.rotateZ(Math.cos(a) * 0.3)
+      nub.rotateX(Math.sin(a) * 0.3)
+      nub.translate(Math.cos(a) * d, 0.04, Math.sin(a) * d)
+      geoms.push(paint(nub, base.clone().lerp(tipCol, 0.22), 0.16, rng, 0.3))
+    }
+  }
+
   const trunks = tier.trunks + (rng() < 0.4 ? 1 : 0)
   for (let i = 0; i < trunks; i++) {
     const a = (i / trunks) * Math.PI * 2 + rng() * 0.9
@@ -172,15 +204,16 @@ function makeTableCoral(rng: Rng, detail: number): THREE.BufferGeometry {
   }
 
   // the disc — a squashed cylinder sculpted into a table top
-  const radial = detail >= 0.9 ? 96 : detail >= 0.6 ? 72 : 48
-  const rings = detail >= 0.6 ? 14 : 9
-  const disc = new THREE.CylinderGeometry(r * 1.02, r * 0.9, 0.15, radial, rings)
+  const radial = detail >= 0.9 ? 128 : detail >= 0.6 ? 90 : 48
+  const rings = detail >= 0.6 ? 16 : 9
+  const thick = 0.2 + r * 0.045                       // v3: thicker living edge
+  const disc = new THREE.CylinderGeometry(r * 1.02, r * 0.9, thick, radial, rings)
   const ph = rng() * Math.PI * 2
+  const cBase = new THREE.Color(pickF(['#d9b98a', '#caa2a2', '#c9c48a', '#b8c9a2'], rng))
+  const cRim = new THREE.Color('#efe3c2')
   {
     const p = disc.attributes.position as THREE.BufferAttribute
     const col = new Float32Array(p.count * 3)
-    const cBase = new THREE.Color(pickF(['#d9b98a', '#caa2a2', '#c9c48a', '#b8c9a2'], rng))
-    const cRim = new THREE.Color('#efe3c2')
     const c = new THREE.Color()
     for (let i = 0; i < p.count; i++) {
       let x = p.getX(i), y = p.getY(i), z = p.getZ(i)
@@ -193,15 +226,20 @@ function makeTableCoral(rng: Rng, detail: number): THREE.BufferGeometry {
         + Math.sin(a * 12 + ph * 2) * 0.014 * d
       // rim dips down at the very edge
       if (d > 0.86) y -= (d - 0.86) * 0.55 * (y > 0 ? 1 : 0.4)
+      // v3: tuck the underside near the rim → thick rolled edge read
+      if (d > 0.9 && y < 0) y *= 1 - (d - 0.9) * 2.1
       // polyp rows on the upper surface
       y += (Math.sin(d * 36 + a * 6) * 0.006 + noise2(x * 9, z * 9) * 0.014) * topness
-      // scalloped edge (radial push)
-      const scallop = 1 + Math.sin(a * 26 + ph) * 0.02 * d
+      // scalloped edge — v3: gentler lobes, cubed falloff (no harsh zigzag)
+      const scallop = 1 + Math.sin(a * 18 + ph) * 0.03 * d * d * d
       x *= scallop; z *= scallop
       p.setXYZ(i, x, y, z)
       // growth bands + pale rim
       c.copy(cBase).multiplyScalar(0.86 + 0.14 * Math.sin(a * 13 + d * 5))
       c.lerp(cRim, Math.max(0, d - 0.55) * 1.3)
+      // v3: deep polyp valleys between the radial rows
+      const valley = Math.sin(d * 36 + a * 6)
+      if (valley < -0.35) c.multiplyScalar(1 + (valley + 0.35) * 0.55)
       c.multiplyScalar(1 + noise2(x * 14 + 3, z * 14) * 0.08)
       col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b
     }
@@ -210,6 +248,37 @@ function makeTableCoral(rng: Rng, detail: number): THREE.BufferGeometry {
   }
   disc.translate(0, h + 0.04, 0)
   geoms.push(disc)
+
+  // v3: acropora branchlets sprouting from the table top
+  if (detail >= 0.6) {
+    const nb = detail >= 0.9 ? 10 + Math.floor(rng() * 8) : 6
+    for (let i = 0; i < nb; i++) {
+      const ba = rng() * Math.PI * 2
+      const bd = (0.3 + rng() * 0.52) * r
+      const bx = Math.cos(ba) * bd, bz = Math.sin(ba) * bd
+      const dd = Math.min(1, Math.hypot(bx, bz) / r)
+      const aa = Math.atan2(bz, bx)
+      const surfY = h + 0.04
+        + Math.sin(aa * 3 + ph) * 0.075 * dd * dd
+        + Math.sin(aa * 7 + 1.3) * 0.028 * dd
+        + Math.sin(aa * 12 + ph * 2) * 0.014 * dd
+      const bl = 0.1 + rng() * 0.16
+      const lean = 0.2 + (bd / r) * 0.5 + rng() * 0.1
+      const br1 = new THREE.CylinderGeometry(0.013, 0.02, bl, 6, 2)
+      br1.translate(0, bl / 2, 0)
+      br1.rotateZ(Math.cos(ba) * lean)
+      br1.rotateX(Math.sin(ba) * lean)
+      br1.translate(bx, surfY + 0.03, bz)
+      geoms.push(paint(br1, cBase.clone().lerp(cRim, 0.5), 0.16, rng, 0.3))
+      const tip = new THREE.SphereGeometry(0.017, 6, 5)
+      tip.translate(
+        bx + Math.sin(lean) * Math.cos(ba) * bl,
+        surfY + 0.03 + Math.cos(lean) * bl,
+        bz + Math.sin(lean) * Math.sin(ba) * bl,
+      )
+      geoms.push(paint(tip, cRim.clone().lerp(new THREE.Color('#ffffff'), 0.3), 0.12, rng, 0))
+    }
+  }
 
   return mergeGeometries(geoms, false)!
 }
@@ -321,47 +390,97 @@ function makeFanCoral(rng: Rng, detail: number): THREE.BufferGeometry {
   return geo
 }
 
-// ★ TUBE — ribbed polyp tubes with rim lips and dark throats
+// ★ TUBE — v3: fluted walls, wavy flared rims, pore noise and a REAL
+// dark hollow throat in every osculum (replaces the draft smooth cones)
 function makeTubeCoral(rng: Rng, detail: number): THREE.BufferGeometry {
   const geoms: THREE.BufferGeometry[] = []
-  const base = new THREE.Color(pickF(['#4fb8a8', '#5a9ac9', '#68c9b0', '#7ab8a0'], rng))
-  const n = 5 + Math.floor(rng() * (detail >= 0.6 ? 6 : 4))
+  const base = new THREE.Color(pickF(['#4fb8a8', '#5a9ac9', '#68c9b0', '#7ab8a0', '#58c9c0'], rng))
+  const innerC = base.clone().multiplyScalar(0.18)
+  const n = 4 + Math.floor(rng() * (detail >= 0.6 ? 5 : 3))
+  const rSeg = detail >= 0.9 ? 18 : detail >= 0.6 ? 14 : 9
+  const hSeg = detail >= 0.6 ? 8 : 4
+
   for (let i = 0; i < n; i++) {
-    const r = 0.09 + rng() * 0.07
-    const h = 0.4 + rng() * 0.5
-    const tube = new THREE.CylinderGeometry(r * 0.82, r, h, detail >= 0.6 ? 12 : 8, 3, true)
+    const r = 0.09 + rng() * 0.08
+    const h = 0.42 + rng() * 0.55
+    const lean = new THREE.Vector3((rng() - 0.5) * 0.5, 1, (rng() - 0.5) * 0.5).normalize()
+    const curve = new THREE.CatmullRomCurve3([
+      new THREE.Vector3(0, 0, 0),
+      new THREE.Vector3(lean.x * h * 0.45, h * 0.55, lean.z * h * 0.45),
+      new THREE.Vector3(lean.x * h * 0.9, h, lean.z * h * 0.9),
+    ])
+    const tube = new THREE.TubeGeometry(curve, hSeg, r, rSeg, false)
     const p = tube.attributes.position as THREE.BufferAttribute
-    const colArr = new Float32Array(p.count * 3)
+    const uv = tube.attributes.uv as THREE.BufferAttribute
+    const nn = tube.attributes.normal as THREE.BufferAttribute
+    const v = new THREE.Vector3(), nv = new THREE.Vector3()
+
+    // vertical flutes + pore bumps (uv.x = along tube, uv.y = around)
+    const flutes = 8 + Math.floor(rng() * 5)
+    for (let j = 0; j < p.count; j++) {
+      const t = uv.getX(j)
+      const a = uv.getY(j) * Math.PI * 2
+      v.fromBufferAttribute(p, j)
+      nv.fromBufferAttribute(nn, j)
+      const ends = Math.min(1, t / 0.14) * (1 - Math.max(0, (t - 0.84) / 0.16) * 0.5)
+      const k = Math.sin(a * flutes + i * 2.1) * 0.055 * r * ends
+        + noise2(a * 3 + i * 4, t * 8) * 0.02 * r
+      v.addScaledVector(nv, k)
+      p.setXYZ(j, v.x, v.y, v.z)
+    }
+    tube.computeVertexNormals()
+
+    // colour: flute light + darkening into the throat
+    const col = new Float32Array(p.count * 3)
     const c = new THREE.Color()
     for (let j = 0; j < p.count; j++) {
-      const fy = p.getY(j) / h + 0.5
-      const ang = Math.atan2(p.getZ(j), p.getX(j))
-      // vertical ribs + slight flare at the mouth
-      const rib = 1 + Math.sin(ang * 10) * 0.05 * (0.4 + fy * 0.6) + fy * fy * 0.1
-      p.setX(j, p.getX(j) * rib)
-      p.setZ(j, p.getZ(j) * rib)
-      // colour: base tone darkening into the throat
-      c.copy(base).multiplyScalar(1 + (rng() - 0.5) * 0.22)
-      const dark = fy > 0.5 ? (fy - 0.5) / 0.5 : 0
-      c.multiplyScalar(1 - dark * 0.62)
-      colArr[j * 3] = c.r; colArr[j * 3 + 1] = c.g; colArr[j * 3 + 2] = c.b
+      const t = uv.getX(j)
+      const a = uv.getY(j) * Math.PI * 2
+      c.copy(base).multiplyScalar(1 + Math.sin(a * flutes + i * 2.1) * 0.1 + (rng() - 0.5) * 0.16)
+      const dark = Math.max(0, (t - 0.5) / 0.5)
+      c.multiplyScalar(1 - dark * 0.6)
+      col[j * 3] = c.r; col[j * 3 + 1] = c.g; col[j * 3 + 2] = c.b
     }
-    tube.setAttribute('color', new THREE.BufferAttribute(colArr, 3))
+    tube.setAttribute('color', new THREE.BufferAttribute(col, 3))
+
+    // wavy flared rim
+    const rimLobes = 7 + Math.floor(rng() * 4)
+    const rimPh = rng() * Math.PI * 2
+    for (let j = 0; j < p.count; j++) {
+      const t = uv.getX(j)
+      if (t > 0.86) {
+        const a = uv.getY(j) * Math.PI * 2
+        const k = (t - 0.86) / 0.14
+        p.setY(j, p.getY(j) + Math.sin(a * rimLobes + rimPh) * r * 0.14 * k)
+      }
+    }
     tube.computeVertexNormals()
-    const a = rng() * Math.PI * 2
-    const d = rng() * 0.18
-    tube.translate(Math.cos(a) * d, h / 2, Math.sin(a) * d)
-    tube.rotateY(rng() * Math.PI)
-    geoms.push(tube)
-    // rim lip
-    const lip = new THREE.TorusGeometry(r * 0.86, r * 0.1, 7, detail >= 0.6 ? 16 : 10)
-    lip.rotateX(Math.PI / 2)
-    lip.translate(Math.cos(a) * d, h, Math.sin(a) * d)
-    lip.rotateY(0)
-    paint(lip, base.clone().multiplyScalar(0.75), 0.15, rng, 0)
-    geoms.push(lip)
+
+    // dark hollow throat visible inside every opening
+    const top = curve.getPointAt(1)
+    const throat = new THREE.CylinderGeometry(r * 0.8, r * 0.16, r * 1.3, rSeg, 1, true)
+    {
+      const tp = throat.attributes.position as THREE.BufferAttribute
+      const tc = new Float32Array(tp.count * 3)
+      for (let j = 0; j < tp.count; j++) {
+        tc[j * 3] = innerC.r; tc[j * 3 + 1] = innerC.g; tc[j * 3 + 2] = innerC.b
+      }
+      throat.setAttribute('color', new THREE.BufferAttribute(tc, 3))
+    }
+    throat.translate(top.x, top.y - r * 0.6, top.z)
+
+    const a0 = rng() * Math.PI * 2
+    const d0 = rng() * 0.16
+    tube.translate(Math.cos(a0) * d0, 0, Math.sin(a0) * d0)
+    throat.translate(Math.cos(a0) * d0, 0, Math.sin(a0) * d0)
+    geoms.push(tube, throat)
   }
-  return mergeGeometries(geoms, false)!
+
+  // mossy base skirt
+  const skirt = new THREE.SphereGeometry(0.24, detail >= 0.6 ? 12 : 8, detail >= 0.6 ? 8 : 6)
+  skirt.scale(1.4, 0.32, 1.4)
+  geoms.push(paint(skirt, base.clone().multiplyScalar(0.4), 0.2, rng, 0))
+  return mergeGeometries(geoms.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
 }
 
 // ★ SOFT — plump lobed polyp clusters, bright flared tips

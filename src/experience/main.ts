@@ -503,6 +503,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       // the async boot loading sequence may re-show the intro AFTER this
       // call — keep suppressing for a few seconds (headless QA only)
       for (const ms of [400, 1200, 2500, 4000, 6000, 9000]) setTimeout(hideOverlays, ms)
+      // headless QA drives the camera — make sure input listeners exist
+      // even though the normal DIVE-IN flow was skipped
+      pointer.enable()
+      swim.enable()
       lighting.revealNow()
       surface.revealNow()
       ui.showHUD()
@@ -520,6 +524,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       tier: cfg.tier,
     }),
     arena: () => arena.stats(),
+    /** QA: world positions of placed pieces for a family (camera staging) */
+    pieces: (kind: string) => (arena.piecePos[kind] ?? []).map((p) => p.toArray().map((n) => Math.round(n * 100) / 100)),
     swimMode: () => swim.active,
     forceShark: () => creatures.triggerPredator(),
     forceTurtle: () => creatures.triggerTurtle(),
@@ -550,6 +556,15 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       if (!swim.active) return false
       swim.position.set(Number(args[0]), Number(args[1]), Number(args[2]))
       return true
+    },
+    /** QA: teleport AND aim the swim camera — setView(yaw, pitch, x, y, z) */
+    setView: (...args: unknown[]) => {
+      if (!swim.active) return false
+      if (args.length >= 5) swim.position.set(Number(args[2]), Number(args[3]), Number(args[4]))
+      if (args.length >= 1) swim.yaw = Number(args[0])
+      if (args.length >= 2) swim.pitch = Number(args[1])
+      swim.pitch = Math.min(1.25, Math.max(-1.25, swim.pitch))
+      return { pos: swim.position.toArray(), yaw: swim.yaw, pitch: swim.pitch }
     },
     projection: {
       enter: () => { projection.enter(); ui.setProjectionActive(true) },

@@ -52,7 +52,7 @@ export class LimestoneReef {
       const t = (y - bb.min.y) / h
       c.copy(base)
       // crevice darkening toward the base
-      c.lerp(shade, (1 - t) * 0.55)
+      c.lerp(shade, (1 - t) * 0.66)
       // algae patches + rust stains from fbm field
       const al = Math.max(0, fbm2(x * 0.5 + 9, z * 0.5 - y * 0.4, 3))
       c.lerp(algae, Math.min(0.5, al * 0.85) * (0.35 + t * 0.4))
@@ -69,7 +69,7 @@ export class LimestoneReef {
   /** one karst tower: icosphere sculpted by ridged fbm + ledges */
   private makeTower(seed: number, r: number, h: number, detail: number): THREE.BufferGeometry {
     const rng = mulberry32(seed)
-    const geo = new THREE.IcosahedronGeometry(1, detail === 1 ? 4 : 3)
+    const geo = new THREE.IcosahedronGeometry(1, detail === 1 ? 5 : 3)
     const p = geo.attributes.position as THREE.BufferAttribute
     const v = new THREE.Vector3()
     for (let i = 0; i < p.count; i++) {
@@ -81,7 +81,8 @@ export class LimestoneReef {
       const e1 = 1 - Math.abs(noise2(v.x * 1.4 + seed, v.z * 1.4 - ny * 0.8))
       const e2 = 1 - Math.abs(noise2(v.z * 2.6 - seed, v.x * 2.6 + ny * 1.7))
       const e3 = noise2(v.x * 5.5 + ny * 3, v.z * 5.5)
-      rad *= 1 + (e1 - 0.45) * 0.42 + (e2 - 0.5) * 0.2 + e3 * 0.08
+      const e4 = noise2(v.x * 11 - ny * 5, v.z * 11 + ny * 4)          // v3: fine fluting
+      rad *= 1 + (e1 - 0.45) * 0.52 + (e2 - 0.5) * 0.26 + e3 * 0.11 + e4 * 0.05
       // horizontal ledge shelves every ~40% of height
       const ledge = Math.exp(-Math.pow(((ny + 0.25) % 0.9 - 0.45) * 7, 2)) * 0.22
       rad += ledge * (0.5 + 0.5 * Math.sin(v.x * 4 + v.z * 3))

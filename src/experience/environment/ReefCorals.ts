@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
-import { fbm2 } from '../utils/math'
+import { fbm2, noise2 } from '../utils/math'
 
 export type Rng = () => number
 export type Det = 0 | 1 | 2
@@ -80,7 +80,7 @@ export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
   const trunkCol = new THREE.Color('#877a5c')
 
   const seg = det === 2 ? 128 : det === 1 ? 72 : 40
-  const hSeg = det === 2 ? 4 : det === 1 ? 3 : 2
+  const hSeg = det === 2 ? 6 : det === 1 ? 4 : 2
   const lobes = 3 + Math.floor(rng() * 3)
   const ribs = 14 + Math.floor(rng() * 10)
   const ph = rng() * Math.PI * 2
@@ -116,7 +116,7 @@ export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
   let r = 1.15 + rng() * 0.65
 
   for (let l = 0; l < levels; l++) {
-    const thick = 0.1 + r * 0.05
+    const thick = 0.13 + r * 0.075               // v3: thicker living edge
     // surface height of the disc top at (x,z) — shared by the vertex
     // displacement AND the branchlet placement below
     const discY = (x: number, z: number, rr: number) => {
@@ -135,6 +135,41 @@ export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
     }
     disc.computeVertexNormals()
     paint(disc, base, 0.13, rng, 0.05)
+
+    // v3: rolled living edge — a wavy torus hugging the rim so the
+    // table reads THICK from the side (the classic reference profile)
+    if (det >= 1 && l === 0) {
+      const tor = new THREE.TorusGeometry(
+        r * 0.99, thick * 0.55,
+        det === 2 ? 9 : 6, det === 2 ? seg : 48,
+      )
+      tor.rotateX(Math.PI / 2)                            // lay flat
+      {
+        const tp = tor.attributes.position as THREE.BufferAttribute
+        for (let i = 0; i < tp.count; i++) {
+          const x = tp.getX(i), z = tp.getZ(i)
+          tp.setY(i, tp.getY(i) + discY(x, z, r))          // follow the undulation
+        }
+        tor.computeVertexNormals()
+      }
+      parts.push(paint(tor, base.clone().lerp(rimC, 0.42), 0.14, rng, 0.12))
+    }
+
+    // v3: corallite nubs sprinkled over the disc top (det 2 only)
+    if (det === 2) {
+      const nubs = 16 + Math.floor(rng() * 14)
+      for (let i = 0; i < nubs; i++) {
+        const na = rng() * Math.PI * 2
+        const nd2 = Math.sqrt(rng()) * r * 0.92
+        const nx = Math.cos(na) * nd2, nz = Math.sin(na) * nd2
+        const nub = new THREE.ConeGeometry(0.018 + rng() * 0.014, 0.05 + rng() * 0.05, 5, 1)
+        nub.translate(0, 0.02, 0)
+        nub.rotateX((rng() - 0.5) * 0.8)
+        nub.rotateZ((rng() - 0.5) * 0.8)
+        nub.translate(nx, discY(nx, nz, r) + thick / 2, nz)
+        parts.push(paint(nub, base.clone().lerp(rimC, 0.3), 0.2, rng, 0.35))
+      }
+    }
     {
       // groove shading + ridge light + pale rim + dark underside
       const nn = disc.attributes.normal as THREE.BufferAttribute
@@ -145,7 +180,8 @@ export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
         const a = Math.atan2(z, x)
         const rib = Math.sin(a * ribs + ph + l * 1.7)
         let k = 1 + rib * 0.16 * d                       // ridges catch light
-        if (nn.getY(i) < -0.3) k *= 0.46                // underside shadow
+        k *= 1 - Math.max(0, -rib - 0.25) * 0.42 * d     // v3: deep polyp valleys between ridges
+        if (nn.getY(i) < -0.3) k *= 0.58                // underside shadow (kept readable, not pitch black)
         cc.setXYZ(i, cc.getX(i) * k, cc.getY(i) * k, cc.getZ(i) * k)
         if (d > 0.86 && nn.getY(i) > 0) {               // pale living rim
           const m = (d - 0.86) / 0.14
@@ -159,7 +195,7 @@ export function makeTableStack(rng: Rng, det: Det): THREE.BufferGeometry {
 
     // branchlets crowning the disc (acropora fingers)
     if (det >= 1) {
-      const nb = det === 2 ? 10 + Math.floor(rng() * 8) : 4
+      const nb = det === 2 ? 14 + Math.floor(rng() * 10) : 7
       for (let i = 0; i < nb; i++) {
         const ba = rng() * Math.PI * 2
         const bd = (0.4 + rng() * 0.42) * r
@@ -221,7 +257,7 @@ export function makeBubbleCoral(rng: Rng, det: Det): THREE.BufferGeometry {
     ['#8fb4ea', '#6f92d8'], ['#c39ae0', '#a37ad0'],
   ]
   const [main, accent] = pickF(palettes, rng)
-  const ballSeg: [number, number] = det === 2 ? [12, 9] : det === 1 ? [10, 7] : [7, 5]
+  const ballSeg: [number, number] = det === 2 ? [16, 12] : det === 1 ? [12, 9] : [8, 6]
   const windowC = new THREE.Color('#eae6ff')
 
   const subClusters = 1 + Math.floor(rng() * 3)
@@ -245,7 +281,7 @@ export function makeBubbleCoral(rng: Rng, det: Det): THREE.BufferGeometry {
     }
     parts.push(paint(blob, new THREE.Color(main).multiplyScalar(0.42), 0.2, rng, 0))
 
-    const balls = 20 + Math.floor(rng() * (det === 2 ? 18 : 12))
+    const balls = 24 + Math.floor(rng() * (det === 2 ? 24 : 14))
     const mainC = new THREE.Color(main)
     const accC = new THREE.Color(accent)
     for (let i = 0; i < balls; i++) {
@@ -298,8 +334,8 @@ export function makeTubeSponge(rng: Rng, det: Det, out?: { lips: THREE.Vector3[]
   const base = new THREE.Color(pickF(palette, rng))
   const innerC = base.clone().multiplyScalar(0.16)
   const n = 3 + Math.floor(rng() * (det === 0 ? 2 : 5))
-  const tSeg = det === 2 ? 18 : det === 1 ? 13 : 9
-  const rSeg = det === 2 ? 16 : det === 1 ? 11 : 8
+  const tSeg = det === 2 ? 26 : det === 1 ? 16 : 10
+  const rSeg = det === 2 ? 22 : det === 1 ? 14 : 9
 
   for (let i = 0; i < n; i++) {
     const r = 0.1 + rng() * 0.14
@@ -406,9 +442,9 @@ export function makeFingerCoral(rng: Rng, det: Det): THREE.BufferGeometry {
   }
   parts.push(paint(dome, base.clone().multiplyScalar(0.72), 0.18, rng, 0))
 
-  const fingers = 24 + Math.floor(rng() * (det === 2 ? 22 : 14))
-  const fSeg = det === 2 ? 9 : 6
-  const fH = det === 2 ? 5 : 2
+  const fingers = 30 + Math.floor(rng() * (det === 2 ? 26 : 16))
+  const fSeg = det === 2 ? 12 : 7
+  const fH = det === 2 ? 7 : 3
   for (let i = 0; i < fingers; i++) {
     const a = rng() * Math.PI * 2
     const rad = Math.sqrt(rng()) * 0.34
@@ -479,14 +515,14 @@ export function makeRedWhip(rng: Rng, det: Det): THREE.BufferGeometry {
     }
     const curve = new THREE.CatmullRomCurve3(pts)
     const rad = 0.05 + rng() * 0.026
-    const whip = new THREE.TubeGeometry(curve, det === 2 ? 34 : det === 1 ? 24 : 14, rad, det === 0 ? 5 : 8, false)
+    const whip = new THREE.TubeGeometry(curve, det === 2 ? 46 : det === 1 ? 30 : 16, rad, det === 0 ? 6 : 10, false)
     taperTube(whip, curve, 0.15, true)
     paint(whip, base, 0.2, rng, 0.3)
     parts.push(whip)
 
     // polyps — pale cones spiralling around the blade
     if (det >= 1) {
-      const nP = det === 2 ? 26 + Math.floor(rng() * 14) : 10
+      const nP = det === 2 ? 40 + Math.floor(rng() * 18) : 14
       const q = new THREE.Quaternion()
       for (let i = 0; i < nP; i++) {
         const t = 0.1 + (i / nP) * 0.82
@@ -498,7 +534,7 @@ export function makeRedWhip(rng: Rng, det: Det): THREE.BufferGeometry {
         const th = i * 2.4
         const dir = nv.multiplyScalar(Math.cos(th)).addScaledVector(bv, Math.sin(th))
         const pl = rad * 1.05 + 0.012
-        const polyp = new THREE.ConeGeometry(rad * 0.36, rad * 1.2, 5, 1)
+        const polyp = new THREE.ConeGeometry(rad * 0.36, rad * 1.2, 7, 1)
         polyp.translate(0, rad * 0.42, 0)
         q.setFromUnitVectors(up, dir)
         polyp.applyQuaternion(q)
@@ -544,7 +580,7 @@ export function makeSpiralWhip(rng: Rng, det: Det): THREE.BufferGeometry {
       }
     }
     const curve = new THREE.CatmullRomCurve3(pts)
-    const whip = new THREE.TubeGeometry(curve, det === 2 ? 84 : det === 1 ? 58 : 34, 0.02 + rng() * 0.014, det === 0 ? 5 : 7, false)
+    const whip = new THREE.TubeGeometry(curve, det === 2 ? 104 : det === 1 ? 68 : 40, 0.02 + rng() * 0.014, det === 0 ? 5 : 9, false)
     taperTube(whip, curve, 0.12, true)
     paint(whip, base, 0.18, rng, 0.35)
     {   // growth banding
@@ -594,7 +630,7 @@ export function makeAnemoneBig(rng: Rng, det: Det): THREE.BufferGeometry {
   disc.translate(0, 0.32, 0)
   parts.push(paint(disc, new THREE.Color('#9a6a74'), 0.12, rng, 0.2))
 
-  const n = det === 2 ? 66 + Math.floor(rng() * 20) : det === 1 ? 48 : 38
+  const n = det === 2 ? 88 + Math.floor(rng() * 26) : det === 1 ? 58 : 42
   for (let i = 0; i < n; i++) {
     const ring = i % 3
     const a = (i / n) * Math.PI * 2 + rng() * 0.24
@@ -610,10 +646,10 @@ export function makeAnemoneBig(rng: Rng, det: Det): THREE.BufferGeometry {
     const top = base.clone().addScaledVector(dir, hgt)
       .add(new THREE.Vector3(Math.cos(a) * bend * 2.1, 0, Math.sin(a) * bend * 2.1))
     const tc = new THREE.CatmullRomCurve3([base, mid, top])
-    const tentacle = new THREE.TubeGeometry(tc, det === 2 ? 7 : 4, 0.034, det === 2 ? 5 : 4, false)
+    const tentacle = new THREE.TubeGeometry(tc, det === 2 ? 9 : 5, 0.034, det === 2 ? 7 : 5, false)
     taperTube(tentacle, tc, 0.45, true)
     parts.push(paint(tentacle, tent, 0.25, rng, 0.4))
-    const tip = new THREE.SphereGeometry(0.044, det === 2 ? 6 : 5, det === 2 ? 5 : 4)
+    const tip = new THREE.SphereGeometry(0.044, det === 2 ? 8 : 5, det === 2 ? 6 : 4)
     tip.translate(top.x, top.y, top.z)
     parts.push(paint(tip, tipC, 0.12, rng, 0))
   }
@@ -627,7 +663,7 @@ export function makeAnemoneBig(rng: Rng, det: Det): THREE.BufferGeometry {
 // =================================================================
 export function makeGreenMound(rng: Rng, size: number, det: Det): THREE.BufferGeometry {
   // NB: icosahedron detail is per-edge linear → faces = 20·(detail+1)²
-  const geo = new THREE.IcosahedronGeometry(size, det === 2 ? 9 : det === 1 ? 5 : 3)
+  const geo = new THREE.IcosahedronGeometry(size, det === 2 ? 10 : det === 1 ? 5 : 3)
   const p = geo.attributes.position as THREE.BufferAttribute
   const v = new THREE.Vector3()
   for (let i = 0; i < p.count; i++) {
@@ -655,4 +691,109 @@ export function makeGreenMound(rng: Rng, size: number, det: Det): THREE.BufferGe
   }
   geo.setAttribute('color', new THREE.BufferAttribute(arr, 3))
   return geo
+}
+
+// =================================================================
+// STAGHORN BUSH — the signature corymbose Acropora of the
+// reference art. A broad encrusting base plate sprouts 3-5
+// leaning trunks that recurse into fine tapering limbs with
+// axial corallite rings and pale growth tips.
+//   det 2 → 4-5 trunks, recursion 4, 8×4 branch segments
+//   det 1 → 3 trunks, recursion 3
+//   det 0 → 2 trunks, recursion 2 (silhouette read)
+// =================================================================
+export function makeStaghornBush(rng: Rng, det: Det): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = []
+  const palette = ['#b05ac9', '#d45a9a', '#5a9ac9', '#c98a5a', '#e07850', '#7ac9a8', '#c9c95a', '#8a7ad0']
+  const base = new THREE.Color(pickF(palette, rng))
+  const tipC = new THREE.Color('#ffe9c9')
+  const up = new THREE.Vector3(0, 1, 0)
+  const rs = det === 2 ? 8 : det === 1 ? 7 : 6
+  const hs = det === 2 ? 4 : det === 1 ? 3 : 2
+  const depth = det === 2 ? 4 : det === 1 ? 3 : 2
+  const tipSeg: [number, number] = det === 2 ? [8, 6] : [6, 5]
+
+  const grow = (origin: THREE.Vector3, dir: THREE.Vector3, len: number, radius: number, lvl: number) => {
+    const end = origin.clone().addScaledVector(dir, len)
+    const cyl = new THREE.CylinderGeometry(radius * 0.58, radius, len, rs, hs)
+    const p = cyl.attributes.position as THREE.BufferAttribute
+    const bendAxis = new THREE.Vector3(rng() - 0.5, 0, rng() - 0.5).normalize()
+    for (let i = 0; i < p.count; i++) {
+      const fy = p.getY(i) / len + 0.5
+      let x = p.getX(i), z = p.getZ(i)
+      const k = fy * fy * 0.85
+      x += bendAxis.x * len * 0.2 * k
+      z += bendAxis.z * len * 0.2 * k
+      // axial corallite rings + fine noise → real staghorn surface
+      const r2 = Math.hypot(x, z)
+      if (r2 > 0.0005 && fy > 0.03 && fy < 0.97) {
+        const ang = Math.atan2(z, x)
+        const bump = 1
+          + Math.sin(ang * 9 + fy * 34) * 0.045
+          + noise2(x * 30 + lvl * 7, z * 30 - fy * 21) * 0.09
+        x *= bump; z *= bump
+      }
+      p.setXYZ(i, x, p.getY(i), z)
+    }
+    cyl.computeVertexNormals()
+    cyl.translate(0, len / 2, 0)
+    cyl.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(up, dir))
+    cyl.translate(origin.x, origin.y, origin.z)
+    parts.push(paint(cyl, base.clone().offsetHSL((rng() - 0.5) * 0.02, 0, (rng() - 0.5) * 0.09), 0.2, rng, 0.14))
+    if (lvl <= 0) {
+      const tip = new THREE.SphereGeometry(radius * 0.92, tipSeg[0], tipSeg[1])
+      tip.translate(end.x, end.y, end.z)
+      parts.push(paint(tip, base.clone().lerp(tipC, 0.62), 0.1, rng, 0))
+      return
+    }
+    const children = lvl >= 3 ? 2 : rng() < 0.45 ? 3 : 2
+    for (let i = 0; i < children; i++) {
+      const nd = dir.clone()
+      const axis = new THREE.Vector3(rng() - 0.5, rng() - 0.5, rng() - 0.5).normalize()
+      nd.applyAxisAngle(axis, 0.3 + rng() * 0.48)
+      nd.y = Math.abs(nd.y) * 0.62 + 0.26
+      nd.normalize()
+      grow(end, nd, len * (0.68 + rng() * 0.15), radius * 0.66, lvl - 1)
+    }
+  }
+
+  // corymbose base — encrusting plate with short vertical nubs
+  const plate = new THREE.SphereGeometry(0.42, det === 2 ? 18 : 12, det === 2 ? 10 : 7)
+  plate.scale(1.25, 0.28, 1.25)
+  {
+    const pp = plate.attributes.position as THREE.BufferAttribute
+    const v = new THREE.Vector3()
+    for (let i = 0; i < pp.count; i++) {
+      v.fromBufferAttribute(pp, i)
+      const n = fbm2(v.x * 6 + 3, (v.y + v.z) * 6, 2)
+      pp.setXYZ(i, v.x * (1 + n * 0.14), v.y, v.z * (1 + n * 0.14))
+    }
+    plate.computeVertexNormals()
+  }
+  parts.push(paint(plate, base.clone().multiplyScalar(0.55), 0.2, rng, 0.05))
+  const nubs = det === 2 ? 12 + Math.floor(rng() * 8) : det === 1 ? 7 : 4
+  for (let i = 0; i < nubs; i++) {
+    const a = rng() * Math.PI * 2
+    const d = Math.sqrt(rng()) * 0.5
+    const nl = 0.1 + rng() * 0.16
+    const nub = new THREE.CylinderGeometry(0.016, 0.026, nl, 6, 1)
+    nub.translate(0, nl / 2, 0)
+    nub.rotateZ(Math.cos(a) * 0.3)
+    nub.rotateX(Math.sin(a) * 0.3)
+    nub.translate(Math.cos(a) * d, 0.06, Math.sin(a) * d)
+    parts.push(paint(nub, base.clone().lerp(tipC, 0.25), 0.16, rng, 0.3))
+  }
+
+  const trunks = det === 2 ? 4 + (rng() < 0.5 ? 1 : 0) : det === 1 ? 3 : 2
+  for (let i = 0; i < trunks; i++) {
+    const a = (i / trunks) * Math.PI * 2 + rng() * 0.9
+    grow(
+      new THREE.Vector3(Math.cos(a) * 0.1, 0.05, Math.sin(a) * 0.1),
+      new THREE.Vector3(Math.cos(a) * 0.24, 1, Math.sin(a) * 0.24).normalize(),
+      0.42 + rng() * 0.2,
+      0.075 + rng() * 0.025,
+      depth,
+    )
+  }
+  return mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
 }

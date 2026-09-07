@@ -21,11 +21,12 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { sharedUniforms } from '../core/sharedUniforms'
-import { mulberry32 } from '../utils/math'
+import { mulberry32, fbm2 } from '../utils/math'
 import { injectSilhouette } from './depthSilhouette'
 import {
   makeTableStack, makeBubbleCoral, makeTubeSponge, makeFingerCoral,
   makeRedWhip, makeSpiralWhip, makeAnemoneBig, makeGreenMound,
+  makeStaghornBush,
   paint, pickF, rand, type Rng, type Det,
 } from './ReefCorals'
 import type { Obstacle } from './Rocks'
@@ -80,6 +81,7 @@ interface MatSpec {
 
 const MATSPEC: Record<string, MatSpec> = {
   table:   { rough: 0.82 },
+  staghorn: { rough: 0.72 },
   bubble:  { rough: 0.34, clear: 0.65, clearRough: 0.22 },
   sponge:  { rough: 0.5, clear: 0.5, clearRough: 0.3, side: THREE.DoubleSide },
   finger:  { rough: 0.78 },
@@ -118,6 +120,7 @@ interface FamilySpec {
 
 const FAMILIES: Record<string, FamilySpec> = {
   table:   { make: (r, d) => makeTableStack(r, d), collide: 0.72 },
+  staghorn: { make: (r, d) => makeStaghornBush(r, d), collide: 0.55 },
   bubble:  { make: (r, d) => makeBubbleCoral(r, d), collide: 0.5 },
   sponge:  { make: (r, d, o) => makeTubeSponge(r, d, o), collide: 0.4 },
   finger:  { make: (r, d) => makeFingerCoral(r, d), collide: 0.42 },
@@ -139,6 +142,8 @@ export class ReefArena {
   /** world-space tube-sponge osculum positions (bubble emitters) */
   spongeLips: THREE.Vector3[] = []
   counts: Record<string, number> = {}
+  /** QA: world position of every placed piece, per family */
+  piecePos: Record<string, THREE.Vector3[]> = {}
   tris = 0
 
   constructor(scene: THREE.Scene, private heightAt: (x: number, z: number) => number) {
@@ -160,7 +165,7 @@ export class ReefArena {
   private build() {
     const rng = mulberry32(3434001)
     const buckets: Record<string, THREE.BufferGeometry[]> = {}
-    for (const key of Object.keys(FAMILIES)) { buckets[key] = []; this.counts[key] = 0 }
+    for (const key of Object.keys(FAMILIES)) { buckets[key] = []; this.counts[key] = 0; this.piecePos[key] = [] }
     const mounds: THREE.BufferGeometry[] = []
     const rubble: THREE.BufferGeometry[] = []
 
@@ -178,6 +183,7 @@ export class ReefArena {
       geo.translate(x, gy, z)
       buckets[kind].push(geo)
       this.counts[kind]++
+      this.piecePos[kind]?.push(new THREE.Vector3(x, gy, z))
       // transform the sponge osculum lips with the very same matrix
       // sequence so bubble emitters land exactly at each opening
       for (const lp of lips) {
@@ -231,6 +237,10 @@ export class ReefArena {
       // hero table stack right on the crown
       place('table', x + rand(-0.6, 0.6, rng), z + rand(-0.6, 0.6, rng), rand(1.9, 2.8, rng), 0.3, 2)
       if (rng() < 0.5) place('table', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(1.1, 1.6, rng), 0.1, 1)
+      // v3: hero staghorn bushes — the signature reference species,
+      // previously absent from the arena wall entirely
+      place('staghorn', x + rand(-1.3, 1.3, rng), z + rand(-1.3, 1.3, rng), rand(1.5, 2.3, rng), 0.12, 2)
+      if (rng() < 0.55) place('staghorn', x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.1, 1.7, rng), 0.1, 1)
       // entourage around the flank
       place('bubble', x + rand(-1.9, 1.9, rng), z + rand(-1.9, 1.9, rng), rand(1.3, 2.0, rng), 0.1, 2)
       place('bubble', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.1, 1.7, rng), 0.1, 1)
@@ -262,10 +272,13 @@ export class ReefArena {
       const H = rand(0.9, 1.7, rng)
       addMound(x, z, R, H, 1)
       place(rng() < 0.4 ? 'table' : 'finger', x + rand(-0.7, 0.7, rng), z + rand(-0.7, 0.7, rng), rand(1.1, 1.7, rng), 0.12, 1)
+      if (rng() < 0.45) place('staghorn', x + rand(-1.1, 1.1, rng), z + rand(-1.1, 1.1, rng), rand(1.0, 1.6, rng), 0.1, 1)
       place(pickF(['bubble', 'sponge'], rng), x + rand(-1.5, 1.5, rng), z + rand(-1.5, 1.5, rng), rand(1.0, 1.5, rng), 0.08, 1)
       place(pickF(['spiral', 'redwhip', 'finger'], rng), x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(0.9, 1.4, rng), 0.06, 1)
       place(pickF(['sponge', 'bubble'], rng), x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.9, 1.4, rng), 0.06, 1)
       if (rng() < 0.5) place('bubble', x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.8, 1.2, rng), 0.06, 1)
+      // anti-bolong densify: one more mid colony per sub-ring slot
+      place(pickF(['finger', 'redwhip', 'spiral', 'bubble'], rng), x + rand(-2.1, 2.1, rng), z + rand(-2.1, 2.1, rng), rand(0.9, 1.5, rng), 0.06, 1)
     }
 
     // ---------- between the rings — scattered filler colonies ----------
@@ -274,7 +287,7 @@ export class ReefArena {
       const r = 36 + rng() * 9
       const x = CX + Math.cos(a) * r
       const z = CZ + Math.sin(a) * r
-      place(pickF(['bubble', 'sponge', 'finger', 'spiral', 'redwhip'], rng), x, z, rand(0.8, 1.4, rng), 0.06, 1)
+      place(pickF(['bubble', 'sponge', 'finger', 'spiral', 'redwhip', 'staghorn', 'staghorn'], rng), x, z, rand(0.8, 1.4, rng), 0.06, 1)
     }
 
     // ---------- clearing edge — low foreground accents framing the sand ----------
@@ -312,6 +325,7 @@ export class ReefArena {
       addMound(x, z, R, H, 1)
 
       place('table', x + rand(-0.8, 0.8, rng), z + rand(-0.8, 0.8, rng), rand(2.8, 4.0, rng), 0.4, 1)
+      place('staghorn', x + rand(-2.2, 2.2, rng), z + rand(-2.2, 2.2, rng), rand(1.8, 2.6, rng), 0.12, 1)
       place('bubble', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.6, 2.4, rng), 0.1, 1)
       place('sponge', x + rand(-2.8, 2.8, rng), z + rand(-2.8, 2.8, rng), rand(1.5, 2.2, rng), 0.1, 1)
       place('finger', x + rand(-2.6, 2.6, rng), z + rand(-2.6, 2.6, rng), rand(1.7, 2.6, rng), 0.1, 1)
@@ -333,6 +347,97 @@ export class ReefArena {
       place('table', x, z, rand(3.8, 5.2, rng), 0.5, 0)
       if (rng() < 0.7) place('sponge', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.0, 3.0, rng), 0.1, 0)
       if (rng() < 0.6) place('finger', x + rand(-3.5, 3.5, rng), z + rand(-3.5, 3.5, rng), rand(2.2, 3.2, rng), 0.1, 0)
+    }
+
+    // ---------- backfill ridge — continuous 360° reef wall (anti-bolong) ----------
+    // An undulating rock ridge threaded between ring A and ring A2 that
+    // seals every see-through gap between the bommies. The 4 sand
+    // channels cut through as smooth dips so the swim lanes survive.
+    {
+      const ANG = 260
+      const ROWS = 6
+      const R0 = 40
+      const pos = new Float32Array((ANG + 1) * (ROWS + 1) * 3)
+      const idx: number[] = []
+      const channelA = [Math.PI * 0.25, Math.PI * 0.75, Math.PI * 1.25, Math.PI * 1.75]
+      let o = 0
+      for (let i = 0; i <= ANG; i++) {
+        const a = (i / ANG) * Math.PI * 2
+        // wobble the ridge centreline in/out for an organic plan
+        const rw = R0 + Math.sin(a * 9 + 1.2) * 2.2 + Math.sin(a * 23 + 4) * 1.1
+          + (fbm2(Math.cos(a) * 3 + 9, Math.sin(a) * 3, 2) - 0.5) * 3
+        const wx = CX + Math.cos(a) * rw
+        const wz = CZ + Math.sin(a) * rw
+        const gy = this.heightAt(wx, wz)
+        // dip to a low sill where the sand channels pass through
+        let dip = 1
+        for (const ca of channelA) {
+          const d = Math.abs(Math.atan2(Math.sin(a - ca), Math.cos(a - ca)))
+          dip = Math.min(dip, 0.1 + Math.min(1, d / 0.17) * 0.9)
+        }
+        const Hbase = 1.6 + (fbm2(Math.cos(a) * 2.2 - 5, Math.sin(a) * 2.2 + 7, 3) + 0.5) * 2.2
+        const Hh = 0.45 + (Hbase - 0.45) * dip
+        for (let jr = 0; jr <= ROWS; jr++) {
+          const t = jr / ROWS
+          const rr = rw + Math.sin(t * Math.PI) * 1.1 - t * 1.4     // belly out, lean in at the crest
+          const y = gy - 0.55 + t * Hh * (0.85 + 0.3 * Math.sin(a * 5 + t * 3))
+          pos[o++] = CX + Math.cos(a) * rr
+          pos[o++] = y
+          pos[o++] = CZ + Math.sin(a) * rr
+        }
+      }
+      // fine rocky relief between the buried base and the crest
+      for (let i = 0; i <= ANG; i++) {
+        for (let jr = 1; jr < ROWS; jr++) {
+          const k = (i * (ROWS + 1) + jr) * 3
+          const x = pos[k], y = pos[k + 1], z = pos[k + 2]
+          const a = (i / ANG) * Math.PI * 2
+          const nx = Math.cos(a), nz = Math.sin(a)
+          const n = fbm2(x * 0.55 + i * 0.13, (y + z) * 0.55, 3) - 0.5
+          pos[k] += nx * n * 1.15
+          pos[k + 2] += nz * n * 1.15
+          pos[k + 1] += (fbm2(z * 0.8, x * 0.8, 2) - 0.5) * 0.7
+        }
+      }
+      for (let i = 0; i < ANG; i++) {
+        for (let jr = 0; jr < ROWS; jr++) {
+          const a0 = i * (ROWS + 1) + jr
+          const b0 = (i + 1) * (ROWS + 1) + jr
+          idx.push(a0, b0, a0 + 1, b0, b0 + 1, a0 + 1)
+        }
+      }
+      const ridge = new THREE.BufferGeometry()
+      ridge.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+      ridge.setIndex(idx)
+      ridge.computeVertexNormals()
+      // mossy rock vertex colours with algae patches + pale crest
+      {
+        const pCount = pos.length / 3
+        const cols = new Float32Array(pCount * 3)
+        const rock = new THREE.Color('#54705e')
+        const algae = new THREE.Color('#6d8f6a')
+        const crest = new THREE.Color('#7d9a74')
+        const c = new THREE.Color()
+        for (let i = 0; i < ANG + 1; i++) {
+          for (let jr = 0; jr <= ROWS; jr++) {
+            const k = (i * (ROWS + 1) + jr) * 3
+            const x = pos[k], y = pos[k + 1], z = pos[k + 2]
+            c.copy(rock).multiplyScalar(0.85 + fbm2(x * 1.1, (y + z) * 1.1, 2) * 0.35)
+            const patch = fbm2(x * 0.7 - 4, (y * 0.8 + z) * 0.7 + 6, 3)
+            if (patch > 0.05) c.lerp(algae, Math.min(1, (patch - 0.05) * 3.2) * 0.6)
+            c.lerp(crest, Math.max(0, (jr / ROWS - 0.55)) * 0.8)
+            cols[k] = c.r; cols[k + 1] = c.g; cols[k + 2] = c.b
+          }
+        }
+        ridge.setAttribute('color', new THREE.BufferAttribute(cols, 3))
+      }
+      this.tris += (idx.length / 3)
+      const ridgeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01, side: THREE.DoubleSide })
+      ridgeMat.onBeforeCompile = (shader) => {
+        injectSilhouette(shader, { start: 46, end: 105, k: 0.8, color: '#0d4266' })
+      }
+      ridgeMat.customProgramCacheKey = () => 'arena-ridge'
+      this.group.add(new THREE.Mesh(ridge, ridgeMat))
     }
 
     // ---------- merge per family ----------
