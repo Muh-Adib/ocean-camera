@@ -1024,3 +1024,18 @@ Stage Summary:
 - Total scene 1,75 juta triangle pada tier medium (headless) — target "jutaan ribu poly" terpenuhi; tier high akan lebih padat lagi.
 - Poly budget terukur via __ocean.stats(); jadwal detailing 5 tahap berikutnya tercatat di atas untuk eksekusi satu per satu.
 
+
+---
+Task ID: 36-b (merge)
+Agent: main (Super Z)
+Task: merge dua implementasi reef paralel (remote Task 35 colosseum vs local reef-v2 anatomy) menjadi satu scene
+
+Work Log:
+- Remote ternyata sudah membawa Task 35 (ReefArena colosseum 360, ReefCorals, depthSilhouette, SpongeBubbles, atmosfer turkuois #25b2c6, god rays ring 360, caustics tile 360) + studio v2 (session isolation, FolderSync, control UI overhaul, logo favicon) + makhluk upgrade + fish template registration.
+- Merge FETCH_HEAD: 5 konflik diselesaikan — Lighting (nilai turkuois 3.3/1.15 + revealNow saya), SceneManager (fog/dome turkuois mereka + buildEnvironment PMREM saya, IBL di-recolor ke palet turkuois, intensity 0.3), FishScan (template registration mereka jadi primer), main.ts (UNION: limestone + coral v2 + arena + sponges + vignette + stats/revealNow + SpongeBubbles arena), worklog (kedua sejarah disatukan, entry lokal dinomori ulang 36).
+- CoralSystem auto-merge: generator v2 saya utuh + satu guard baru dari mereka (cluster draft lama di-skip dalam radius 64 m dari pusat arena supaya colosseum bersih) — karang v2 kini berakar di limestone spots + cluster luar; arena mengisi ring.
+- PerformanceManager: versi saya menang (coralDetail tier + bubble 150/90/55).
+- Verifikasi: tsc + eslint bersih; boot utama 3.449.806 tris total (123 draw calls) — arena 1.399K triK + coral v2 190K + limestone + sponge + rest; screenshot reef-v3-merged-garden.png: staghorn v2 hijau/biru/ungu tumbuh dari karst, table stacks arena berlapis, sponge teal/ungu, caustics pasir, school blue tang, atmosfer turkuois + vignette — gabungan padat & sehat; /output headless saturasi main thread (software renderer x multi-kamera x 3.4M tris — artefak headless; GPU nyata mampu, tapi Stage 9 diprioritaskan: LOD arena by tier utk multi-pass output).
+
+Stage Summary:
+- Scene final = kolaborasi dua pendekatan: dinding colosseum 360 derajat (Task 35) + anatomi karang asli berakar struktur kapur sentral (Task 36) + IBL PBR + QA hooks, 3,45 juta triangle pada tier medium, tanpa regresi fitur studio/ikan/remote.
