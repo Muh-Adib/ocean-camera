@@ -28,6 +28,7 @@ export class SceneManager {
     this.renderer.toneMappingExposure = 1.26
     this.canvas = this.renderer.domElement
     this.canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;'
+    this.canvas.dataset.oceanGl = '1'   // vibrance grade hooks this exact canvas
     container.appendChild(this.canvas)
 
     // ---- scene & fog ----

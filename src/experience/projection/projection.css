@@ -528,6 +528,20 @@
   color: rgba(160, 210, 230, 0.72);
   font-weight: 600;
 }
+/* vibrance slider inside the output overlay */
+#pm-out-overlay .pm-out-vib { display: inline-flex; align-items: center; gap: 0.4rem; }
+#pm-out-overlay .pm-out-vib input[type='range'] {
+  width: 96px;
+  accent-color: #25b2c6;
+}
+#pm-out-overlay .pm-out-vib span {
+  font-size: 0.54rem;
+  min-width: 3.2em;
+  color: #9feaf6;
+  font-variant-numeric: tabular-nums;
+}
+/* studio VIBRANCE slider row */
+.pm-vib-slider { flex: 1 1 auto; min-width: 120px; accent-color: #25b2c6; }
 #pm-out-overlay .pm-out-warn {
   font-size: 0.54rem;
   letter-spacing: 0.08em;

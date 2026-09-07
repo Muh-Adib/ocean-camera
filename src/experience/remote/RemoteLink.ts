@@ -19,7 +19,9 @@
 // ---------------------------------------------------------------
 
 export interface CtlFrame { t: 'ctl'; mx: number; my: number; ox: number; oy: number; dz: number }
-export interface HandFrame { t: 'hand'; p: boolean; x: number; y: number; o: number; n: number }
+/** one hand's metrics — same geometry the desktop HandTracker produces */
+export interface HandMetrics { x: number; y: number; o: number; s: number }
+export interface HandFrame { t: 'hand'; p: boolean; x: number; y: number; o: number; n: number; s?: number; /** second hand (optional — full two-hand parity with the desktop) */ b?: HandMetrics }
 export interface CamFrame { t: 'cam'; on: boolean }
 export interface PhoneFrame { t: 'phone'; on: boolean; n: number }
 export type ScreenMsg = CtlFrame | HandFrame | CamFrame | PhoneFrame
@@ -153,7 +155,7 @@ export class ScreenLink extends WsBase {
           break
         case 'cam':
           // camera mode off → any stale hand signal must stop driving the ocean
-          if (msg.on !== true && this.hand) { this.hand = { t: 'hand', p: false, x: 0.5, y: 0.5, o: 0, n: 0 } }
+          if (msg.on !== true && this.hand) { this.hand = { t: 'hand', p: false, x: 0.5, y: 0.5, o: 0, n: 0, s: 0 } }
           break
         case 'phone':
           this.phoneOn = msg.on === true
@@ -214,8 +216,8 @@ export class PhoneLink extends WsBase {
     this.send({ t: 'ctl', mx, my, ox, oy, dz })
   }
 
-  sendHand(present: boolean, x: number, y: number, openness: number, hands: number) {
-    this.send({ t: 'hand', p: present, x, y, o: openness, n: hands })
+  sendHand(present: boolean, x: number, y: number, openness: number, hands: number, scale?: number, second?: HandMetrics) {
+    this.send({ t: 'hand', p: present, x, y, o: openness, n: hands, ...(scale !== undefined ? { s: scale } : {}), ...(second ? { b: second } : {}) })
   }
 
   sendCam(on: boolean) { this.send({ t: 'cam', on }) }

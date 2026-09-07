@@ -357,6 +357,17 @@ function sanitizeSurface(raw: unknown): ProjectionSurface | null {
       ? (r.calibration as ProjectionSurface['calibration']) : 'off',
   }
 
+  // REAL-SIZE flow — optional trio of physical measurements (old projects skip)
+  const real = (cam.real ?? null) as { w?: unknown; h?: unknown; d?: unknown } | null
+  if (real && typeof real === 'object') {
+    const rw = clampNum(real.w, 3, 0.1, 500)
+    const rh = clampNum(real.h, 2, 0.1, 500)
+    const rd = clampNum(real.d, 4, 0.3, 500)
+    if (Number.isFinite(rw) && Number.isFinite(rh) && Number.isFinite(rd)) {
+      s.camera.real = { w: rw, h: rh, d: rd }
+    }
+  }
+
   // grid: accept a stored grid if it matches res, else rebuild from corners
   const gridRaw = warp.grid
   if (Array.isArray(gridRaw) && gridRaw.length === (res + 1) * (res + 1) && warp.gridCustom === true) {

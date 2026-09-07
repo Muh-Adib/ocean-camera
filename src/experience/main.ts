@@ -39,6 +39,8 @@ import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
 import { ProjectionManager } from './projection/ProjectionManager'
+import { RemoteHands } from './remote/RemoteHands'
+import { loadVibrance, setVibrance, getVibrance } from './look/vibrance'
 import { rand, pick } from './utils/math'
 import { gridFromCorners } from './projection/ProjectionMath'
 
@@ -77,6 +79,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const cfg = perf.config
   sceneMgr.setPixelRatioCap(cfg.dpr)
   sceneMgr.buildBackgroundDome()
+  // global colour grade (per-machine) — saturate/contrast on the GL canvas
+  setVibrance(loadVibrance(), false)
 
   const cameraRig = new CameraRig(sceneMgr.camera)
   sceneMgr.scene.add(cameraRig.group)
@@ -262,19 +266,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   fishTank.start()
   disposers.push(() => fishTank.stop())
 
-  // phone-camera hand signals (WebSocket from /control-mobile) drive the
-  // ocean the same way the local camera does — only when the local camera
-  // is not already running, so the two never fight over the field
-  projection.onPhoneHand = (h) => {
-    if (handTracker.isRunning) return
-    if (h && h.p) {
-      const p = new THREE.Vector3((h.x - 0.5) * 70, 2 + (0.5 - h.y) * 22, -18)
-      field.setHandActive(true)
-      field.setTarget(p, undefined, 0.15 + h.o * 0.55, 'current')
-    } else {
-      field.setHandActive(false)
-    }
-  }
+  // phone-camera hand signals (WebSocket from /control-mobile) feed the SAME
+  // GestureEngine as the local camera — identical swipe/push/pull/palm/fist
+  // analysis and identical swim steering, never a parallel simplified path.
+  // The local camera keeps priority: while it runs, phone hands are ignored.
+  const remoteHands = new RemoteHands()
+  projection.onPhoneHand = (h) => remoteHands.feed(h)
 
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
@@ -420,18 +417,24 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
     // ---- interaction pipeline ----
     pointer.updateKeyboard(dt)
+    // ONE gesture path: local camera first, else fresh phone-camera hands —
+    // both end up in the same GestureEngine → field/bursts/audio/swim.
+    let samples: ReturnType<HandTracker['hands']> = []
+    let landmarks: ReturnType<HandTracker['landmarksList']> | null = null
     if (handTracker.isRunning) {
       handTracker.detect(dt)          // drives per-slot smoothing (0-2 hands)
-      const samples = handTracker.hands()
-      gestureEngine.update(samples, dt)
-      gestureView?.update(dt, samples, handTracker.landmarksList(), gestureEngine.status, true, handTracker.video)
-      // in swim mode the primary palm doubles as a steering joystick
-      if (swim.active) {
-        const steer = samples[0]
-        swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
-      }
+      samples = handTracker.hands()
+      landmarks = handTracker.landmarksList()
     } else {
-      gestureView?.update(dt, null, null, gestureEngine.status, false, null)
+      samples = remoteHands.take()
+    }
+    gestureEngine.update(samples, dt)
+    gestureView?.update(dt, samples, landmarks, gestureEngine.status, handTracker.isRunning, handTracker.video)
+    // in swim mode the primary palm doubles as a steering joystick —
+    // phone-camera hands steer exactly like hands in the local camera
+    if (swim.active) {
+      const steer = samples[0]
+      swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
     }
     field.update(dt)
 
@@ -642,6 +645,17 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         s.warp.grid.forEach((p) => { p.x += dx; p.y += dy })
         projection.surfaces.touch(s)
         return true
+      },
+      /** QA: neighbour-linked span edit (joined edges stay pinned) — real UI path */
+      spanEdit: (surfaceName: string, axis: 'h' | 'v', value: number) =>
+        projection.qaSpanEdit(String(surfaceName), axis, value),
+      /** QA: real-size → span flow for a surface */
+      realSize: (surfaceName: string, w: number, h: number, d: number) =>
+        projection.qaRealSize(String(surfaceName), w, h, d),
+      /** QA: read the vibrance grade */
+      vibrance: (v?: number) => {
+        if (typeof v === 'number') setVibrance(v)
+        return getVibrance()
       },
     },
   }

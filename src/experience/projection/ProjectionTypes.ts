@@ -46,6 +46,13 @@ export interface ProjectionSurface {
      * walls' frustum edges meet EXACTLY and the frame is never cut.
      */
     span: { h: number; v: number; lock: boolean }
+    /**
+     * REAL-SIZE flow (optional): the physical wall's width/height in
+     * metres plus the viewer distance the operator calibrated with.
+     * When present the editor derives span h/v from these numbers
+     * (span = 2·atan(size / 2 / dist)) instead of raw angle fields.
+     */
+    real?: { w: number; h: number; d: number }
   }
 
   warp: {
@@ -235,6 +242,7 @@ export function createSurface(init: {
       near: init.camera.near,
       far: init.camera.far,
       span: init.camera.span ?? { h: init.camera.fov, v: init.camera.fov, lock: false },
+      ...(init.camera.real ? { real: { ...init.camera.real } } : {}),
     },
     warp: {
       corners: cornersFromRect(rect),

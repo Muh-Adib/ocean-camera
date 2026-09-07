@@ -19,9 +19,11 @@ import { ProjectManager, encodeProjectPayload, decodeProjectPayload, PORTABLE_LI
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
+import { linkedSpanEdit, realSizeToSpan } from './SpanLink'
 import { RemoteRig } from '../remote/RemoteRig'
 import { ScreenLink, cleanSessionId, type HandFrame } from '../remote/RemoteLink'
 import { phoneOrigin } from '../remote/lanOrigin'
+import { getVibrance, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN } from '../look/vibrance'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
@@ -305,6 +307,29 @@ export class ProjectionManager {
   /** QA: nudge the rig directly (headless tests) */
   qaRigSet(v: { yaw?: number; pitch?: number; dolly?: number; strafe?: number; lift?: number }) {
     Object.assign(this.remoteRig.cur, v)
+  }
+
+  /** QA: neighbour-linked span edit through the SAME path the editor uses */
+  qaSpanEdit(surfaceName: string, axis: 'h' | 'v', value: number) {
+    const s = this.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === surfaceName.toLowerCase())
+    if (!s) return null
+    this.surfaces.snapshot()
+    const res = linkedSpanEdit(this.surfaces.surfaces, s, axis, value)
+    this.surfaces.emit()
+    return { ...res, yaw: s.camera.yaw, pitch: s.camera.pitch, spanH: s.camera.span.h, spanV: s.camera.span.v }
+  }
+
+  /** QA: REAL-SIZE flow — physical wall size → spans via the linked editor */
+  qaRealSize(surfaceName: string, w: number, h: number, d: number) {
+    const s = this.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === surfaceName.toLowerCase())
+    if (!s) return null
+    this.surfaces.snapshot()
+    s.camera.real = { w, h, d }
+    const spans = realSizeToSpan(w, h, d)
+    linkedSpanEdit(this.surfaces.surfaces, s, 'h', spans.h)
+    linkedSpanEdit(this.surfaces.surfaces, s, 'v', spans.v)
+    this.surfaces.emit()
+    return { yaw: s.camera.yaw, pitch: s.camera.pitch, spanH: s.camera.span.h, spanV: s.camera.span.v }
   }
 
   /** QA: QR overlay geometry — the wall QR (in-projection) plus the DOM fallback */
@@ -597,6 +622,12 @@ export class ProjectionManager {
             <option value="contain">CONTAIN — LETTERBOX</option>
           </select>
         </label>
+        <label class="pm-out-field">VIBRANCE
+          <span class="pm-out-vib">
+            <input id="pm-out-vib" type="range" min="${VIBRANCE_MIN}" max="${VIBRANCE_MAX}" step="0.02" value="${getVibrance()}">
+            <span id="pm-out-vib-val">${getVibrance().toFixed(2)}×</span>
+          </span>
+        </label>
         <label class="pm-out-field">PATTERN
           <select id="pm-out-pattern" class="pm-select pm-select-sm">
             ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
@@ -628,6 +659,11 @@ export class ProjectionManager {
     el.querySelector('#pm-out-fit')?.addEventListener('change', (e) => {
       this.setScreenFit((e.target as HTMLSelectElement).value as ScreenFit)
     })
+    el.querySelector('#pm-out-vib')?.addEventListener('input', (e) => {
+      const v = setVibrance(parseFloat((e.target as HTMLInputElement).value))
+      const val = el.querySelector('#pm-out-vib-val')
+      if (val) val.textContent = `${v.toFixed(2)}×`
+    })
     el.querySelector('#pm-out-match')?.addEventListener('click', () => this.matchScreen())
     el.querySelector('#pm-out-pattern')?.addEventListener('change', (e) => {
       this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
@@ -657,7 +693,11 @@ export class ProjectionManager {
     const qsel = this.overlay.querySelector('#pm-out-quality') as HTMLSelectElement | null
     const fsel = this.overlay.querySelector('#pm-out-fit') as HTMLSelectElement | null
     const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
+    const vsel = this.overlay.querySelector('#pm-out-vib') as HTMLInputElement | null
+    const vval = this.overlay.querySelector('#pm-out-vib-val')
     if (fsel) fsel.value = this.screenFit
+    if (vsel) vsel.value = String(getVibrance())
+    if (vval) vval.textContent = `${getVibrance().toFixed(2)}×`
     if (info) {
       const n = this.surfaces.surfaces.filter((s) => s.enabled).length
       const rt = this.effectiveRT()

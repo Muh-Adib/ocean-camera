@@ -12,6 +12,8 @@ import { OutputNodeEditor } from './OutputNodeEditor'
 import { CameraManager } from './CameraManager'
 import { PRESETS } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
+import { linkedSpanEdit, realSizeToSpan } from './SpanLink'
+import { getVibrance, onVibranceChange, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN } from '../look/vibrance'
 import { downloadFishTemplate, TEMPLATE_URL } from '../fish/FishTemplate'
 import { processFishImage } from '../fish/FishScan'
 import { FolderSync } from '../fish/FolderSync'
@@ -498,6 +500,32 @@ export class ProjectionEditorUI {
     }, 'pm-btn-sm'))
     gCanvas.appendChild(fitRow)
     body.appendChild(this.hint('COVER fills the screen edge-to-edge with no black bars (slight edge crop when aspects differ). MATCH SCREEN snaps the output canvas to this screen\'s exact resolution for a perfect 1:1 picture.'))
+
+    // ---- vibrance — one colour-punch slider for the whole show ----
+    const vibRow = document.createElement('div')
+    vibRow.className = 'pm-row'
+    vibRow.appendChild(this.labelEl('VIBRANCE'))
+    const vibSlider = document.createElement('input')
+    vibSlider.type = 'range'
+    vibSlider.min = String(VIBRANCE_MIN)
+    vibSlider.max = String(VIBRANCE_MAX)
+    vibSlider.step = '0.02'
+    vibSlider.value = String(getVibrance())
+    vibSlider.className = 'pm-vib-slider'
+    const vibVal = document.createElement('span')
+    vibVal.className = 'pm-slider-val'
+    vibVal.textContent = `${getVibrance().toFixed(2)}×`
+    vibSlider.addEventListener('input', () => {
+      const v = setVibrance(parseFloat(vibSlider.value))
+      vibVal.textContent = `${v.toFixed(2)}×`
+    })
+    vibRow.append(vibSlider, vibVal)
+    gCanvas.appendChild(vibRow)
+    const vibOff = onVibranceChange((v) => {
+      vibSlider.value = String(v)
+      vibVal.textContent = `${v.toFixed(2)}×`
+    })
+    this.disposers.push(vibOff)
 
     // ---- output quality — sized to the machine driving the show ----
     const gQuality = this.collap(body, 'OUTPUT QUALITY', true)
@@ -1112,7 +1140,11 @@ export class ProjectionEditorUI {
     cg.appendChild(this.numField('YAW °', c.yaw, 1, (v) => { c.yaw = v; this.lightCam(s) }, -720, 720))
     cg.appendChild(this.numField('PITCH °', c.pitch, 1, (v) => { c.pitch = v; this.lightCam(s) }, -95, 95))
     if (spanLocked) {
-      cg.appendChild(this.numField('SPAN H °', c.span.h, 1, (v) => { c.span.h = Math.max(4, Math.min(359, v)); this.lightCam(s) }, 4, 359))
+      // neighbour-linked: joined edges stay pinned, growth stops at the next wall
+      cg.appendChild(this.numField('SPAN H °', c.span.h, 1, (v) => {
+        linkedSpanEdit(this.pm.surfaces.surfaces, s, 'h', Math.max(4, Math.min(359, v)))
+        this.lightCam(s)
+      }, 4, 359))
     } else {
       cg.appendChild(this.numField('FOV °', c.fov, 1, (v) => { c.fov = Math.max(8, Math.min(150, v)); this.lightCam(s) }, 8, 150))
     }
@@ -1128,8 +1160,38 @@ export class ProjectionEditorUI {
         this.pm.surfaces.emit()
       }))
       this.propsEl.appendChild(spanRow)
-      this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => { c.span.h = v; this.lightCam(s) }))
-      this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => { c.span.v = v; this.lightCam(s) }))
+      this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => {
+        linkedSpanEdit(this.pm.surfaces.surfaces, s, 'h', v)
+        this.lightCam(s)
+      }))
+      this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => {
+        linkedSpanEdit(this.pm.surfaces.surfaces, s, 'v', v)
+        this.lightCam(s)
+      }))
+      // ---- REAL-SIZE flow: type the wall's physical size, the camera follows ----
+      const real = c.real ?? { w: 3, h: 2, d: 4 }
+      const realGrid = document.createElement('div')
+      realGrid.className = 'pm-grid3'
+      const applyReal = () => {
+        const spans = realSizeToSpan(real.w, real.h, real.d)
+        linkedSpanEdit(this.pm.surfaces.surfaces, s, 'h', spans.h)
+        linkedSpanEdit(this.pm.surfaces.surfaces, s, 'v', spans.v)
+        this.lightCam(s)
+      }
+      const persistReal = () => { c.real = { w: real.w, h: real.h, d: real.d } }
+      realGrid.appendChild(this.numField('W (m)', real.w, 0.1, (v) => { real.w = Math.max(0.1, v); persistReal(); applyReal() }, 0.1, 500))
+      realGrid.appendChild(this.numField('H (m)', real.h, 0.1, (v) => { real.h = Math.max(0.1, v); persistReal(); applyReal() }, 0.1, 500))
+      realGrid.appendChild(this.numField('DIST (m)', real.d, 0.1, (v) => { real.d = Math.max(0.3, v); persistReal(); applyReal() }, 0.3, 500))
+      this.propsEl.appendChild(realGrid)
+      const covRow = document.createElement('div')
+      covRow.className = 'pm-row'
+      covRow.appendChild(this.labelEl('CAMERA COVERS'))
+      const cov = document.createElement('span')
+      cov.className = 'pm-slider-val'
+      cov.textContent = `${c.span.h.toFixed(1)}° × ${c.span.v.toFixed(1)}°`
+      covRow.appendChild(cov)
+      this.propsEl.appendChild(covRow)
+      this.propsEl.appendChild(this.hint('Real size sets the frustum from the physical wall (span = 2·atan(size / 2 ÷ distance)). Neighbour-linked: edges joined to another camera stay pinned and never take over the neighbour\'s view — stacked floors/ceilings and same-band walls follow the edit automatically.'))
       // camera input ratio vs the slice it feeds — one click keeps them equal
       const camRatio = c.span.h / Math.max(1, c.span.v)
       const sliceRatio = rect.width / Math.max(1, rect.height)

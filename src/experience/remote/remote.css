@@ -155,30 +155,73 @@
   background: linear-gradient(transparent, rgba(2, 12, 18, 0.85));
 }
 
-/* control deck */
-.rm-deck {
-  margin-top: auto;
+/* header actions — speed + camera + session tag */
+.rm-head-actions { display: flex; align-items: center; gap: 8px; }
+.rm-speed-btn {
+  border: 1px solid rgba(159, 234, 246, 0.35);
+  background: rgba(95, 240, 255, 0.06);
+  color: #9feaf6;
+  border-radius: 999px;
+  padding: 9px 12px;
+  font: 700 11px/1 var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.1em;
+}
+.rm-speed-btn.fast {
+  border-color: rgba(255, 212, 127, 0.55);
+  color: #ffd47f;
+  background: rgba(255, 212, 127, 0.08);
+}
+
+/* control stage — TWO HALF-SCREEN PADS: touch anywhere, the stick
+   floats to your thumb. No more aiming for a small circle. */
+.rm-stage {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 240px;
+  touch-action: none;
+}
+.rm-zone {
+  position: relative;
+  flex: 1 1 50%;
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  gap: 6vw;
-  padding: 10px 18px calc(22px + env(safe-area-inset-bottom));
+  padding-bottom: 8px;
 }
-.rm-stick-wrap {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
+.rm-zone + .rm-zone { border-left: 1px dashed rgba(95, 240, 255, 0.12); }
+.rm-zone-label {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  font: 600 11px/1.5 var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.12em;
+  color: rgba(159, 234, 246, 0.66);
+  pointer-events: none;
+}
+.rm-zone-label em {
+  font: 500 10px/1.4 var(--font-sans, system-ui, sans-serif);
+  font-style: normal;
+  letter-spacing: 0.06em;
+  color: rgba(159, 234, 246, 0.42);
 }
 .rm-stick {
-  position: relative;
-  width: min(34vw, 158px);
+  position: absolute;
+  bottom: 18px;
+  left: 50%;
+  width: min(44vw, 168px);
   aspect-ratio: 1;
   border-radius: 50%;
   background: radial-gradient(circle at 50% 42%, rgba(95, 240, 255, 0.10), rgba(4, 26, 38, 0.55) 72%);
   border: 1px solid rgba(95, 240, 255, 0.30);
   touch-action: none;
+  pointer-events: none;   /* the stage routes the pointer — sticks are visual */
+  transition: opacity 0.2s ease-out;
+  opacity: 0.55;
 }
+.rm-stick.live { opacity: 1; }
 .rm-stick .rm-ring {
   position: absolute; inset: 18%;
   border-radius: 50%;
@@ -186,7 +229,7 @@
 }
 .rm-stick .rm-nub {
   position: absolute; left: 50%; top: 50%;
-  width: 42%; aspect-ratio: 1;
+  width: 46%; aspect-ratio: 1;
   border-radius: 50%;
   transform: translate(-50%, -50%);
   background: radial-gradient(circle at 38% 32%, #9ff3ff, #1e94ad 70%);
@@ -201,20 +244,33 @@
   white-space: nowrap;
 }
 
+/* foot — dolly slider + hint */
+.rm-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 14px;
+  padding: 6px 18px 0;
+}
+.rm-foot-label {
+  font: 600 10.5px/1.4 var(--font-mono, ui-monospace, monospace);
+  letter-spacing: 0.1em;
+  color: rgba(159, 234, 246, 0.55);
+  padding-bottom: 34px;
+}
+
 /* dolly throttle */
 .rm-dolly {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  align-self: stretch;
-  justify-content: flex-end;
-  padding-bottom: 22px;
+  gap: 6px;
+  padding-bottom: 12px;
 }
 .rm-dolly-track {
   position: relative;
   width: 46px;
-  height: min(34vw, 158px);
+  height: 118px;
   border-radius: 23px;
   background: rgba(4, 26, 38, 0.55);
   border: 1px solid rgba(95, 240, 255, 0.30);
@@ -248,7 +304,7 @@
 
 @media (orientation: landscape) {
   .rm-cam { min-height: 38vh; }
-  .rm-deck { gap: 4vw; }
+  .rm-dolly-track { height: 96px; }
 }
 
 /* session tag — the phone shows which show/venue it steers */

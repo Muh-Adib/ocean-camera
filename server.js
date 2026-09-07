@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- CommonJS Node server (custom Next.js host + WS hub) */
 // ---------------------------------------------------------------
 // server.js — custom Next.js server + the phone-control WebSocket
 // hub ("use ws" — the remote link the projection site relies on).
@@ -26,6 +27,10 @@
 // wall QR would never come back).
 // ---------------------------------------------------------------
 const { createServer } = require('http')
+const { createServer: createHttpsServer } = require('https')
+const { spawnSync } = require('child_process')
+const fs = require('fs')
+const path = require('path')
 const next = require('next')
 const { WebSocketServer } = require('ws')
 
@@ -34,13 +39,54 @@ const dev = process.env.NODE_ENV !== 'production'
 const app = next({ dev, hostname: '0.0.0.0', port })
 const handle = app.getRequestHandler()
 
+/**
+ * TLS material for ENABLE_HTTPS=1. The phone CAMERA (getUserMedia) only
+ * works in a secure context — localhost counts, but http://<lan-ip> does
+ * NOT, which is exactly why phone camera control "belum bisa" in a
+ * production container. With ENABLE_HTTPS=1 the server presents a
+ * self-signed cert (or HTTPS_CERT/HTTPS_KEY files when provided); the
+ * phone opens https://<ip>:3000, accepts the one-time warning, and the
+ * camera unlocks. Without openssl available the server falls back to
+ * HTTP with a clear log line.
+ */
+function tlsOptions() {
+  const certPath = process.env.HTTPS_CERT
+  const keyPath = process.env.HTTPS_KEY
+  if (certPath && keyPath) {
+    try { return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) } }
+    catch (e) { console.warn('[ws-hub] HTTPS_CERT/HTTPS_KEY unreadable — trying self-signed:', e.message) }
+  }
+  const dir = path.join(__dirname, '.certs')
+  const certFile = path.join(dir, 'cert.pem')
+  const keyFile = path.join(dir, 'key.pem')
+  try {
+    if (!fs.existsSync(certFile) || !fs.existsSync(keyFile)) {
+      fs.mkdirSync(dir, { recursive: true })
+      const r = spawnSync('openssl', [
+        'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+        '-keyout', keyFile, '-out', certFile, '-days', '825',
+        '-subj', '/CN=ocean-local',
+        '-addext', 'subjectAltName=DNS:localhost,DNS:ocean.local,IP:0.0.0.0,IP:127.0.0.1',
+      ], { stdio: 'ignore' })
+      if (r.error || r.status !== 0) throw new Error('openssl unavailable or failed')
+    }
+    return { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) }
+  } catch (e) {
+    console.warn('[ws-hub] ENABLE_HTTPS=1 but TLS material could not be produced (' + e.message + ') — serving HTTP. Phone camera needs https:// or localhost.')
+    return null
+  }
+}
+const tls = process.env.ENABLE_HTTPS === '1' ? tlsOptions() : null
+
 const cleanSession = (v) => {
   const s = typeof v === 'string' ? v.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) : ''
   return s || 'main'
 }
 
 app.prepare().then(() => {
-  const server = createServer((req, res) => handle(req, res))
+  const server = tls
+    ? createHttpsServer(tls, (req, res) => handle(req, res))
+    : createServer((req, res) => handle(req, res))
 
   // ---------------- WebSocket hub ----------------
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false })
@@ -164,6 +210,6 @@ app.prepare().then(() => {
   beat.unref()
 
   server.listen(port, '0.0.0.0', () => {
-    console.log(`> ocean server ready on http://0.0.0.0:${port} (${dev ? 'dev' : 'prod'}) — ws at /ws/control`)
+    console.log(`> ocean server ready on ${tls ? 'https' : 'http'}://0.0.0.0:${port} (${dev ? 'dev' : 'prod'}) — ws at /ws/control (same port — no extra container port needed)`)
   })
 })
