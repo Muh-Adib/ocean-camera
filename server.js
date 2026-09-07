@@ -18,7 +18,8 @@
 //                          {t:'cam', on}               camera mode toggled
 //                          {t:'hb'}                    idle heartbeat (keep-alive)
 //   hub → screens: {t:'phone', on}                     phone presence
-//   hub → phone:   nothing (fire-and-forget upstream)
+//   hub → phone:   {t:'room', screens}                 screens listening in this
+//                                                      session (0 = nothing to steer)
 // Every socket gets ping/pong liveness + a 15 s sweep; phones also
 // expire after 22 s of TOTAL silence (crashed tabs / half-open Wi-Fi
 // sockets would otherwise be counted as connected forever and the
@@ -61,9 +62,22 @@ app.prepare().then(() => {
     if (g) for (const s of g) send(s, obj)
   }
   const phoneCount = (session) => (phonesBySession.get(session) || new Set()).size
+  const screenCount = (session) => (screensBySession.get(session) || new Set()).size
 
   const announcePhones = (session) =>
     toScreens(session, { t: 'phone', on: phoneCount(session) > 0, n: phoneCount(session) })
+
+  /**
+   * phones get room occupancy: {t:'room', screens}. A phone showing
+   * "connected" while NO screen of its session is listening used to be
+   * indistinguishable from a dead link — the operator (and the guest
+   * holding the phone) read it as "connection failure" when in fact the
+   * screen tab was closed or joined a different session.
+   */
+  const announceRooms = (session) => {
+    const g = phonesBySession.get(session)
+    if (g) for (const p of g) send(p, { t: 'room', screens: screenCount(session) })
+  }
 
   wss.on('connection', (ws, req) => {
     ws.role = null
@@ -86,8 +100,13 @@ app.prepare().then(() => {
         ;(ws.role === 'phone'
           ? group(phonesBySession, ws.session)
           : group(screensBySession, ws.session)).add(ws)
-        announcePhones(ws.session)
-        if (ws.role === 'screen') {
+        if (ws.role === 'phone') {
+          // the joining phone gets the room truth immediately
+          send(ws, { t: 'room', screens: screenCount(ws.session) })
+          announcePhones(ws.session)
+        } else {
+          announcePhones(ws.session)
+          announceRooms(ws.session)   // phones: a screen just joined their session
           send(ws, { t: 'phone', on: phoneCount(ws.session) > 0, n: phoneCount(ws.session) })
         }
         return
@@ -106,6 +125,7 @@ app.prepare().then(() => {
         if (!g.size) map.delete(ws.session)
       }
       if (ws.role === 'phone') announcePhones(ws.session)
+      else announceRooms(ws.session)   // phones: a screen left their session
     })
     ws.on('error', () => { /* close will follow */ })
   })

@@ -46,11 +46,37 @@ const MAX_DESIGNS = 12
 const MAX_DATAURL = 480_000   // ~480 KB per design keeps the poll cheap
 const MAX_SESSIONS = 16       // LRU beyond that — plenty for a venue network
 
-/** one store per server process */
+/**
+ * one store per server process — SHAPE-CHECKED.
+ *
+ * Why the shape check: dev-mode HMR / cache swaps can leave an OLDER
+ * compiled version of this module's global ({v, designs, loaded} — the
+ * pre-session single-tank shape) sitting on globalThis while the new
+ * module runs. Trusting a truthy-but-stale value made `st.sessions`
+ * undefined and EVERY request 500 — the folder sync then reported
+ * "tank refused the scan" for the whole show. We now validate the
+ * shape, migrate a legacy single tank into sessions.main, and only
+ * then reuse it.
+ */
 function store(): TankStore {
   const g = globalThis as typeof globalThis & { __oceanFishTank?: TankStore }
-  if (!g.__oceanFishTank) g.__oceanFishTank = { sessions: new Map(), loaded: false }
-  return g.__oceanFishTank
+  const existing = g.__oceanFishTank
+  if (existing && existing.sessions instanceof Map) return existing
+  const fresh: TankStore = { sessions: new Map(), loaded: false }
+  // carry over a legacy single-tank value if we can (best effort)
+  if (existing && Array.isArray((existing as unknown as { designs?: unknown }).designs)) {
+    fresh.loaded = (existing as unknown as { loaded?: boolean }).loaded === true
+    try {
+      fresh.sessions.set('main', {
+        v: typeof (existing as unknown as { v?: number }).v === 'number' ? (existing as unknown as { v: number }).v : 1,
+        designs: ((existing as unknown as { designs: FishDesign[] }).designs || [])
+          .filter((d) => d && typeof d.id === 'string' && typeof d.url === 'string' && d.url.length <= MAX_DATAURL)
+          .slice(0, MAX_DESIGNS),
+      })
+    } catch { /* never trust the stale value too hard */ }
+  }
+  g.__oceanFishTank = fresh
+  return fresh
 }
 
 const FILE = () => path.join(process.cwd(), '.fish-tank.json')
@@ -122,56 +148,69 @@ function sanitizeUrl(raw: unknown): string | null {
   return raw
 }
 
+/** never let a thrown store error become an empty 500 — clients show the message */
+function err(error: string, status = 500) {
+  return Response.json({ ok: false, error }, { status })
+}
+
 export async function GET(req: Request) {
-  await loadOnce()
-  const url = new URL(req.url)
-  const t = tankFor(cleanSession(url.searchParams.get('session')))
-  if (url.searchParams.get('full')) {
-    return Response.json({ v: t.v, designs: t.designs })
+  try {
+    await loadOnce()
+    const url = new URL(req.url)
+    const t = tankFor(cleanSession(url.searchParams.get('session')))
+    if (url.searchParams.get('full')) {
+      return Response.json({ v: t.v, designs: t.designs })
+    }
+    return Response.json({
+      v: t.v,
+      items: t.designs.map((d) => ({ id: d.id, name: d.name })),
+    })
+  } catch (e) {
+    return err(`tank store error: ${String((e as Error)?.message ?? e)}`)
   }
-  return Response.json({
-    v: t.v,
-    items: t.designs.map((d) => ({ id: d.id, name: d.name })),
-  })
 }
 
 export async function POST(req: Request) {
-  await loadOnce()
-  let body: { action?: string; session?: unknown; design?: { name?: unknown; dataUrl?: unknown }; id?: string }
   try {
-    body = await req.json()
-  } catch {
-    return Response.json({ ok: false, error: 'bad json' }, { status: 400 })
-  }
-  const t = tankFor(cleanSession(body.session))
+    await loadOnce()
+    let body: { action?: string; session?: unknown; design?: { name?: unknown; dataUrl?: unknown }; id?: string }
+    try {
+      body = await req.json()
+    } catch {
+      return err('bad json', 400)
+    }
+    const t = tankFor(cleanSession(body.session))
 
-  if (body.action === 'add' && body.design) {
-    const url = sanitizeUrl(body.design.dataUrl)
-    if (!url) return Response.json({ ok: false, error: 'design must be an image data URL ≤ 480 KB' }, { status: 400 })
-    const id = `fish-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
-    const design: FishDesign = { id, name: sanitizeName(body.design.name), url, at: Date.now() }
-    // newest wins — cap the tank and evict the oldest imports
-    t.designs.push(design)
-    while (t.designs.length > MAX_DESIGNS) t.designs.shift()
-    t.v++
-    void persist()
-    return Response.json({ ok: true, v: t.v, id, designs: t.designs })
-  }
+    if (body.action === 'add' && body.design) {
+      const url = sanitizeUrl(body.design.dataUrl)
+      if (!url) return err('design must be an image data URL ≤ 480 KB', 400)
+      const id = `fish-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+      const design: FishDesign = { id, name: sanitizeName(body.design.name), url, at: Date.now() }
+      // newest wins — cap the tank and evict the oldest imports
+      t.designs.push(design)
+      while (t.designs.length > MAX_DESIGNS) t.designs.shift()
+      t.v++
+      void persist()
+      return Response.json({ ok: true, v: t.v, id, designs: t.designs })
+    }
 
-  if (body.action === 'remove' && typeof body.id === 'string') {
-    const before = t.designs.length
-    t.designs = t.designs.filter((d) => d.id !== body.id)
-    if (t.designs.length !== before) t.v++
-    void persist()
-    return Response.json({ ok: true, v: t.v, designs: t.designs })
-  }
+    if (body.action === 'remove' && typeof body.id === 'string') {
+      const before = t.designs.length
+      t.designs = t.designs.filter((d) => d.id !== body.id)
+      if (t.designs.length !== before) t.v++
+      void persist()
+      return Response.json({ ok: true, v: t.v, designs: t.designs })
+    }
 
-  if (body.action === 'clear') {
-    t.designs = []
-    t.v++
-    void persist()
-    return Response.json({ ok: true, v: t.v, designs: t.designs })
-  }
+    if (body.action === 'clear') {
+      t.designs = []
+      t.v++
+      void persist()
+      return Response.json({ ok: true, v: t.v, designs: t.designs })
+    }
 
-  return Response.json({ ok: false, error: 'unknown action' }, { status: 400 })
+    return err('unknown action', 400)
+  } catch (e) {
+    return err(`tank store error: ${String((e as Error)?.message ?? e)}`)
+  }
 }

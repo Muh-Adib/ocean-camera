@@ -81,6 +81,12 @@ export class FolderSync {
   /** "name:lastModified:size" of everything already through the pipeline */
   private seen = new Set<string>()
   private seenAt = new Map<string, number>()
+  /**
+   * refused designs (the POST came back not-ok): count per sig so a
+   * TRANSIENT server hiccup retries on the next poll, while a file the
+   * tank keeps rejecting (3×) is parked instead of hot-looping forever.
+   */
+  private refusals = new Map<string, number>()
   /** set while the first sweep (existing files) is still draining */
   private initialSweep = false
 
@@ -265,9 +271,7 @@ export class FolderSync {
 
       let budget = this.initialSweep ? INITIAL_SWEEP_CAP : files.length
       for (const { file } of files) {
-        const sig = `${file.name}:${file.lastModified}:${file.size}`
-        this.remember(sig)
-        if (budget <= 0) { this.bump('skipped'); continue }
+        if (budget <= 0) break   // unseen backlog beyond the cap — next tick drains it
         budget--
         await this.importFile(file)
       }
@@ -279,20 +283,39 @@ export class FolderSync {
     }
   }
 
-  /** run one image through the fish pipeline and post the design */
+  /**
+   * run one image through the fish pipeline and post the design.
+   *
+   * Only files that are DONE with the pipeline are remembered:
+   *  • imported            → remembered (seen forever)
+   *  • hard scan failure   → remembered (unreadable / no fish — never retry)
+   *  • refused by the tank → retried on the next poll (server hiccup,
+   *    dev restart, tank briefly unreachable) — after 3 refusals the
+   *    file is parked so a permanently-bad design cannot hot-loop.
+   * Marking refused files as seen used to skip them FOREVER — the
+   * operator's scans never appeared even after the server healed.
+   */
   private async importFile(file: File) {
+    const sig = `${file.name}:${file.lastModified}:${file.size}`
     try {
       const design = await processFishImage(file)
       const ok = await this.onDesign?.({ name: design.name, dataUrl: design.dataUrl })
       if (ok) {
+        this.refusals.delete(sig)
+        this.remember(sig)
         this.bump('imported')
         this.set({ lastFileName: file.name, lastError: null })
       } else {
-        this.bump('skipped')
-        this.set({ lastFileName: file.name, lastError: 'tank refused the scan' })
+        const n = (this.refusals.get(sig) ?? 0) + 1
+        this.refusals.set(sig, n)
+        this.set({ lastFileName: file.name, lastError: n >= 3 ? 'tank kept refusing — parked' : 'tank refused the scan — will retry' })
+        if (n >= 3) { this.refusals.delete(sig); this.remember(sig); this.bump('skipped') }
+        // below the threshold: NOT remembered → next poll retries
       }
     } catch (e) {
       // unreadable/no fish found — mark seen so we never retry it
+      this.refusals.delete(sig)
+      this.remember(sig)
       this.bump('skipped')
       this.set({ lastFileName: file.name, lastError: String((e as Error)?.message ?? 'scan failed') })
     }
@@ -302,6 +325,7 @@ export class FolderSync {
   private resetSeen() {
     this.seen.clear()
     this.seenAt.clear()
+    this.refusals.clear()
     this.state.imported = 0
     this.state.skipped = 0
   }

@@ -48,20 +48,52 @@ class WsBase {
 
   protected connect() {
     if (this.closed) return
-    try { this.ws = new WebSocket(wsUrl()) } catch { this.scheduleRetry(); return }
-    const ws = this.ws
+    let ws: WebSocket
+    try { ws = new WebSocket(wsUrl()) } catch { this.scheduleRetry(); return }
+    this.ws = ws
+    // EVERY handler is guarded: events from a stale socket (replaced by
+    // forceReconnect / a newer connect) must be ignored. Without this,
+    // a late onclose from the OLD socket nulled this.ws while the NEW
+    // socket was live — send() silently no-oped until the next
+    // reconnect: the intermittent "connection failure" on phones that
+    // slept and woke.
     ws.onopen = () => {
+      if (this.ws !== ws) return
       this.retry = 0
       try { ws.send(JSON.stringify({ t: 'hello', role: this.role, session: this.session })) } catch { /* noop */ }
       this.onOpen?.()
     }
     ws.onmessage = (e) => {
+      if (this.ws !== ws) return
       let msg: unknown
       try { msg = JSON.parse(String(e.data)) } catch { return }
       if (msg && typeof msg === 'object') this.onMessage?.(msg as Record<string, unknown>)
     }
-    ws.onclose = () => { this.ws = null; this.onClose?.(); this.scheduleRetry() }
+    ws.onclose = () => {
+      if (this.ws !== ws) return          // stale close — new socket already owns the link
+      this.ws = null
+      this.onClose?.()
+      this.scheduleRetry()
+    }
     ws.onerror = () => { try { ws.close() } catch { /* noop */ } }
+  }
+
+  /**
+   * drop the current link and reconnect immediately (no backoff) —
+   * used when the phone returns from sleep: suspended tabs come back
+   * with half-open sockets that would otherwise sit "live" but deaf
+   * until the hub's sweep (up to 22 s) or TCP gives up (minutes).
+   */
+  forceReconnect() {
+    if (this.closed) return
+    window.clearTimeout(this.timer)
+    this.timer = 0
+    const ws = this.ws
+    if (ws) {
+      this.ws = null            // detach first — stale events become no-ops
+      try { ws.close() } catch { /* noop */ }
+    }
+    this.connect()
   }
 
   private scheduleRetry() {
@@ -160,19 +192,24 @@ export class ScreenLink extends WsBase {
 // ---------------------------------------------------------------
 export class PhoneLink extends WsBase {
   onState?: (live: boolean) => void
+  /** hub room occupancy — screens of THIS session (0 = nothing to steer) */
+  onRoom?: (screens: number) => void
   private hbTimer = 0
 
   constructor(session: string) {
     super('phone', session)
     this.onOpen = () => this.onState?.(true)
     this.onClose = () => this.onState?.(false)
+    this.onMessage = (msg) => {
+      if (msg.t === 'room' && typeof msg.screens === 'number') this.onRoom?.(msg.screens)
+    }
     this.connect()
     // idle heartbeat: proves the phone is alive even when no sticks move.
     // Without it, the hub's idle sweep would drop a quiet-but-open phone.
     this.hbTimer = window.setInterval(() => this.send({ t: 'hb' }), 5000)
   }
 
-  /** stick velocities — called at the phone's 30 Hz cadence while live */
+  /** stick velocities — called at the phone's 40 Hz cadence while live */
   sendCtl(mx: number, my: number, ox: number, oy: number, dz: number) {
     this.send({ t: 'ctl', mx, my, ox, oy, dz })
   }

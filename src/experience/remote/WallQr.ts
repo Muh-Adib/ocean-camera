@@ -19,6 +19,7 @@
 import * as THREE from 'three'
 import QRCode from 'qrcode'
 import { cleanSessionId } from './RemoteLink'
+import { phoneOrigin } from './lanOrigin'
 import type { ProjectionSurface } from '../projection/ProjectionTypes'
 
 /** card side as a fraction of the output viewport height (¼ of the screen) */
@@ -44,6 +45,11 @@ export class WallQr {
   private canvas: HTMLCanvasElement
   private texture: THREE.CanvasTexture | null = null
   private url = ''
+  /** origin the QR encodes — location.origin, swapped to the server's
+   *  LAN address when this page browses itself as localhost (a QR that
+   *  says localhost tells the SCANNING PHONE to open itself — the #1
+   *  silent "phone cannot connect" cause at the exhibition) */
+  private origin = typeof window !== 'undefined' ? window.location.origin : ''
   private alpha = 0
   private resolved: ProjectionSurface | null = null
 
@@ -67,6 +73,10 @@ export class WallQr {
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
     this.redraw()
+    // localhost page? re-encode onto the server's LAN address once known
+    void phoneOrigin().then((o) => {
+      if (o && o !== this.origin) { this.origin = o; this.redraw() }
+    })
   }
 
   /** switch the session tag — redraws the code so the phone joins the right room */
@@ -80,8 +90,8 @@ export class WallQr {
   /** (re)draw the clean quarter-screen QR card for the current URL */
   private redraw() {
     this.url = this.session === 'main'
-      ? `${location.origin}/control-mobile`
-      : `${location.origin}/control-mobile?s=${this.session}`
+      ? `${this.origin}/control-mobile`
+      : `${this.origin}/control-mobile?s=${this.session}`
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
 

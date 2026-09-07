@@ -92,11 +92,23 @@ export function mountPhoneController(root: HTMLElement): () => void {
   const camStatus = $('rm-cam-status')
 
   const link = new PhoneLink(session)
-  link.onState = (live) => {
+  /** screens of this session currently listening (from the hub) — lets the
+   *  phone TELL the difference between "linked but nothing to steer" (screen
+   *  tab closed / other session) and a working show, instead of looking
+   *  like a mysterious connection failure */
+  let screensInRoom = 0
+  const updateNote = (live: boolean) => {
     dot.classList.toggle('on', live)
-    note.textContent = live ? 'connected — steer the ocean' : 'reconnecting to the ocean…'
+    if (!live) { note.textContent = 'reconnecting to the ocean…'; return }
+    note.textContent = screensInRoom > 0
+      ? 'connected — steer the ocean'
+      : `no screen on session “${session}” yet — open the /output wall`
+  }
+  link.onState = (live) => {
+    updateNote(live)
     if (live && camOn) link.sendCam(true)   // re-announce camera mode after a reconnect
   }
+  link.onRoom = (n) => { screensInRoom = n; updateNote(link.live) }
 
   // ------------------------------------------------------------ sticks
   const move: Stick = { vx: 0, vy: 0 }
@@ -173,11 +185,23 @@ export function mountPhoneController(root: HTMLElement): () => void {
     link.sendCtl(move.vx, -move.vy, orbit.vx, -orbit.vy, dolly)
   }, Math.round(1000 / SEND_HZ))
 
-  // tab hidden → drop everything so the screens stop immediately
+  // tab hidden → drop everything so the screens stop immediately;
+  // RETURNING from hidden → force an immediate reconnect when the socket
+  // did not survive the sleep (mobile OSes silently kill idle sockets —
+  // without this the phone sat "connected" but deaf for up to minutes),
+  // and prove liveness right away with a heartbeat.
+  let hiddenAt = 0
   const onVis = () => {
-    if (document.hidden && link.live) {
-      link.sendCtl(0, 0, 0, 0, 0)
-      if (camOn) link.sendHand(false, 0.5, 0.5, 0, 0)
+    if (document.hidden) {
+      hiddenAt = Date.now()
+      if (link.live) {
+        link.sendCtl(0, 0, 0, 0, 0)
+        if (camOn) link.sendHand(false, 0.5, 0.5, 0, 0)
+      }
+    } else {
+      const awayFor = Date.now() - (hiddenAt || Date.now())
+      if (awayFor > 15000 || !link.live) link.forceReconnect()
+      else link.send({ t: 'hb' })
     }
   }
   document.addEventListener('visibilitychange', onVis)

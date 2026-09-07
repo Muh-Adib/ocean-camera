@@ -21,6 +21,7 @@ import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
 import { RemoteRig } from '../remote/RemoteRig'
 import { ScreenLink, cleanSessionId, type HandFrame } from '../remote/RemoteLink'
+import { phoneOrigin } from '../remote/lanOrigin'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
@@ -451,7 +452,10 @@ export class ProjectionManager {
    */
   async portableSessionLink(id: string, name?: string): Promise<string> {
     const rec = this.project.getSession(id)
-    const base = `${location.origin}/output?s=${id}`
+    // the link is opened on OTHER machines — when the studio browses
+    // itself as localhost, swap in the server's LAN address
+    const origin = await phoneOrigin()
+    const base = `${origin}/output?s=${id}`
     if (!rec) return base
     const label = encodeURIComponent((name ?? rec.name).slice(0, 48))
     try {
