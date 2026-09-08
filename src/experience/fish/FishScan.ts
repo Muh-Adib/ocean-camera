@@ -37,6 +37,8 @@
 // ---------------------------------------------------------------
 import { reserveWhiteTexel } from './CustomFish'
 import { SHEET_CONTRACT } from './FishTemplate'
+import { getFishSilhouetteMask } from './FishSilhouetteMask'
+import { detectTemplateFrame, warpAndExtractFish } from './TemplateRegistration'
 
 export interface ProcessedFish {
   dataUrl: string
@@ -401,11 +403,20 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
   const { ctx, W, H } = toWorkCanvas(src)
   if ('close' in src && typeof src.close === 'function') src.close()
 
-  const found = fineFishMask(ctx, W, H)
-
-  // fish-only crop — or the whole picture as a last-resort fallback
+  // 1. Primary: Template-guided registration using official template frame & corners.
+  // Exactly crops the fish silhouette and discards all background (even if heavily colored).
+  const detected = detectTemplateFrame(ctx, W, H)
   let crop: HTMLCanvasElement
-  if (found) {
+
+  if (detected) {
+    const fishMask = getFishSilhouetteMask()
+    crop = warpAndExtractFish(ctx, W, H, detected, fishMask)
+  } else {
+    // 2. Fallback: heuristic fineFishMask for close-ups or cropped scans
+    const found = fineFishMask(ctx, W, H)
+
+    // fish-only crop — or the whole picture as a last-resort fallback
+    if (found) {
     const cw = found.x1 - found.x0 + 1
     const ch = found.y1 - found.y0 + 1
     crop = document.createElement('canvas')
@@ -497,6 +508,7 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
     crop.height = H
     crop.getContext('2d')!.drawImage(ctx.canvas, 0, 0)
   }
+  }
 
   // sheet: the fish-only crop stretched to fill the whole UV window
   const sheet = document.createElement('canvas')
@@ -511,12 +523,34 @@ export async function processFishImage(file: File): Promise<ProcessedFish> {
   try { sctx.filter = 'none' } catch { /* noop */ }
   reserveWhiteTexel(sctx, SHEET)
 
+  // ENCODE — must land under the tank API's transport cap, guaranteed:
+  // 1) quality walk on the full-size sheet (highest quality wins),
+  // 2) still over (extremely noisy AI textures) → step the SHEET SIZE
+  //    down and re-encode. A 448² JPEG cannot reach 480 KB, so every
+  //    import now ships — before, a heavy Gemini image could exceed
+  //    the cap and the tank refused it ("skipped, tank refused").
   let dataUrl = sheet.toDataURL('image/jpeg', 0.86)
-  // quality walk if the transport cap bites
   let q = 0.86
-  while (dataUrl.length > MAX_DATAURL && q > 0.5) {
+  while (dataUrl.length > MAX_DATAURL && q > 0.38) {
     q -= 0.12
     dataUrl = sheet.toDataURL('image/jpeg', q)
+  }
+  if (dataUrl.length > MAX_DATAURL) {
+    for (const side of [640, 512, 448]) {
+      const small = document.createElement('canvas')
+      small.width = side
+      small.height = side
+      const sc = small.getContext('2d')!
+      sc.imageSmoothingQuality = 'high'
+      sc.drawImage(sheet, 0, 0, side, side)
+      let sq = 0.8
+      dataUrl = small.toDataURL('image/jpeg', sq)
+      while (dataUrl.length > MAX_DATAURL && sq > 0.4) {
+        sq -= 0.1
+        dataUrl = small.toDataURL('image/jpeg', sq)
+      }
+      if (dataUrl.length <= MAX_DATAURL) break
+    }
   }
   return { dataUrl, name: nameFromFile(file) }
 }

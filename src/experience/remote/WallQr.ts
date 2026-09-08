@@ -18,6 +18,8 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import QRCode from 'qrcode'
+import { cleanSessionId } from './RemoteLink'
+import { phoneOrigin } from './lanOrigin'
 import type { ProjectionSurface } from '../projection/ProjectionTypes'
 
 /** card side as a fraction of the output viewport height (¼ of the screen) */
@@ -27,6 +29,8 @@ const CARD = 512
 export class WallQr {
   /** which surface carries the QR: 'auto' (largest enabled) or a surface id */
   host = 'auto'
+  /** show session — a non-main session deep-links /control-mobile?s=<id> */
+  session = 'main'
   /** phone linked → hide (driven by ScreenLink presence) */
   phoneOn = false
   /** operator dismissed it for this page session */
@@ -41,6 +45,11 @@ export class WallQr {
   private canvas: HTMLCanvasElement
   private texture: THREE.CanvasTexture | null = null
   private url = ''
+  /** origin the QR encodes — location.origin, swapped to the server's
+   *  LAN address when this page browses itself as localhost (a QR that
+   *  says localhost tells the SCANNING PHONE to open itself — the #1
+   *  silent "phone cannot connect" cause at the exhibition) */
+  private origin = typeof window !== 'undefined' ? window.location.origin : ''
   private alpha = 0
   private resolved: ProjectionSurface | null = null
 
@@ -64,11 +73,25 @@ export class WallQr {
     this.mesh.frustumCulled = false
     this.scene.add(this.mesh)
     this.redraw()
+    // localhost page? re-encode onto the server's LAN address once known
+    void phoneOrigin().then((o) => {
+      if (o && o !== this.origin) { this.origin = o; this.redraw() }
+    })
+  }
+
+  /** switch the session tag — redraws the code so the phone joins the right room */
+  setSession(id: string) {
+    const clean = cleanSessionId(id)
+    if (clean === this.session) return
+    this.session = clean
+    this.redraw()
   }
 
   /** (re)draw the clean quarter-screen QR card for the current URL */
   private redraw() {
-    this.url = `${location.origin}/control-mobile`
+    this.url = this.session === 'main'
+      ? `${this.origin}/control-mobile`
+      : `${this.origin}/control-mobile?s=${this.session}`
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return
 

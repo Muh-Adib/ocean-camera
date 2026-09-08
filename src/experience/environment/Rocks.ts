@@ -4,6 +4,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { rand, mulberry32, noise2 } from '../utils/math'
+import { addDepthSilhouette } from './depthSilhouette'
 
 export interface Obstacle { x: number; y: number; z: number; r: number }
 
@@ -36,7 +37,8 @@ export class RockSystem {
   private build(count: number) {
     const rng = mulberry32(777)
     const geo = this.makeRockGeometry(31, 1)
-    const mat = new THREE.MeshStandardMaterial({ color: '#5a6b74', roughness: 0.95, metalness: 0.02, flatShading: true })
+    const mat = new THREE.MeshStandardMaterial({ color: '#5f7a68', roughness: 0.95, metalness: 0.02, flatShading: true })
+    addDepthSilhouette(mat, { start: 42, end: 105, k: 0.8, color: '#0d4266' }, 'rocks-sil')
 
     const mesh = new THREE.InstancedMesh(geo, mat, count)
     const m = new THREE.Matrix4()

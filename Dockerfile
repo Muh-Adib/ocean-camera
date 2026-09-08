@@ -44,24 +44,25 @@ RUN adduser --system --uid 1001 nextjs
 # Copy static public assets
 COPY --from=builder /app/public ./public
 
-# Custom server: owns the WebSocket hub at /ws/control (phone remote).
-# The standalone bundle ships its OWN server.js WITHOUT any WebSocket
-# endpoint — running it is why phones could not connect in production
-# containers ("error koneksi dengan phone"). Overwrite it with ours.
-COPY --from=builder /app/server.js ./server.js
-# `ws` is required by the custom server but is not traced into the
-# standalone node_modules (only the app's imports are traced).
-COPY --from=builder /app/node_modules/ws ./node_modules/ws
-
 # Set up prerender cache directory permissions
 RUN mkdir .next && chown nextjs:nodejs .next
+# writable home for the optional self-signed TLS cert (ENABLE_HTTPS=1)
+RUN mkdir .certs && chown nextjs:nodejs .certs
 
 # Copy standalone build output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Re-assert the WS-capable server AFTER the standalone copy (the standalone
-# bundle also contains a server.js that would otherwise win the copy race)
+# ------------------------------------------------------------------
+# PHONE CONTROL IN PRODUCTION — the custom server REPLACES the
+# generated standalone server.js. It serves the same Next.js app AND
+# owns the WebSocket hub at /ws/control on THE SAME port, so the
+# container needs NO extra port for the phone remote (the old image
+# ran the generated server, which silently dropped /ws/control —
+# phones could never connect in prod).
+# `ws` is not traced by the standalone build (only server.js uses it)
+# so it is copied explicitly — it is dependency-free.
+# ------------------------------------------------------------------
 COPY --from=builder /app/server.js ./server.js
 COPY --from=builder /app/node_modules/ws ./node_modules/ws
 
@@ -71,4 +72,6 @@ USER nextjs
 # the container only needs this one port published/reachable.
 EXPOSE 3000
 
+# Optional: ENABLE_HTTPS=1 → self-signed TLS on the same port so the
+# phone CAMERA works over LAN (getUserMedia requires a secure context).
 CMD ["node", "server.js"]

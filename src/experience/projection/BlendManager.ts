@@ -55,9 +55,9 @@ void main() {
 }`
 
 export class BlendManager {
-  /** composite saturation — projector walls read duller than screens, so the
-   *  default nudges the picture livelier; the studio slider tunes it live */
-  vibrance = 1.18
+  /** per-show shader saturation stacked on the global VIBRANCE display grade —
+   *  1 = neutral (the default; the global CSS grade carries the punch) */
+  vibrance = 1
 
   makeMaterial(map: THREE.Texture, calib: THREE.Texture): THREE.ShaderMaterial {
     const mat = new THREE.ShaderMaterial({

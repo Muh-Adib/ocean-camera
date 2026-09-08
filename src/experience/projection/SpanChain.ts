@@ -31,9 +31,12 @@ export function hasRatio(c: ProjectionSurface['camera']): boolean {
 /**
  * Derive SPAN H from SPAN V and the declared wall ratio (no-op when
  * no ratio is set). Idempotent — safe to call on every sync.
+ * A REAL-SIZE camera (metres + distance) is absolute geometry and
+ * wins: the ratio derivation steps aside for it.
  */
 export function deriveSpanH(c: ProjectionSurface['camera']) {
   if (!c.span?.lock || !hasRatio(c)) return
+  if (c.real) return
   const derived = spanHFromRatio(c.span.v, c.span.ratioW! / c.span.ratioH!)
   c.span.h = r2(clampH(derived))
 }

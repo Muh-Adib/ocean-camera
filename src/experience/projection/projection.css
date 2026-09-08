@@ -528,6 +528,20 @@
   color: rgba(160, 210, 230, 0.72);
   font-weight: 600;
 }
+/* vibrance slider inside the output overlay */
+#pm-out-overlay .pm-out-vib { display: inline-flex; align-items: center; gap: 0.4rem; }
+#pm-out-overlay .pm-out-vib input[type='range'] {
+  width: 96px;
+  accent-color: #25b2c6;
+}
+#pm-out-overlay .pm-out-vib span {
+  font-size: 0.54rem;
+  min-width: 3.2em;
+  color: #9feaf6;
+  font-variant-numeric: tabular-nums;
+}
+/* studio VIBRANCE slider row */
+.pm-vib-slider { flex: 1 1 auto; min-width: 120px; accent-color: #25b2c6; }
 #pm-out-overlay .pm-out-warn {
   font-size: 0.54rem;
   letter-spacing: 0.08em;
@@ -672,3 +686,128 @@ body.projection-studio-open #gesture-view { display: none !important; }
   padding: 0;
 }
 .pm-fish-del:hover { background: #b3405a; }
+
+/* ================================================================
+   Studio v2 — live status pills, status bar, collapsible groups,
+   show-session chips and the folder-sync panel
+   ================================================================ */
+
+/* ---------------- topbar pills ---------------- */
+.pm-pills {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.4rem;
+  flex-wrap: wrap;
+}
+.pm-pill {
+  font-size: 0.52rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(130, 205, 230, 0.22);
+  background: rgba(8, 30, 44, 0.6);
+  color: rgba(180, 225, 240, 0.85);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.pm-pill-dim { opacity: 0.85; }
+.pm-pill-accent { border-color: rgba(63, 224, 200, 0.5); color: #aef2e4; background: rgba(63, 224, 200, 0.1); }
+.pm-pill-live { border-color: rgba(120, 255, 170, 0.55); color: #b8ffd2; background: rgba(50, 220, 120, 0.12); }
+
+/* ---------------- bottom status bar ---------------- */
+.pm-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.3rem 0.9rem;
+  background: var(--pm-panel);
+  border-top: 1px solid var(--pm-border);
+  backdrop-filter: blur(10px);
+  font-size: 0.52rem;
+  letter-spacing: 0.12em;
+  color: rgba(160, 210, 230, 0.62);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.pm-statusbar b { color: rgba(190, 240, 250, 0.9); font-weight: 600; }
+
+/* ---------------- collapsible groups ---------------- */
+.pm-collap {
+  border: 1px solid rgba(90, 180, 210, 0.14);
+  border-radius: 8px;
+  background: rgba(6, 24, 38, 0.45);
+  margin-bottom: 0.5rem;
+  overflow: hidden;
+}
+.pm-collap-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: rgba(12, 40, 56, 0.5);
+  border: none;
+  border-bottom: 1px solid transparent;
+  color: rgba(200, 240, 250, 0.92);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 0.5rem 0.65rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pm-collap-head:hover { background: rgba(24, 66, 88, 0.55); }
+.pm-collap-arrow {
+  display: inline-block;
+  transition: transform 0.18s ease;
+  color: var(--pm-accent);
+  font-size: 0.6rem;
+}
+.pm-collap:not(.pm-collap-open) .pm-collap-arrow { transform: rotate(-90deg); }
+.pm-collap-body { display: none; padding: 0.55rem 0.65rem; }
+.pm-collap.pm-collap-open { border-color: rgba(110, 240, 210, 0.28); }
+.pm-collap.pm-collap-open .pm-collap-body { display: block; }
+.pm-collap.pm-collap-open .pm-collap-head { border-bottom-color: rgba(90, 180, 210, 0.16); }
+
+/* ---------------- FISH studio ---------------- */
+.pm-fish-tpl-row { align-items: center; }
+.pm-fish-tpl-mini {
+  width: 132px;
+  height: auto;
+  border: 1px solid rgba(90, 180, 210, 0.25);
+  border-radius: 6px;
+  background: #fff;
+  padding: 4px;
+}
+.pm-input-sm { max-width: 170px; padding: 0.3rem 0.5rem; font-size: 0.58rem; }
+
+/* ---------------- folder sync panel ---------------- */
+.pm-sync {
+  border: 1px dashed rgba(120, 220, 200, 0.35);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(8, 32, 40, 0.45);
+}
+.pm-sync-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.45rem;
+}
+.pm-sync-head {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: rgba(180, 225, 240, 0.9);
+}
+.pm-sync-live .pm-sync-head { color: #aef2e4; }
+.pm-sync-warn .pm-sync-head { color: #ffd47f; }
+.pm-sync-stats {
+  font-size: 0.54rem;
+  letter-spacing: 0.06em;
+  color: rgba(160, 210, 230, 0.6);
+  font-variant-numeric: tabular-nums;
+}

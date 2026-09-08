@@ -15,12 +15,16 @@ import { sharedUniforms } from './core/sharedUniforms'
 import { Seabed } from './environment/Seabed'
 import { RockSystem } from './environment/Rocks'
 import { CoralSystem } from './environment/CoralSystem'
+import { LimestoneReef } from './environment/LimestoneReef'
+import { SpongeSystem } from './environment/Sponges'
+import { ReefArena } from './environment/ReefArena'
 import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
 import { Biomes } from './environment/Biomes'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
+import { SpongeBubbles } from './particles/SpongeBubbles'
 import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
 import { SpecialCreatures } from './fish/SpecialCreatures'
@@ -35,6 +39,8 @@ import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
 import { GestureView } from './ui/GestureView'
 import { ProjectionManager } from './projection/ProjectionManager'
+import { RemoteHands } from './remote/RemoteHands'
+import { loadVibrance, setVibrance, getVibrance } from './look/vibrance'
 import { rand, pick } from './utils/math'
 import { gridFromCorners } from './projection/ProjectionMath'
 
@@ -73,6 +79,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const cfg = perf.config
   sceneMgr.setPixelRatioCap(cfg.dpr)
   sceneMgr.buildBackgroundDome()
+  // global colour grade (per-machine) — saturate/contrast on the GL canvas
+  setVibrance(loadVibrance(), false)
 
   const cameraRig = new CameraRig(sceneMgr.camera)
   sceneMgr.scene.add(cameraRig.group)
@@ -81,6 +89,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const lighting = new Lighting(sceneMgr.scene)
   lighting.buildGodRays(cfg.lightRayCount)
   lighting.buildCaustics()
+  sceneMgr.buildEnvironment()          // image-based lighting → real PBR response
 
   // ---------------- interaction state (needed early by systems) ----
   const field = new InteractionField()
@@ -88,22 +97,56 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // ---------------- environment ----------------
   const seabed = new Seabed(sceneMgr.scene, cfg.pebbleCount)
   const rocks = new RockSystem(sceneMgr.scene, seabed.heightAt, 64)
-  const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity)
+  // the central limestone structure first — corals root on its ledges
+  const limestone = new LimestoneReef(sceneMgr.scene, seabed.heightAt, cfg.coralDetail)
+  const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity, {
+    detail: cfg.coralDetail,
+    attach: limestone.growthSpots,
+  })
+  // the 360° coral colosseum — a reef wall around the sandy clearing so
+  // every heading (visitors circle the room) has full scenery.
+  // Ring detail scales with the device tier (Stage 9 LOD budget)
+  const arena = new ReefArena(sceneMgr.scene, seabed.heightAt, cfg.tier)
   const seaweed = new Seaweed(sceneMgr.scene, seabed.heightAt, cfg.seaweedBlades)
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles]
+  const sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
+  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
   const bubbles = new BubbleSystem(sceneMgr.scene, cfg.bubbleCount, seabed.heightAt, {
     pos: field.point, dir: field.dir, strength: sharedUniforms.uFieldStrength, radius: 11,
   })
+  // sponge oscula trickle bubbles continuously
+  for (const e of sponges.emitters) {
+    bubbles.addEmitter(e.pos, { rate: e.rate, size: e.size, speed: e.speed })
+  }
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
+  // fine bubble streams rising out of every tube-sponge osculum
+  const spongeBubbles = arena.spongeLips.length
+    ? new SpongeBubbles(sceneMgr.scene, arena.spongeLips, {
+      pos: field.point, strength: sharedUniforms.uFieldStrength, radius: 11,
+    }, Math.min(210, Math.max(90, Math.round(arena.spongeLips.length * 0.7))))
+    : null
+
+  // ---------------- screen vignette ----------------
+  // deep-blue depth-of-field feel: the arena's edges sink into shadow.
+  // SKIPPED on the dedicated /output page — the projector gets the clean
+  // composite edge-to-edge (the in-world depth fade already carries the mood)
+  if (!outputOnly) {
+    const vignette = document.createElement('div')
+    vignette.style.cssText = [
+      'position:fixed', 'inset:0', 'pointer-events:none', 'z-index:4',
+      'background:radial-gradient(ellipse 130% 125% at 50% 44%, rgba(1,10,20,0) 44%, rgba(1,10,20,0.38) 78%, rgba(1,9,18,0.62) 100%)',
+    ].join(';')
+    container.appendChild(vignette)
+    disposers.push(() => { vignette.remove() })
+  }
 
   // ---------------- fish ----------------
-  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
+  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])
   const creatures = new SpecialCreatures(sceneMgr.scene)
   const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
@@ -135,7 +178,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- free swim (open-world exploration) ----------------
   const swim = new SwimController(sceneMgr.canvas, seabed.heightAt, {
-    x: 74, minZ: -96, maxZ: 18, maxY: 11.5, floorPad: 0.7,
+    radius: 94, centerX: 0, centerZ: -20, maxY: 11.5, floorPad: 0.7,
   })
   swim.capturePose = () => cameraRig.snapshotSwim()
   swim.onChange = (on) => {
@@ -223,19 +266,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   fishTank.start()
   disposers.push(() => fishTank.stop())
 
-  // phone-camera hand signals (WebSocket from /control-mobile) drive the
-  // ocean the same way the local camera does — only when the local camera
-  // is not already running, so the two never fight over the field
-  projection.onPhoneHand = (h) => {
-    if (handTracker.isRunning) return
-    if (h && h.p) {
-      const p = new THREE.Vector3((h.x - 0.5) * 70, 2 + (0.5 - h.y) * 22, -18)
-      field.setHandActive(true)
-      field.setTarget(p, undefined, 0.15 + h.o * 0.55, 'current')
-    } else {
-      field.setHandActive(false)
-    }
-  }
+  // phone-camera hand signals (WebSocket from /control-mobile) feed the SAME
+  // GestureEngine as the local camera — identical swipe/push/pull/palm/fist
+  // analysis and identical swim steering, never a parallel simplified path.
+  // The local camera keeps priority: while it runs, phone hands are ignored.
+  const remoteHands = new RemoteHands()
+  projection.onPhoneHand = (h) => remoteHands.feed(h)
 
   handTracker.onStatus = (s) => {
     if (s === 'loading') {
@@ -381,18 +417,24 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
     // ---- interaction pipeline ----
     pointer.updateKeyboard(dt)
+    // ONE gesture path: local camera first, else fresh phone-camera hands —
+    // both end up in the same GestureEngine → field/bursts/audio/swim.
+    let samples: ReturnType<HandTracker['hands']> = []
+    let landmarks: ReturnType<HandTracker['landmarksList']> | null = null
     if (handTracker.isRunning) {
       handTracker.detect(dt)          // drives per-slot smoothing (0-2 hands)
-      const samples = handTracker.hands()
-      gestureEngine.update(samples, dt)
-      gestureView?.update(dt, samples, handTracker.landmarksList(), gestureEngine.status, true, handTracker.video)
-      // in swim mode the primary palm doubles as a steering joystick
-      if (swim.active) {
-        const steer = samples[0]
-        swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
-      }
+      samples = handTracker.hands()
+      landmarks = handTracker.landmarksList()
     } else {
-      gestureView?.update(dt, null, null, gestureEngine.status, false, null)
+      samples = remoteHands.take()
+    }
+    gestureEngine.update(samples, dt)
+    gestureView?.update(dt, samples, landmarks, gestureEngine.status, handTracker.isRunning, handTracker.video)
+    // in swim mode the primary palm doubles as a steering joystick —
+    // phone-camera hands steer exactly like hands in the local camera
+    if (swim.active) {
+      const steer = samples[0]
+      swim.setHandSteer(steer ? steer.x : 0.5, steer ? steer.y : 0.5, !!steer, !!steer && steer.openness < 0.28)
     }
     field.update(dt)
 
@@ -416,6 +458,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     creatures.update(dt, elapsed)
     feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
+    spongeBubbles?.update(dt, elapsed)
     bursts.update(dt)
     dynamicEvents(dt)
 
@@ -452,6 +495,49 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
     fishCount: () => fish.count(),
+    /** QA: skip all intro theatrics instantly (headless test helper) */
+    revealNow: () => {
+      entered = true
+      gsap.globalTimeline.getChildren(true, true, true).forEach((t) => {
+        try { (t as gsap.core.Animation).progress(1).kill() } catch { /* noop */ }
+      })
+      const hideOverlays = () => {
+        for (const id of ['ocean-intro', 'ocean-loading']) {
+          const el = document.getElementById(id)
+          if (el) { el.style.opacity = '0'; el.style.display = 'none' }
+        }
+      }
+      hideOverlays()
+      // the async boot loading sequence may re-show the intro AFTER this
+      // call — keep suppressing for a while (headless QA sweeps are long)
+      for (const ms of [400, 1200, 2500, 4000, 6000, 9000, 15000, 25000, 40000, 60000]) setTimeout(hideOverlays, ms)
+      // headless QA drives the camera — make sure input listeners exist
+      // even though the normal DIVE-IN flow was skipped
+      pointer.enable()
+      swim.enable()
+      // 360° QA sweeps drive the swim rig directly (setView) — activate it
+      // so pushSwimPose actually owns the camera pose (enable() alone only
+      // attaches listeners and the rig keeps drifting around HOME)
+      if (!swim.active) swim.setActive(true)
+      lighting.revealNow()
+      surface.revealNow()
+      ui.showHUD()
+      return 'REVEALED'
+    },
+    /** renderer + environment stats (poly budget verification) */
+    stats: () => ({
+      tris: Math.round(sceneMgr.renderer.info.render.triangles),
+      calls: sceneMgr.renderer.info.render.calls,
+      geometries: sceneMgr.renderer.info.memory.geometries,
+      coralTris: Math.round(coral.polyCount),
+      limestoneSpots: limestone.growthSpots.length,
+      spongeEmitters: sponges.emitters.length,
+      arena: arena.stats(),
+      tier: cfg.tier,
+    }),
+    arena: () => arena.stats(),
+    /** QA: world positions of placed pieces for a family (camera staging) */
+    pieces: (kind: string) => (arena.piecePos[kind] ?? []).map((p) => p.toArray().map((n) => Math.round(n * 100) / 100)),
     swimMode: () => swim.active,
     forceShark: () => creatures.triggerPredator(),
     forceTurtle: () => creatures.triggerTurtle(),
@@ -483,6 +569,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       swim.position.set(Number(args[0]), Number(args[1]), Number(args[2]))
       return true
     },
+    /** QA: teleport AND aim the swim camera — setView(yaw, pitch, x, y, z) */
+    setView: (...args: unknown[]) => {
+      // 360° sweeps may call setView before/without revealNow — self-activate
+      if (!swim.active) { swim.enable(); swim.setActive(true) }
+      if (args.length >= 5) swim.position.set(Number(args[2]), Number(args[3]), Number(args[4]))
+      if (args.length >= 1) swim.yaw = Number(args[0])
+      if (args.length >= 2) swim.pitch = Number(args[1])
+      swim.pitch = Math.min(1.25, Math.max(-1.25, swim.pitch))
+      return { pos: swim.position.toArray(), yaw: swim.yaw, pitch: swim.pitch }
+    },
     projection: {
       enter: () => { projection.enter(); ui.setProjectionActive(true) },
       exit: () => { projection.exit(); ui.setProjectionActive(false) },
@@ -511,7 +607,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         if (on !== undefined) projection.setSnapWalls(!!on)
         return projection.snapWalls
       },
-      vibrance: (v?: number) => {
+      /** QA: per-show shader grade (stacks on the global vibrance) */
+      wallGrade: (v?: number) => {
         if (v !== undefined) projection.setVibrance(v)
         return projection.output.vibrance
       },
@@ -527,6 +624,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       relay: () => projection.relayInfo(),
       /** phone remote diagnostics (WebSocket link, rig pose, QR) */
       remote: () => projection.remoteInfo(),
+      /** QA: switch the show session (tank + phone isolation) */
+      session: (id: string) => { projection.setTankSession(String(id)); return projection.tankSession },
       /** QA: force the remote rig offsets (headless tests) */
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */
@@ -565,6 +664,17 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         projection.surfaces.touch(s)
         return true
       },
+      /** QA: neighbour-linked span edit (joined edges stay pinned) — real UI path */
+      spanEdit: (surfaceName: string, axis: 'h' | 'v', value: number) =>
+        projection.qaSpanEdit(String(surfaceName), axis, value),
+      /** QA: real-size → span flow for a surface */
+      realSize: (surfaceName: string, w: number, h: number, d: number) =>
+        projection.qaRealSize(String(surfaceName), w, h, d),
+      /** QA: read the vibrance grade */
+      vibrance: (v?: number) => {
+        if (typeof v === 'number') setVibrance(v)
+        return getVibrance()
+      },
     },
   }
 
@@ -583,6 +693,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       container.innerHTML = ''
       decor.dispose()
       biomes.dispose()
+      limestone.dispose()
+      sponges.dispose()
       feeding.dispose()
       void particles
     },

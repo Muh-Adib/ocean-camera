@@ -9,11 +9,21 @@
 // tear apart, at any angle, at any distance. (Per-camera movement
 // is what used to break the picture at the edges.)
 //
-// Feel: the phone sends stick VELOCITIES (deflection = speed, not
-// position). The rig integrates them into target offsets and glides
-// the current offsets toward the targets with exponential damping,
-// so packet jitter, stick re-centring and limit hits all look like
-// one continuous fluid motion — never a step.
+// Feel — PACKET-DRIVEN INTEGRATION (v2, fixes stutter + drift):
+// Each control packet integrates its stick velocities into the rig
+// TARGETS using the time elapsed SINCE THE PREVIOUS PACKET (not
+// the render frame rate). Every screen therefore integrates the
+// exact same motion for every packet, no matter when its frames
+// run — screens stay in lockstep instead of accumulating drift,
+// and the 60 fps render loop between packets only GLIDES the live
+// pose toward the target (exponential damping), which reads as one
+// continuous fluid motion. No more sawtooth: the old per-frame
+// velocity bleed between 30 Hz packets (−15 % per frame) is gone.
+//
+// Packets that stop arriving (phone tab hidden, Wi-Fi hiccup) are
+// held for a short grace window, then the velocity bleeds out
+// GENTLY (≈4 / s) so the view coasts to a stop instead of either
+// drifting forever or freezing mid-gesture.
 //
 // Limits are SOFT: as an offset approaches its bound the available
 // speed is eased down (a rubber band), so the view decelerates to a
@@ -53,6 +63,14 @@ const LIMITS = {
 /** exponential smoothing rate — higher = snappier, lower = dreamier */
 const DAMP = 7.5
 
+/** packets newer than this drive the rig at full strength */
+const HOLD_MS = 450
+/** after the hold window the velocity bleeds at this rate (1/s) */
+const STALE_DECAY = 4
+/** consumed-packet dt clamp: rejects bursts, caps catch-up after a stall */
+const MIN_PACKET_DT = 0.004
+const MAX_PACKET_DT = 0.25
+
 export class RemoteRig {
   /** smoothed, applied every frame */
   cur: RigState = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
@@ -60,18 +78,34 @@ export class RemoteRig {
   private target: RigState = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
   /** stick velocities received from the phone (−1..1) */
   private vel = { mx: 0, my: 0, ox: 0, oy: 0, dz: 0 }
+  /** arrival time of the last CONSUMED packet (performance.now ms) */
+  private lastPacketAt = 0
   /** phone camera mode → sticks stay live even without input */
   enabled = false
   /** true while any stick is deflected (screens may show a HINT) */
   active = false
 
-  /** feed one control packet (already validated by RemoteLink) */
+  /**
+   * Feed one control packet. The velocity is integrated into the
+   * targets HERE, scaled by the time elapsed since the previous
+   * CONSUMED packet. Coalesced packets (a slow screen only consumes
+   * a few of the 40 Hz stream) therefore still integrate the full
+   * elapsed time — every screen, at any frame rate, converges to the
+   * same total motion, which is what keeps the walls in lockstep.
+   */
   apply(v: { mx?: number; my?: number; ox?: number; oy?: number; dz?: number }) {
+    const now = performance.now()
+    const dt = this.lastPacketAt
+      ? Math.min(MAX_PACKET_DT, Math.max(MIN_PACKET_DT, (now - this.lastPacketAt) / 1000))
+      : 1 / 40
+    this.lastPacketAt = now
+
     this.vel.mx = clamp1(v.mx ?? 0)
     this.vel.my = clamp1(v.my ?? 0)
     this.vel.ox = clamp1(v.ox ?? 0)
     this.vel.oy = clamp1(v.oy ?? 0)
     this.vel.dz = clamp1(v.dz ?? 0)
+    this.integrate(dt)
     this.active =
       Math.abs(this.vel.mx) > 0.001 || Math.abs(this.vel.my) > 0.001 ||
       Math.abs(this.vel.ox) > 0.001 || Math.abs(this.vel.oy) > 0.001 ||
@@ -85,20 +119,20 @@ export class RemoteRig {
       Math.abs(v.ox) > 0.001 || Math.abs(v.oy) > 0.001 || Math.abs(v.dz) > 0.001
   }
 
-  /**
-   * Bleed the last velocity out smoothly (no fresh packets arriving —
-   * phone tab throttled/hidden). The view coasts to a gentle stop instead
-   * of either drifting forever or freezing mid-gesture.
-   */
-  decayInput(dt: number) {
-    const k = Math.exp(-dt * 10)
-    const v = this.vel
-    v.mx *= k; v.my *= k; v.ox *= k; v.oy *= k; v.dz *= k
-    if (Math.abs(v.mx) < 0.01) v.mx = 0
-    if (Math.abs(v.my) < 0.01) v.my = 0
-    if (Math.abs(v.ox) < 0.01) v.ox = 0
-    if (Math.abs(v.oy) < 0.01) v.oy = 0
-    if (Math.abs(v.dz) < 0.01) v.dz = 0
+  /** forget all input and glide home (phone disconnected / mode off) */
+  release(hard = false) {
+    this.vel = { mx: 0, my: 0, ox: 0, oy: 0, dz: 0 }
+    this.lastPacketAt = 0
+    this.active = false
+    if (hard) {
+      this.target = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
+    }
+  }
+
+  /** reset instantly (new project loaded) */
+  reset() {
+    this.release(true)
+    this.cur = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
   }
 
   /** soft rubber-band gain: 1 in the free zone, easing to 0 at the bound */
@@ -112,9 +146,8 @@ export class RemoteRig {
     return cur + (tgt - cur) * (1 - Math.exp(-DAMP * dt))
   }
 
-  /** integrate stick velocities → targets, then glide current → target */
-  update(dt: number) {
-    if (!this.enabled) dt = Math.min(dt, 1 / 30)
+  /** integrate the held stick velocities into the targets for dt seconds */
+  private integrate(dt: number) {
     const v = this.vel
     const t = this.target
 
@@ -130,30 +163,42 @@ export class RemoteRig {
     t.strafe = clamp(t.strafe + v.mx * GAIN.strafe * sGain * dt, LIMITS.strafe[0], LIMITS.strafe[1])
     const lGain = RemoteRig.band(t.lift, LIMITS.lift[0], LIMITS.lift[1], 3)
     t.lift = clamp(t.lift + v.my * GAIN.lift * lGain * dt, LIMITS.lift[0], LIMITS.lift[1])
+  }
+
+  /**
+   * Per-frame: glide the applied pose toward the target. When packets
+   * stopped arriving, bleed the held velocity out gently so the view
+   * coasts to a graceful stop (and never stutters between packets).
+   */
+  update(dt: number) {
+    if (!this.enabled) dt = Math.min(dt, 1 / 30)
+
+    if (this.hasInput() && this.lastPacketAt) {
+      const idleFor = performance.now() - this.lastPacketAt
+      if (idleFor > HOLD_MS) {
+        // stale: decay at STALE_DECAY per second — far gentler than the
+        // old per-render-frame bleed, so the glide stays invisible
+        const k = Math.exp(-STALE_DECAY * dt)
+        const v = this.vel
+        v.mx *= k; v.my *= k; v.ox *= k; v.oy *= k; v.dz *= k
+        if (Math.abs(v.mx) < 0.01) v.mx = 0
+        if (Math.abs(v.my) < 0.01) v.my = 0
+        if (Math.abs(v.ox) < 0.01) v.ox = 0
+        if (Math.abs(v.oy) < 0.01) v.oy = 0
+        if (Math.abs(v.dz) < 0.01) v.dz = 0
+        this.integrate(dt)
+        if (!this.hasInput()) this.active = false
+      }
+    }
 
     // glide the applied pose toward the target — this is what makes the
     // view buttery even when packets arrive in bursts
     const c = this.cur
-    c.yaw = RemoteRig.stepAxis(c.yaw, t.yaw, dt)
-    c.pitch = RemoteRig.stepAxis(c.pitch, t.pitch, dt)
-    c.dolly = RemoteRig.stepAxis(c.dolly, t.dolly, dt)
-    c.strafe = RemoteRig.stepAxis(c.strafe, t.strafe, dt)
-    c.lift = RemoteRig.stepAxis(c.lift, t.lift, dt)
-  }
-
-  /** forget all input and glide home (phone disconnected / mode off) */
-  release(hard = false) {
-    this.vel = { mx: 0, my: 0, ox: 0, oy: 0, dz: 0 }
-    this.active = false
-    if (hard) {
-      this.target = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
-    }
-  }
-
-  /** reset instantly (new project loaded) */
-  reset() {
-    this.release(true)
-    this.cur = { yaw: 0, pitch: 0, dolly: 0, strafe: 0, lift: 0 }
+    c.yaw = RemoteRig.stepAxis(c.yaw, this.target.yaw, dt)
+    c.pitch = RemoteRig.stepAxis(c.pitch, this.target.pitch, dt)
+    c.dolly = RemoteRig.stepAxis(c.dolly, this.target.dolly, dt)
+    c.strafe = RemoteRig.stepAxis(c.strafe, this.target.strafe, dt)
+    c.lift = RemoteRig.stepAxis(c.lift, this.target.lift, dt)
   }
 
   // ------------------------------------------------------------ application

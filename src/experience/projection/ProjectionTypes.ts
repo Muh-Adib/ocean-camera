@@ -51,6 +51,16 @@ export interface ProjectionSurface {
      * automatically fits the physical wall while neighbours stay glued.
      */
     span: { h: number; v: number; lock: boolean; ratioW?: number; ratioH?: number }
+    /**
+     * REAL-SIZE flow (optional): the physical wall's width/height in
+     * metres plus the viewer distance the operator calibrated with.
+     * When present the editor derives span h/v from these numbers
+     * (span = 2·atan(size / 2 / dist)) instead of raw angle fields.
+     * The WALL RATIO flow (span.ratioW/ratioH) is the proportion-only
+     * sibling: it derives just SPAN H from SPAN V. `real` wins when
+     * both are present — absolute geometry beats proportions.
+     */
+    real?: { w: number; h: number; d: number }
   }
 
   warp: {
@@ -123,6 +133,18 @@ export interface ProjectionOutput {
   vibrance?: number
 }
 
+/**
+ * How the composite output space maps onto the PHYSICAL screen showing it
+ * (per-machine display setting — the projector's aspect often differs from
+ * the studio's). Stored per browser, NOT inside the project.
+ *  - cover:   fill the screen completely, aspect-true, crop overflow edges
+ *  - stretch: fill the screen completely, map the output rect 1:1 onto the
+ *             screen (distorts when aspects differ — ideal once output size
+ *             matches the screen via MATCH SCREEN)
+ *  - contain: letterbox — whole output visible, black bars (editor previews)
+ */
+export type ScreenFit = 'contain' | 'cover' | 'stretch'
+
 /** resolved settings actually used by the render pipeline this frame */
 export interface ResolvedQuality {
   renderScale: number
@@ -165,6 +187,8 @@ export interface ProjectionProject {
   qr?: { host: string }
   /** snap wall edges: span edits re-aim neighbours so seams never break (default on) */
   snapWalls?: boolean
+  /** active show session — isolates the fish tank + phone remote per venue */
+  tank?: { session?: string }
 }
 
 export const PROJECT_VERSION = 2
@@ -230,6 +254,7 @@ export function createSurface(init: {
       near: init.camera.near,
       far: init.camera.far,
       span: init.camera.span ?? { h: init.camera.fov, v: init.camera.fov, lock: false },
+      ...(init.camera.real ? { real: { ...init.camera.real } } : {}),
     },
     warp: {
       corners: cornersFromRect(rect),

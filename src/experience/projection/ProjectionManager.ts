@@ -19,12 +19,15 @@ import { ProjectManager, encodeProjectPayload, decodeProjectPayload, PORTABLE_LI
 import { ProjectionEditorUI } from './ProjectionEditorUI'
 import { PRESETS, getPreset } from './ProjectionPresets'
 import { gridFromCorners } from './ProjectionMath'
+import { linkedSpanEdit, realSizeToSpan } from './SpanLink'
 import { RemoteRig } from '../remote/RemoteRig'
-import { ScreenLink, type HandFrame } from '../remote/RemoteLink'
+import { ScreenLink, cleanSessionId, type HandFrame } from '../remote/RemoteLink'
+import { phoneOrigin } from '../remote/lanOrigin'
+import { getVibrance, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN } from '../look/vibrance'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import { deriveSpanH, fitSliceToRatio, glueWalls, seamAudit } from './SpanChain'
-import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
+import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
 export interface ProjectionDeps {
@@ -49,6 +52,14 @@ const RELAY_HEARTBEAT = 4000
  * cosmetic marker needs the slack.
  */
 const LIVE_FRESH_MS = 70000
+/** localStorage key for this browser's active show session */
+const TANK_SESSION_KEY = 'ocean-tank-session'
+/**
+ * per-MACHINE display setting: how the composite maps onto this screen
+ * (the projector's aspect often differs from the studio's — never synced)
+ */
+const SCREEN_FIT_KEY = 'ocean-output-fit-v1'
+const SCREEN_FITS: ScreenFit[] = ['contain', 'cover', 'stretch']
 
 export class ProjectionManager {
   /** studio open — the render pipeline is ours */
@@ -62,7 +73,7 @@ export class ProjectionManager {
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
   showFrustums = true
 
-  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced', vibrance: 1.18 }
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced', vibrance: 1 }
 
   /**
    * Wall-edge snapping — when a span-locked camera changes (span, ratio,
@@ -71,6 +82,12 @@ export class ProjectionManager {
    * the picture seamless across differently-shaped walls.
    */
   snapWalls = true
+  /**
+   * how the live composite maps onto THIS screen. COVER is the show default:
+   * edge-to-edge picture with no black bars; the projector's screen is not
+   * always the same aspect as the configured output canvas.
+   */
+  screenFit: ScreenFit = 'cover'
 
   readonly surfaces = new SurfaceManager()
   private cameras: CameraManager
@@ -120,11 +137,23 @@ export class ProjectionManager {
   private qrDismissed = false
   /** painted-fish sync client — assigned by main.ts (studio edits, all pages follow) */
   fishTank: import('../fish/FishTank').FishTank | null = null
+  /**
+   * SHOW SESSION — isolates everything that flows per exhibition/venue:
+   * the painted-fish tank (which scans swim where) and the phone remote
+   * (a phone can only steer screens of its own session). The active id
+   * rides inside the serialized project, so every /output follows the
+   * studio's session automatically.
+   */
+  tankSession = 'main'
   /** phone-camera hand signals forwarded to the ocean (set by main.ts) */
   onPhoneHand: ((h: HandFrame | null) => void) | null = null
   phoneOn = false
 
   constructor(private deps: ProjectionDeps) {
+    try {
+      const saved = localStorage.getItem(SCREEN_FIT_KEY) as ScreenFit | null
+      if (saved && SCREEN_FITS.includes(saved)) this.screenFit = saved
+    } catch { /* private mode — keep the default */ }
     this.cameras = new CameraManager(deps.sceneMgr.scene)
     this.outputMgr = new OutputManager(this.blend, this.calib)
     this.outputMgr.maxTexSize = Math.min(deps.sceneMgr.renderer.capabilities.maxTextureSize || 4096, 8192)
@@ -137,7 +166,7 @@ export class ProjectionManager {
       output: this.output,
       setOutput: (o) => {
         Object.assign(this.output, o)
-        this.blend.vibrance = this.output.vibrance ?? 1.18
+        this.blend.vibrance = this.output.vibrance ?? 1
         this.ui?.refreshAll()
       },
       // live getter — a snapshot value would go stale the moment the host changes
@@ -145,8 +174,10 @@ export class ProjectionManager {
       setQrHost: (h) => { self.setQrHost(h, { silent: true }) },
       get snapWalls() { return self.snapWalls },
       setSnapWalls: (on) => { self.snapWalls = on },
+      get tankSession() { return self.tankSession },
+      setTankSession: (id, opts) => { self.setTankSession(id, opts) },
     })
-    this.blend.vibrance = this.output.vibrance ?? 1.18
+    this.blend.vibrance = this.output.vibrance ?? 1
     // studio side: every persisted save is also pushed to /output tabs live
     if (deps.outputOnly) this.outputOnly = true
     else {
@@ -181,7 +212,7 @@ export class ProjectionManager {
   private ensureRemote() {
     if (this.remoteLink) return
     this.cameras.rig = this.remoteRig
-    const link = new ScreenLink()
+    const link = new ScreenLink(this.tankSession)
     this.remoteLink = link
     link.onPresence = (on) => {
       this.phoneOn = on
@@ -232,18 +263,47 @@ export class ProjectionManager {
     }
   }
 
+  /**
+   * Switch the show session: the fish tank re-polls its store, the QR
+   * invitation re-points at /control-mobile?s=<id>, the WebSocket remote
+   * re-homes to that session group and (unless silent) the new id rides
+   * the next push so every /output switches with us.
+   */
+  setTankSession(id: string, opts: { silent?: boolean } = {}) {
+    const clean = cleanSessionId(id)
+    if (clean === this.tankSession) return
+    this.tankSession = clean
+    try { localStorage.setItem(TANK_SESSION_KEY, clean) } catch { /* private mode */ }
+    void this.fishTank?.setSession(clean)
+    this.wallQr.setSession(clean)
+    this.qr?.setSession(clean)
+    // the remote link must join the new session group (cheap reconnect)
+    if (this.remoteLink) {
+      this.remoteLink.dispose()
+      this.remoteLink = null
+      this.ensureRemote()
+    }
+    if (!opts.silent) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.ui?.refreshAll()
+      this.deps.toast(`Session “${clean}” — tank + phone remote are isolated to it`, 3000)
+    }
+  }
+
   /** per-frame remote pump — control smoothing + hand forwarding */
   private updateRemote(dt: number) {
     const link = this.remoteLink
     if (!link) return
-    // stale-input handling: fresh packets drive the rig directly; when the
-    // phone goes quiet (tab hidden, Wi-Fi hiccup) the last velocity BLEEDS
-    // out smoothly — the view coasts to a stop, never drifts, never freezes
-    if (link.ctlAge() < 350) {
-      const c = link.ctl
-      if (c) this.remoteRig.apply(c)
-    } else if (this.remoteRig.hasInput()) {
-      this.remoteRig.decayInput(dt)
+    // Packet-driven rig: every arriving packet integrates its own motion
+    // (scaled by the time since the PREVIOUS packet) inside RemoteRig.apply,
+    // so every screen moves the same amount per packet — no cross-screen
+    // drift, and no per-frame velocity bleed between 30 Hz packets (the old
+    // stutter). Stale-velocity coasting lives inside RemoteRig.update too.
+    const c = link.ctl
+    if (c) {
+      this.remoteRig.apply(c)
+      link.ctl = null
     }
     this.remoteRig.update(dt)
     this.onPhoneHand?.(link.freshHand())
@@ -263,6 +323,32 @@ export class ProjectionManager {
   /** QA: nudge the rig directly (headless tests) */
   qaRigSet(v: { yaw?: number; pitch?: number; dolly?: number; strafe?: number; lift?: number }) {
     Object.assign(this.remoteRig.cur, v)
+  }
+
+  /** QA: neighbour-linked span edit through the SAME path the editor uses */
+  qaSpanEdit(surfaceName: string, axis: 'h' | 'v', value: number) {
+    const s = this.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === surfaceName.toLowerCase())
+    if (!s) return null
+    this.surfaces.snapshot()
+    const res = linkedSpanEdit(this.surfaces.surfaces, s, axis, value)
+    this.surfaces.emit()
+    return { ...res, yaw: s.camera.yaw, pitch: s.camera.pitch, spanH: s.camera.span.h, spanV: s.camera.span.v }
+  }
+
+  /** QA: REAL-SIZE flow — physical wall size → spans via the linked editor */
+  qaRealSize(surfaceName: string, w: number, h: number, d: number) {
+    const s = this.surfaces.surfaces.find((sc) => sc.name.toLowerCase() === surfaceName.toLowerCase())
+    if (!s) return null
+    this.surfaces.snapshot()
+    s.camera.real = { w, h, d }
+    // absolute geometry wins — release the proportion lock (same as the UI path)
+    delete s.camera.span.ratioW
+    delete s.camera.span.ratioH
+    const spans = realSizeToSpan(w, h, d)
+    linkedSpanEdit(this.surfaces.surfaces, s, 'h', spans.h)
+    linkedSpanEdit(this.surfaces.surfaces, s, 'v', spans.v)
+    this.surfaces.emit()
+    return { yaw: s.camera.yaw, pitch: s.camera.pitch, spanH: s.camera.span.h, spanV: s.camera.span.v }
   }
 
   /** QA: QR overlay geometry — the wall QR (in-projection) plus the DOM fallback */
@@ -293,6 +379,12 @@ export class ProjectionManager {
     this.wireSyncChannel()
     this.startRelayHeartbeat()
     this.ensureRemote()
+
+    // resume this browser's last active show session (studio side)
+    try {
+      const saved = localStorage.getItem(TANK_SESSION_KEY)
+      if (saved) this.setTankSession(saved, { silent: true })
+    } catch { /* private mode */ }
 
     let restored = false
     if (this.surfaces.surfaces.length === 0) {
@@ -420,7 +512,10 @@ export class ProjectionManager {
    */
   async portableSessionLink(id: string, name?: string): Promise<string> {
     const rec = this.project.getSession(id)
-    const base = `${location.origin}/output?s=${id}`
+    // the link is opened on OTHER machines — when the studio browses
+    // itself as localhost, swap in the server's LAN address
+    const origin = await phoneOrigin()
+    const base = `${origin}/output?s=${id}`
     if (!rec) return base
     const label = encodeURIComponent((name ?? rec.name).slice(0, 48))
     try {
@@ -489,6 +584,10 @@ export class ProjectionManager {
     if (this.liveLinked) {
       this.lastAppliedJson = json
       this.lastSyncAt = performance.now()
+      // follow the studio's show session — tank + phone remote switch with
+      // the push (silent: never echo a state change back upstream)
+      const pushedSession = (project as { tank?: { session?: unknown } } | null)?.tank?.session
+      if (typeof pushedSession === 'string') this.setTankSession(pushedSession, { silent: true })
       // keep the published session's stored settings current — reloading
       // the link boots the newest state the operator pushed, even if the
       // studio closed without republishing
@@ -535,12 +634,26 @@ export class ProjectionManager {
             <option value="ultra">ULTRA</option>
           </select>
         </label>
+        <label class="pm-out-field">FIT
+          <select id="pm-out-fit" class="pm-select pm-select-sm">
+            <option value="cover">COVER — FULL SCREEN</option>
+            <option value="stretch">STRETCH — FULL SCREEN</option>
+            <option value="contain">CONTAIN — LETTERBOX</option>
+          </select>
+        </label>
+        <label class="pm-out-field">VIBRANCE
+          <span class="pm-out-vib">
+            <input id="pm-out-vib" type="range" min="${VIBRANCE_MIN}" max="${VIBRANCE_MAX}" step="0.02" value="${getVibrance()}">
+            <span id="pm-out-vib-val">${getVibrance().toFixed(2)}×</span>
+          </span>
+        </label>
         <label class="pm-out-field">PATTERN
           <select id="pm-out-pattern" class="pm-select pm-select-sm">
             ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
           </select>
         </label>
         <button class="pm-btn pm-btn-sm" id="pm-out-fullscreen">FULLSCREEN</button>
+        <button class="pm-btn pm-btn-sm" id="pm-out-match" title="Set the output canvas to this screen's exact resolution — 1:1 pixels">MATCH SCREEN</button>
         <button class="pm-btn pm-btn-sm" id="pm-out-import">IMPORT .JSON</button>
         ${missingSession
           ? '<span class="pm-out-warn">session link not found — pick a session below or import a .json</span>'
@@ -562,6 +675,15 @@ export class ProjectionManager {
     el.querySelector('#pm-out-quality')?.addEventListener('change', (e) => {
       this.setQuality((e.target as HTMLSelectElement).value as QualityLevel)
     })
+    el.querySelector('#pm-out-fit')?.addEventListener('change', (e) => {
+      this.setScreenFit((e.target as HTMLSelectElement).value as ScreenFit)
+    })
+    el.querySelector('#pm-out-vib')?.addEventListener('input', (e) => {
+      const v = setVibrance(parseFloat((e.target as HTMLInputElement).value))
+      const val = el.querySelector('#pm-out-vib-val')
+      if (val) val.textContent = `${v.toFixed(2)}×`
+    })
+    el.querySelector('#pm-out-match')?.addEventListener('click', () => this.matchScreen())
     el.querySelector('#pm-out-pattern')?.addEventListener('change', (e) => {
       this.setCalibrationAll((e.target as HTMLSelectElement).value as ProjectionSurface['calibration'])
     })
@@ -588,7 +710,13 @@ export class ProjectionManager {
     const info = this.overlay.querySelector('#pm-out-info')
     const sel = this.overlay.querySelector('#pm-out-pattern') as HTMLSelectElement | null
     const qsel = this.overlay.querySelector('#pm-out-quality') as HTMLSelectElement | null
+    const fsel = this.overlay.querySelector('#pm-out-fit') as HTMLSelectElement | null
     const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
+    const vsel = this.overlay.querySelector('#pm-out-vib') as HTMLInputElement | null
+    const vval = this.overlay.querySelector('#pm-out-vib-val')
+    if (fsel) fsel.value = this.screenFit
+    if (vsel) vsel.value = String(getVibrance())
+    if (vval) vval.textContent = `${getVibrance().toFixed(2)}×`
     if (info) {
       const n = this.surfaces.surfaces.filter((s) => s.enabled).length
       const rt = this.effectiveRT()
@@ -596,7 +724,7 @@ export class ProjectionManager {
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
       const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
       const live = this.liveLinked ? (this.liveFresh() ? 'LIVE LINK · ' : 'HOLDING · ') : ''
-      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()}${rtTxt}`
+      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()} · ${this.screenFit.toUpperCase()}${rtTxt}`
     }
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
@@ -906,6 +1034,32 @@ export class ProjectionManager {
     this.broadcastSoon()
     this.scheduleAutosave()
     this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  /**
+   * Screen fit for the LIVE output on THIS machine (contain / cover / stretch).
+   * A per-browser display setting on purpose: the projector machine may show
+   * the same project through a very different aspect than the studio.
+   */
+  setScreenFit(fit: ScreenFit) {
+    if (!SCREEN_FITS.includes(fit)) return
+    this.screenFit = fit
+    try { localStorage.setItem(SCREEN_FIT_KEY, fit) } catch { /* private mode */ }
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  /**
+   * Snap the output canvas to THIS screen's exact size — after this the
+   * composite maps 1:1 onto the physical display: no bars, no crop, no
+   * distortion, regardless of the fit mode.
+   */
+  matchScreen() {
+    const w = Math.round(Math.max(320, Math.min(16384, window.innerWidth)))
+    const h = Math.round(Math.max(240, Math.min(8640, window.innerHeight)))
+    this.setOutputSize(w, h)
+    this.deps.toast(`Output canvas matched to this screen — ${w}×${h}`, 2800)
   }
 
   // ------------------------------------------------------------ wall ratio & edge snap
@@ -922,6 +1076,8 @@ export class ProjectionManager {
     const span = s.camera.span
     if (!span) return
     if (ratio) {
+      // the ratio flow takes over — release any real-size lock
+      delete s.camera.real
       span.ratioW = Math.min(64, Math.max(0.05, ratio.w))
       span.ratioH = Math.min(64, Math.max(0.05, ratio.h))
       fitSliceToRatio(s, span.ratioW / span.ratioH)
@@ -955,9 +1111,9 @@ export class ProjectionManager {
     this.ui?.refreshAll()
   }
 
-  /** composite saturation of the projected picture (0.5 .. 1.8) */
+  /** per-show composite saturation stacked on the global VIBRANCE (1 = neutral) */
   setVibrance(v: number) {
-    this.output.vibrance = Math.min(1.8, Math.max(0.5, Number.isFinite(v) ? v : 1.18))
+    this.output.vibrance = Math.min(1.8, Math.max(0.5, Number.isFinite(v) ? v : 1))
     this.blend.vibrance = this.output.vibrance
     this.broadcastSoon()
     this.scheduleAutosave()
@@ -1115,9 +1271,9 @@ export class ProjectionManager {
       r.setRenderTarget(null)
     }
 
-    // 2) screen pass
+    // 2) screen pass — fit mode fills the physical screen (no black bars)
     if (this.outputLive) {
-      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight)
+      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight, this.screenFit)
       this.outputMgr.renderComposite(r)
       return
     }
@@ -1225,6 +1381,7 @@ export class ProjectionManager {
       active: this.active,
       outputLive: this.outputLive,
       liveLinked: this.liveLinked,
+      screenFit: this.screenFit,
       relay: this.relayInfo(),
       surfaces: this.surfaces.surfaces.map((s) => ({
         id: s.id, name: s.name, enabled: s.enabled, locked: s.locked,
