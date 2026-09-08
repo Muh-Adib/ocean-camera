@@ -44,8 +44,13 @@ export interface ProjectionSurface {
      * derived from the world angles this surface covers (yaw span h,
      * pitch span v) instead of the output rect aspect, so adjacent
      * walls' frustum edges meet EXACTLY and the frame is never cut.
+     *
+     * ratioW/ratioH — the REAL surface proportions (width:height, e.g.
+     * 1:1, 4:3, 2:3). When present, SPAN H is DERIVED from SPAN V and
+     * this ratio (tan(h/2) = ratio · tan(v/2)), so the camera width
+     * automatically fits the physical wall while neighbours stay glued.
      */
-    span: { h: number; v: number; lock: boolean }
+    span: { h: number; v: number; lock: boolean; ratioW?: number; ratioH?: number }
   }
 
   warp: {
@@ -114,6 +119,8 @@ export interface ProjectionOutput {
   height: number
   renderScale: number   // RT resolution scale: 0.1 .. 1 (set by the quality profile unless custom)
   quality: QualityLevel // which hardware profile is active
+  /** composite saturation boost — 1 = untouched, 1.18 default vividity */
+  vibrance?: number
 }
 
 /** resolved settings actually used by the render pipeline this frame */
@@ -156,6 +163,8 @@ export interface ProjectionProject {
   surfaces: ProjectionSurface[]
   /** which surface carries the phone-connection QR — 'auto' = largest enabled surface */
   qr?: { host: string }
+  /** snap wall edges: span edits re-aim neighbours so seams never break (default on) */
+  snapWalls?: boolean
 }
 
 export const PROJECT_VERSION = 2

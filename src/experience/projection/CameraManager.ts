@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { ProjectionSurface } from './ProjectionTypes'
+import { deriveSpanH } from './SpanChain'
 import type { RemoteRig } from '../remote/RemoteRig'
 
 const DEG = Math.PI / 180
@@ -88,8 +89,11 @@ export class CameraManager {
 
     // frustum: span-lock derives BOTH fov and aspect from the world angles
     // this surface covers, so neighbouring walls' edges meet exactly.
-    // unlocked keeps the classic behaviour: vertical fov + output-rect aspect.
+    // A declared WALL RATIO (real surface proportions) narrows/ widens the
+    // horizontal span further so the camera width always fits the physical
+    // wall. Unlocked keeps the classic behaviour: vertical fov + rect aspect.
     const locked = c.span?.lock === true
+    if (locked) deriveSpanH(c)          // ratio present → SPAN H re-derived (idempotent)
     const spanH = Math.max(4, c.span?.h ?? c.fov)
     const spanV = Math.max(4, c.span?.v ?? c.fov)
     const wantFov = locked ? spanV : c.fov

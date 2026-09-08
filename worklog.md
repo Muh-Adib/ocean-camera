@@ -734,3 +734,25 @@ Work Log:
 
 Stage Summary:
 - Texture ikan hasil scan kini = GAMBAR IKANNYA SAJA: frame, meja, background, dan bayangan dipotong total; bagian tak diwarnai di dalam ikan otomatis terwarnai dari warna sekitarnya; pupil/insang/jari-jari dipertahankan; tidak ada lagi bagian putih pada ikan — gambar mewarnai model penuh tepi-ke-tepi.
+
+---
+Task ID: 27
+Agent: main (Super Z)
+Task: "saya ingin menentukan aspek rasio output namun tetap snap kameranya — misal dinding kanan 1:1 H:V, tengah 4:3 H:V, kiri 2:3 H:V — namun ujung gambar kameranya tetap menyatu sehingga gambar rasionya pas dan juga tidak patah" + WS port prod container + vibrance
+
+Work Log:
+- WALL RATIO (fitur inti): deklarasi proporsi REAL per surface (H:V — preset 1:1, 4:3, 3:2, 16:9, 2:3, 3:4, 9:16 + W:H kustom bebas). SPAN H kini DERIVED dari SPAN V × rasio (tan(h/2) = rasio·tan(v/2)) — lebar kamera otomatis menyesuaikan ukuran ruang nyata tiap surface; SPAN V = tinggi dinding bersama; slice output auto-refit ke rasio (tinggi tetap, pusat tetap, warp grid ikut kecuali gridCustom); ubah SPAN V/YAW/PITCH ikut menurunkan ulang SPAN H.
+- GLUE/SNAP (SpanChain.ts baru): surface2 span-locked yang berbagi satu eye point = SATU CINCIN DINDING. Setiap edit span/rasio/yaw/pitch meng-anchor surface yang diedit lalu meng-aim ulang tetangga (sort yaw, jalan kiri-kanan) sehingga yaw_prev + h_prev/2 == yaw_next − h_next/2 EXACT — gambar satu panorama kontinu: tanpa gap, tanpa konten dobel, tanpa "mengambil view bagian lain". Anggota cincin ikut pitch & SPAN V anchor (dinding satu ruangan selevel & setinggi) sementara tiap dinding PERTAHANKAN span-nya sendiri (dari rasio masing2). Ceiling/floor (|pitch|≥89) dan surface locked dikecualikan.
+- Flag project snapWalls (default ON, persist di project JSON + autosave + session + relay): checkbox "Snap wall edges (seamless ring)" di pane kamera; OFF = perilaku lama (edit lokal, seam bisa geser).
+- CameraManager.sync menjalankan deriveSpanH tiap frame (safety net — semua jalur load/undo/push menghormati rasio); ProjectManager sanitize mem-bawa ratioW/ratioH + vibrance + snapWalls (project lama tetap jalan).
+- QA hooks baru di __ocean.projection: wallRatio(name,w,h|null), seamAudit(name?) (worst gap° + per-joint), snapWalls(on?), vibrance(v?).
+- VIBRANCE: uniform uVibrance di shader komposit (BlendManager) — saturasi luma-preserving (mix(vec3(luma), c, uVibrance)) khusus picture proyeksi (pola kalibrasi tak terpengaruh); output.vibrance persist; slider "WALL VIBRANCE" (0.6–1.8) di pane PROJECT; default 1.18 (dinding proyektor terbaca lebih kusam daripada layar).
+- ROOT CAUSE WS PROD DITEMUKAN & DIPERBAiki: Dockerfile runner menyalin .next/standalone yang membawa server.js BAWAAN Next — TANPA WebSocket hub; container prod karenanya menjalankan server tanpa /ws/control → "error koneksi dengan phone". Fix: server.js custom (hub WS) menimpa standalone server.js + node_modules/ws disalin (tidak ter-trace standalone); EXPOSE 3000 tunggal — WS naik di port yang sama via path /ws/control, jadi container CUMA butuh port 3000 dibuka (tidak ada port WS terpisah). Dev server (node server.js) sudah benar sejak lama.
+- E2E headless (agent-browser): preset immersive-270 → rasio kiri 2:3 / tengah 4:3 / kanan 1:1 → span H turun 67.38/106.26/90 (v=90), seamAudit worst = 0°; slice 663×994 / 1325×994 / 994×994 (rasio pas); snap OFF → seam −7.51° (perilaku lama), snap ON → 0° lagi; slider SPAN V asli (DOM) → seluruh cincin ikut v=70 + H re-derived + seam 0; roundtrip save/load localStorage membawa rasio+vibrance+snap utuh; /output mengadopsi state live (3 dinding + rasio); WS /ws/control upgrade OK; screenshot: qa-wall-ratio-grid.png (grid 3 rasio), qa-panorama-mixed-ratio.png (panorama 3 dinding rasio beda — batu besar menyeberang seam Front/Right TANPA patah, garis pantai kontinu).
+- Catatan lingkungan: tab headless crash-restore tiap ~1–2 menit di bawah load RT (artefak environment, bukan app) — penyebab localStorage sementara tertimpa fallback; semua verifikasi state diulang deterministic di page hidup.
+- tsc bersih; eslint bersih (require CommonJS di server.js = gaya lama file itu).
+
+Stage Summary:
+- Rasio H:V per surface kini kontrol utama bentuk output: user menyatakan ukuran real dinding (1:1 / 4:3 / 2:3 / bebas), lebar kamera dan slice menyesuaikan OTOMATIS, dan snap ring menjaga setiap ujung kamera bertetangga tetap menyatu — rasio pas, gambar tidak patah, tidak ada view terambil.
+- Prod container kini benar-benar menjalankan server WS (fix Dockerfile) — koneksi phone /control-mobile memakai satu port yang sama (3000).
+- Tampilan proyeksi lebih hidup: vibrance default 1.18 + slider di PROJECT.

@@ -461,6 +461,10 @@ export class ProjectionEditorUI {
     }
     body.appendChild(ratioRow)
 
+    // ---- wall vibrance — projector walls read duller than screens ----
+    body.appendChild(this.sliderRow('WALL VIBRANCE', this.pm.output.vibrance ?? 1.18, 0.6, 1.8, 0.01, (v) => this.pm.setVibrance(v)))
+    body.appendChild(this.hint('Saturation of the projected picture — luma-preserving so the reef pops without clipping. Calibration patterns are not affected.'))
+
     // ---- output quality — sized to the machine driving the show ----
     const qRow = document.createElement('div')
     qRow.className = 'pm-row'
@@ -958,10 +962,10 @@ export class ProjectionEditorUI {
     cg.appendChild(this.numField('POS X', c.position[0], 0.1, (v) => { c.position[0] = v; this.lightCam(s) }, -200, 200))
     cg.appendChild(this.numField('POS Y', c.position[1], 0.1, (v) => { c.position[1] = v; this.lightCam(s) }, -100, 100))
     cg.appendChild(this.numField('POS Z', c.position[2], 0.1, (v) => { c.position[2] = v; this.lightCam(s) }, -200, 200))
-    cg.appendChild(this.numField('YAW °', c.yaw, 1, (v) => { c.yaw = v; this.lightCam(s) }, -720, 720))
-    cg.appendChild(this.numField('PITCH °', c.pitch, 1, (v) => { c.pitch = v; this.lightCam(s) }, -95, 95))
+    cg.appendChild(this.numField('YAW °', c.yaw, 1, (v) => { c.yaw = v; this.pm.applySpanEdit(s) }, -720, 720))
+    cg.appendChild(this.numField('PITCH °', c.pitch, 1, (v) => { c.pitch = v; this.pm.applySpanEdit(s) }, -95, 95))
     if (spanLocked) {
-      cg.appendChild(this.numField('SPAN H °', c.span.h, 1, (v) => { c.span.h = Math.max(4, Math.min(359, v)); this.lightCam(s) }, 4, 359))
+      cg.appendChild(this.numField('SPAN H °', c.span.h, 1, (v) => { c.span.h = Math.max(4, Math.min(359, v)); this.pm.applySpanEdit(s) }, 4, 359))
     } else {
       cg.appendChild(this.numField('FOV °', c.fov, 1, (v) => { c.fov = Math.max(8, Math.min(150, v)); this.lightCam(s) }, 8, 150))
     }
@@ -969,6 +973,7 @@ export class ProjectionEditorUI {
 
     if (spanLocked) {
       // edge-matched room projection: fov derives from the angular spans
+      const hasWallRatio = typeof c.span.ratioW === 'number' && typeof c.span.ratioH === 'number'
       const spanRow = document.createElement('div')
       spanRow.className = 'pm-row'
       spanRow.appendChild(this.check('Match wall edges (span lock)', true, (on) => {
@@ -977,11 +982,39 @@ export class ProjectionEditorUI {
         this.pm.surfaces.emit()
       }))
       this.propsEl.appendChild(spanRow)
-      this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => { c.span.h = v; this.lightCam(s) }))
-      this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => { c.span.v = v; this.lightCam(s) }))
+      // with a wall ratio declared, SPAN H is DERIVED — shown read-only
+      this.propsEl.appendChild(this.sliderRow('SPAN H', c.span.h, 4, 170, 1, (v) => { c.span.h = v; this.pm.applySpanEdit(s) }, hasWallRatio))
+      this.propsEl.appendChild(this.sliderRow('SPAN V', c.span.v, 4, 170, 1, (v) => { c.span.v = v; this.pm.applySpanEdit(s) }))
+
+      // ---- WALL RATIO — the real proportions of this surface ----
+      // declaring them auto-fits the camera width AND the output slice;
+      // neighbours re-aim so shared edges stay seamless (see SpanChain)
+      const wallRow = document.createElement('div')
+      wallRow.className = 'pm-btn-row pm-btn-row-wrap'
+      wallRow.appendChild(this.labelEl('WALL RATIO'))
+      const wr = document.createElement('span')
+      wr.className = 'pm-slider-val'
+      wr.textContent = hasWallRatio ? `${trimNum(c.span.ratioW!)}:${trimNum(c.span.ratioH!)}` : 'FREE'
+      wallRow.appendChild(wr)
+      wallRow.appendChild(this.btn('FREE', () => this.pm.setWallRatio(s, null), 'pm-btn-sm'))
+      for (const [lw, lh] of [[1, 1], [4, 3], [3, 2], [16, 9], [2, 3], [3, 4], [9, 16]] as const) {
+        wallRow.appendChild(this.btn(`${lw}:${lh}`, () => this.pm.setWallRatio(s, { w: lw, h: lh }), 'pm-btn-sm'))
+      }
+      this.propsEl.appendChild(wallRow)
+
+      // custom proportions — any real surface shape, two numbers
+      const customRow = document.createElement('div')
+      customRow.className = 'pm-grid2'
+      customRow.appendChild(this.numField('RATIO W', hasWallRatio ? c.span.ratioW! : 4, 0.1, (v) => {
+        if (v > 0 && v < 65) this.pm.setWallRatio(s, { w: v, h: hasWallRatio ? c.span.ratioH! : 3 })
+      }, 0.1, 64))
+      customRow.appendChild(this.numField('RATIO H', hasWallRatio ? c.span.ratioH! : 3, 0.1, (v) => {
+        if (v > 0 && v < 65) this.pm.setWallRatio(s, { w: hasWallRatio ? c.span.ratioW! : 4, h: v })
+      }, 0.1, 64))
+      this.propsEl.appendChild(customRow)
+
       // camera input ratio vs the slice it feeds — one click keeps them equal
       const camRatio = c.span.h / Math.max(1, c.span.v)
-      const sliceRatio = rect.width / Math.max(1, rect.height)
       const ratioRow = document.createElement('div')
       ratioRow.className = 'pm-btn-row'
       ratioRow.appendChild(this.labelEl('CAM RATIO'))
@@ -989,15 +1022,29 @@ export class ProjectionEditorUI {
       rl.className = 'pm-slider-val'
       rl.textContent = `${camRatio.toFixed(2)} · ${aspectLabel(c.span.h, c.span.v)}`
       ratioRow.appendChild(rl)
-      ratioRow.appendChild(this.btn('MATCH SLICE', () => {
-        this.pm.surfaces.snapshot()
-        // keep SPAN H (the wall's angular width) and reshape SPAN V so the
-        // frustum ratio equals the slice ratio — no stretched pixels
-        c.span.v = Math.max(4, Math.min(179, Math.round(c.span.h / Math.max(0.05, sliceRatio))))
-        this.pm.surfaces.emit()
-      }, 'pm-btn-sm'))
+      if (!hasWallRatio) {
+        const sliceRatio = rect.width / Math.max(1, rect.height)
+        ratioRow.appendChild(this.btn('MATCH SLICE', () => {
+          this.pm.surfaces.snapshot()
+          // keep SPAN H (the wall's angular width) and reshape SPAN V so the
+          // frustum ratio equals the slice ratio — no stretched pixels
+          c.span.v = Math.max(4, Math.min(179, Math.round(c.span.h / Math.max(0.05, sliceRatio))))
+          this.pm.applySpanEdit(s)
+          this.pm.surfaces.emit()
+        }, 'pm-btn-sm'))
+      }
       this.propsEl.appendChild(ratioRow)
-      this.propsEl.appendChild(this.hint('Frustum edges derive from these world angles — adjacent walls tile with no gaps or duplicated content. MATCH SLICE reshapes SPAN V so the camera ratio equals the slice ratio.'))
+
+      // wall-edge snapping — span edits re-aim the whole ring so seams never break
+      const snapChk = document.createElement('div')
+      snapChk.className = 'pm-row'
+      snapChk.appendChild(this.check('Snap wall edges (seamless ring)', this.pm.snapWalls, (on) => {
+        this.pm.setSnapWalls(on)
+        if (on) { this.pm.glueWalls(s); this.pm.surfaces.emit() }
+      }))
+      this.propsEl.appendChild(snapChk)
+
+      this.propsEl.appendChild(this.hint('WALL RATIO declares the real surface shape (H:V) — the camera width and the slice refit automatically while neighbours re-aim to keep every edge menyatu. SPAN V is the shared wall height; SPAN H follows from the ratio.'))
     } else {
       this.propsEl.appendChild(this.sliderRow('FOV', c.fov, 10, 130, 1, (v) => { c.fov = v; this.lightCam(s) }))
       const lockRow = document.createElement('div')
@@ -1144,7 +1191,7 @@ export class ProjectionEditorUI {
     return wrap
   }
 
-  private sliderRow(label: string, value: number, min: number, max: number, step: number, cb: (v: number) => void): HTMLElement {
+  private sliderRow(label: string, value: number, min: number, max: number, step: number, cb: (v: number) => void, disabled = false): HTMLElement {
     const row = document.createElement('div')
     row.className = 'pm-slider-row'
     const span = document.createElement('span')
@@ -1156,6 +1203,8 @@ export class ProjectionEditorUI {
     input.max = String(max)
     input.step = String(step)
     input.value = String(value)
+    input.disabled = disabled
+    if (disabled) input.title = 'derived from WALL RATIO — change the ratio or pick FREE'
     const val = document.createElement('span')
     val.className = 'pm-slider-val'
     val.textContent = formatVal(value)
@@ -1252,6 +1301,11 @@ export class ProjectionEditorUI {
 
 function formatVal(v: number): string {
   return Math.abs(v) >= 10 ? String(Math.round(v)) : String(Math.round(v * 100) / 100)
+}
+
+/** compact number for ratio labels — 1 → "1", 1.5 → "1.5", 1.3333 → "1.33" */
+function trimNum(v: number): string {
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100)
 }
 
 /** readable W:H label — 1920×1080 → "16:9", 3840×1080 → "32:9", odd sizes → "1.78:1" */

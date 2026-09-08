@@ -498,6 +498,23 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       calibrate: (pattern: string) => projection.setCalibrationAll(pattern as never),
       scale: (n: number) => projection.setRenderScale(n),
       quality: (q: string) => { projection.setQuality(q as never); return projection.qualityLabel() },
+      /** QA: declare a surface's real wall ratio (W:H) — null frees it */
+      wallRatio: (name: string, w: number | null, h?: number) => {
+        const s = projection.surfaces.surfaces.find((x) => x.name.toLowerCase() === String(name).toLowerCase())
+        if (!s) return false
+        projection.setWallRatio(s, w && h ? { w, h } : null)
+        return true
+      },
+      /** QA: worst seam gap (deg) in the wall ring — 0 = every edge closed */
+      seamAudit: (name?: string) => projection.qaSeamAudit(name),
+      snapWalls: (on?: boolean) => {
+        if (on !== undefined) projection.setSnapWalls(!!on)
+        return projection.snapWalls
+      },
+      vibrance: (v?: number) => {
+        if (v !== undefined) projection.setVibrance(v)
+        return projection.output.vibrance
+      },
       autoSample: (cost: number) => { projection.qaAutoTick(cost); return projection.qualityLabel() },
       publish: (name: string) => projection.publishSession(String(name)),
       sessions: () => projection.listSessions(),

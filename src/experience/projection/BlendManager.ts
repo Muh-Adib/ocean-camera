@@ -24,6 +24,7 @@ uniform vec4 uFeather;        // left, right, top, bottom (uv fraction)
 uniform float uOpacity;
 uniform float uBrightness;
 uniform float uGamma;
+uniform float uVibrance;      // 1 = untouched · >1 saturates the wall picture
 uniform int uMode;            // 0 normal, 1 add, 2 screen
 varying vec2 vUv;
 
@@ -31,6 +32,9 @@ void main() {
   vec3 sceneC = texture2D(uMap, vUv).rgb;
   sceneC *= uBrightness;
   sceneC = pow(max(sceneC, vec3(0.0)), vec3(1.0 / max(uGamma, 0.05)));
+  // vibrance: luma-preserving saturation — the reef pops without clipping
+  float luma = dot(sceneC, vec3(0.2126, 0.7152, 0.0722));
+  sceneC = mix(vec3(luma), sceneC, max(uVibrance, 0.0));
   vec3 calibC = texture2D(uCalib, vUv).rgb;
   vec3 c = mix(sceneC, calibC, uCalibMix);
 
@@ -51,6 +55,10 @@ void main() {
 }`
 
 export class BlendManager {
+  /** composite saturation — projector walls read duller than screens, so the
+   *  default nudges the picture livelier; the studio slider tunes it live */
+  vibrance = 1.18
+
   makeMaterial(map: THREE.Texture, calib: THREE.Texture): THREE.ShaderMaterial {
     const mat = new THREE.ShaderMaterial({
       vertexShader: VERT,
@@ -63,6 +71,7 @@ export class BlendManager {
         uOpacity: { value: 1 },
         uBrightness: { value: 1 },
         uGamma: { value: 1 },
+        uVibrance: { value: this.vibrance },
         uMode: { value: 0 },
       },
       transparent: true,
@@ -78,6 +87,7 @@ export class BlendManager {
     const u = mat.uniforms
     u.uCalib.value = calibTex
     u.uCalibMix.value = s.calibration === 'off' ? 0 : 1
+    u.uVibrance.value = this.vibrance
     const f = s.blend.feather
     ;(u.uFeather.value as THREE.Vector4).set(f.left, f.right, f.top, f.bottom)
     u.uOpacity.value = s.blend.opacity

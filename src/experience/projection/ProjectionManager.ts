@@ -23,6 +23,7 @@ import { RemoteRig } from '../remote/RemoteRig'
 import { ScreenLink, type HandFrame } from '../remote/RemoteLink'
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
+import { deriveSpanH, fitSliceToRatio, glueWalls, seamAudit } from './SpanChain'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
@@ -61,7 +62,15 @@ export class ProjectionManager {
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
   showFrustums = true
 
-  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced' }
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced', vibrance: 1.18 }
+
+  /**
+   * Wall-edge snapping — when a span-locked camera changes (span, ratio,
+   * yaw, pitch), every other wall sharing its eye point is re-aimed so
+   * neighbouring frustum edges keep meeting EXACTLY. This is what keeps
+   * the picture seamless across differently-shaped walls.
+   */
+  snapWalls = true
 
   readonly surfaces = new SurfaceManager()
   private cameras: CameraManager
@@ -126,11 +135,18 @@ export class ProjectionManager {
     this.project = new ProjectManager({
       surfaces: this.surfaces,
       output: this.output,
-      setOutput: (o) => { Object.assign(this.output, o); this.ui?.refreshAll() },
+      setOutput: (o) => {
+        Object.assign(this.output, o)
+        this.blend.vibrance = this.output.vibrance ?? 1.18
+        this.ui?.refreshAll()
+      },
       // live getter — a snapshot value would go stale the moment the host changes
       get qrHost() { return self.qrHost },
       setQrHost: (h) => { self.setQrHost(h, { silent: true }) },
+      get snapWalls() { return self.snapWalls },
+      setSnapWalls: (on) => { self.snapWalls = on },
     })
+    this.blend.vibrance = this.output.vibrance ?? 1.18
     // studio side: every persisted save is also pushed to /output tabs live
     if (deps.outputOnly) this.outputOnly = true
     else {
@@ -892,6 +908,70 @@ export class ProjectionManager {
     this.ui?.refreshAll()
   }
 
+  // ------------------------------------------------------------ wall ratio & edge snap
+  /**
+   * Declare a surface's REAL proportions (W:H, e.g. 1:1, 4:3, 2:3).
+   * The camera's horizontal span re-derives from the vertical span and
+   * the ratio, the output slice refits so the picture is never
+   * stretched, and — with snap on — the neighbouring walls re-aim so
+   * every shared edge stays joined (no patah, no stolen view).
+   * Pass null to release the ratio (FREE hand-tuned spans again).
+   */
+  setWallRatio(s: ProjectionSurface, ratio: { w: number; h: number } | null) {
+    this.surfaces.snapshot()
+    const span = s.camera.span
+    if (!span) return
+    if (ratio) {
+      span.ratioW = Math.min(64, Math.max(0.05, ratio.w))
+      span.ratioH = Math.min(64, Math.max(0.05, ratio.h))
+      fitSliceToRatio(s, span.ratioW / span.ratioH)
+    } else {
+      delete span.ratioW
+      delete span.ratioH
+    }
+    deriveSpanH(s.camera)
+    this.glueWalls(s)
+    this.surfaces.emit()
+  }
+
+  /** live camera-span edit (slider / number drag): derive + re-aim + light update */
+  applySpanEdit(s: ProjectionSurface) {
+    deriveSpanH(s.camera)
+    this.glueWalls(s)
+    this.surfaces.touch(s)
+  }
+
+  /** re-aim the wall ring around this surface so shared edges meet exactly */
+  glueWalls(anchor: ProjectionSurface): number {
+    if (!this.snapWalls) return 0
+    return glueWalls(this.surfaces.surfaces, anchor.id)
+  }
+
+  /** studio setting: snap wall edges on span edits (persisted per project) */
+  setSnapWalls(on: boolean) {
+    this.snapWalls = on
+    this.broadcastSoon()
+    this.scheduleAutosave()
+    this.ui?.refreshAll()
+  }
+
+  /** composite saturation of the projected picture (0.5 .. 1.8) */
+  setVibrance(v: number) {
+    this.output.vibrance = Math.min(1.8, Math.max(0.5, Number.isFinite(v) ? v : 1.18))
+    this.blend.vibrance = this.output.vibrance
+    this.broadcastSoon()
+    this.scheduleAutosave()
+    this.ui?.refreshAll()
+  }
+
+  /** QA: worst seam gap (deg) around a surface — 0 means every joint is closed */
+  qaSeamAudit(name?: string) {
+    const s = name
+      ? this.surfaces.surfaces.find((x) => x.name.toLowerCase() === name.toLowerCase())
+      : this.surfaces.selected
+    return s ? seamAudit(this.surfaces.surfaces, s.id) : null
+  }
+
   setRenderScale(scale: number) {
     this.output.renderScale = Math.min(1, Math.max(0.1, scale))
     // a manual scale leaves the named profiles (AUTO keeps tuning on its own)
@@ -1149,10 +1229,11 @@ export class ProjectionManager {
       surfaces: this.surfaces.surfaces.map((s) => ({
         id: s.id, name: s.name, enabled: s.enabled, locked: s.locked,
         output: { ...s.output }, calibration: s.calibration,
-        camera: { ...s.camera }, corners: s.warp.corners,
+        camera: { ...s.camera, span: { ...s.camera.span } }, corners: s.warp.corners,
       })),
       selected: this.surfaces.selected?.name ?? null,
       output: { ...this.output },
+      snapWalls: this.snapWalls,
       quality: this.qualityLabel(),
       frameCostMs: Math.round(this.frameCost * 10) / 10,
       rtPerSurface: this.surfaces.surfaces

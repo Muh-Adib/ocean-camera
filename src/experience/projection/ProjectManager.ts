@@ -19,6 +19,9 @@ export interface ProjectHost {
   /** which surface carries the phone QR ('auto' = largest enabled) */
   qrHost: string
   setQrHost(host: string): void
+  /** wall-edge snapping (span edits re-aim neighbours) — live getter */
+  snapWalls: boolean
+  setSnapWalls(on: boolean): void
 }
 
 /** one published output session — a full project snapshot under a stable id */
@@ -194,6 +197,7 @@ export class ProjectManager {
       output: { ...this.host.output },
       surfaces: this.host.surfaces.serialize(),
       qr: { host: this.host.qrHost },
+      snapWalls: this.host.snapWalls,
     }
   }
 
@@ -219,11 +223,14 @@ export class ProjectManager {
       height: clampNum(out.height, 1080, 240, 8640),
       renderScale: clampNum(out.renderScale, 0.6, 0.1, 1),
       quality,
+      vibrance: clampNum(out.vibrance, 1.18, 0.5, 1.8),
     })
     this.host.surfaces.replaceAll(surfaces)
     // QR host setting — 'auto' or a surface id (fall back to auto when stale)
     const qh = typeof p.qr?.host === 'string' ? p.qr.host : 'auto'
     this.host.setQrHost(qh === 'auto' || surfaces.some((s) => s.id === qh) ? qh : 'auto')
+    // wall-edge snapping — absent flag on old projects means the default (on)
+    this.host.setSnapWalls(p.snapWalls !== false)
     return true
   }
 
@@ -325,6 +332,16 @@ function sanitizeSurface(raw: unknown): ProjectionSurface | null {
         h: clampNum((cam.span as { h?: unknown } | undefined)?.h, 60, 4, 359),
         v: clampNum((cam.span as { v?: unknown } | undefined)?.v, 60, 4, 179),
         lock: (cam.span as { lock?: unknown } | undefined)?.lock === true,
+        // real wall proportions — kept when both parts are sane positive numbers
+        ...(typeof (cam.span as { ratioW?: unknown })?.ratioW === 'number' &&
+          typeof (cam.span as { ratioH?: unknown })?.ratioH === 'number' &&
+          (cam.span as { ratioW: number }).ratioW > 0 &&
+          (cam.span as { ratioH: number }).ratioH > 0
+          ? {
+              ratioW: clampNum((cam.span as { ratioW: number }).ratioW, 1, 0.05, 64),
+              ratioH: clampNum((cam.span as { ratioH: number }).ratioH, 1, 0.05, 64),
+            }
+          : {}),
       },
     },
     warp: {

@@ -74,6 +74,21 @@ export function gridIndex(res: number, i: number, j: number): number {
   return j * (res + 1) + i
 }
 
+/**
+ * Horizontal angular span (degrees) that matches a surface whose real
+ * proportions are `ratio` (width / height) while covering `vDeg` of
+ * vertical angle: tan(h/2) = ratio · tan(v/2). This is the camera
+ * width auto-fit behind the WALL RATIO control — a 4:3 wall at 40°
+ * tall gets exactly the horizontal angle a real 4:3 surface needs,
+ * and because every wall derives from its own ratio the picture is
+ * never stretched.
+ */
+export function spanHFromRatio(vDeg: number, ratio: number): number {
+  const r = Math.min(64, Math.max(0.05, Number.isFinite(ratio) ? ratio : 1))
+  const v = Math.min(179, Math.max(4, vDeg))
+  return (2 * Math.atan(r * Math.tan((v * Math.PI) / 360)) * 180) / Math.PI
+}
+
 /** Rebuild the whole mesh grid so it follows the 4 corners projectively */
 export function gridFromCorners(corners: WarpCorners, res: number): Vec2[] {
   const H = homographyFromQuad(corners)
