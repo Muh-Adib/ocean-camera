@@ -12,9 +12,13 @@ import * as THREE from 'three'
 import { clamp } from '../utils/math'
 
 export interface SwimBounds {
-  x: number                 // ±x reach
-  minZ: number
-  maxZ: number
+  x?: number                // ±x reach (legacy box bounds)
+  minZ?: number
+  maxZ?: number
+  /** circular arena bounds — preferred for the 360° reef */
+  radius?: number
+  centerX?: number
+  centerZ?: number
   maxY: number              // ceiling (just below the surface)
   floorPad: number          // metres above the seabed the swimmer floats
 }
@@ -157,8 +161,29 @@ export class SwimController {
     this.position.addScaledVector(this.vel, dt)
 
     // --- soft bounds: reef floor, surface ceiling, world edge ---
-    this.position.x = clamp(this.position.x, -this.bounds.x, this.bounds.x)
-    this.position.z = clamp(this.position.z, this.bounds.minZ, this.bounds.maxZ)
+    if (this.bounds.radius !== undefined) {
+      // circular arena: keep the swimmer inside the reef ring
+      const cx = this.bounds.centerX ?? 0
+      const cz = this.bounds.centerZ ?? 0
+      const dx = this.position.x - cx
+      const dz = this.position.z - cz
+      const d = Math.hypot(dx, dz)
+      if (d > this.bounds.radius) {
+        const k = this.bounds.radius / d
+        this.position.x = cx + dx * k
+        this.position.z = cz + dz * k
+        // slide along the rim instead of sticking to it
+        const nx = dx / d, nz = dz / d
+        const outward = this.vel.x * nx + this.vel.z * nz
+        if (outward > 0) {
+          this.vel.x -= nx * outward
+          this.vel.z -= nz * outward
+        }
+      }
+    } else {
+      this.position.x = clamp(this.position.x, -this.bounds.x!, this.bounds.x!)
+      this.position.z = clamp(this.position.z, this.bounds.minZ!, this.bounds.maxZ!)
+    }
     const floor = this.floorAt(this.position.x, this.position.z) + this.bounds.floorPad
     if (this.position.y < floor) {
       this.position.y = floor

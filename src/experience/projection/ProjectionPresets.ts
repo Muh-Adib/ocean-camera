@@ -51,7 +51,9 @@ export const PRESETS: PresetDef[] = [
     build: (W, H) => [
       finish(createSurface({
         name: 'Main Screen',
-        output: rect(0.12, 0.10, 0.76, 0.80, W, H),
+        // full-bleed by default — the output picture IS the whole canvas;
+        // drag corners/numeric fields if the physical wall wants an inset
+        output: rect(0, 0, 1, 1, W, H),
         camera: cam(0, 0, 58, { h: 62, v: 40 }),
         gridResolution: RES,
       })),

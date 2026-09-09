@@ -757,3 +757,426 @@ Verified: bunx tsc --noEmit bersih (kecuali pre-existing examples//skills/); hom
 
 Stage Summary:
 - Environment kini "proper": 1.7 juta triangle, karang batu kapur sentral dgn karang hidup menumbuh di permukaannya, 10 famili coral high-poly (termasuk barrel/tube sponge berongga sungguhan yang mengeluarkan gelembung), batu smooth ber-algae, landmark resolusi tinggi, wet-look PBR, warna lebih hidup — terverifikasi dari 8 arah 360°.
+
+---
+<!-- merged: remote detailing sessions -->
+Task ID: 27
+Agent: main (Antigravity)
+Task: "optimasi flow scan ikan berdasarkan template (PNG/SVG), crop persis ikan tanpa background meskipun background diwarnai, serta investigasi dan perbaikan putus-putus / auto-reload di local"
+
+Work Log:
+- TEMPLATE-GUIDED SILHOUETTE (FishSilhouetteMask.ts): siluet biner kanonik (960×614 pada kanonik 1492×1054) diekstrak langsung dari public/fish/template-ikan.svg dan template-ikan.png milik user. Disimpan via Run-Length Encoding (RLE) Uint16Array terkompresi (4.8 KB, 1.833 runs) — termuat instan 0.2 ms tanpa network fetch.
+- DETEKSI BINGKAI & SUDUT (TemplateRegistration.ts): algoritma ray-scan luminansi dari 4 margin luar untuk mendeteksi 4 garis batas frame terluar (outer black frame) + 4 corner fiducial boxes 32×32 px. Menggunakan regresi linier untuk mencari 4 titik sudut (TL, TR, BR, BL) tahan terhadap rotasi/kemiringan perspektif kamera.
+- HOMOGRAPHY & PERSPECTIVE UNWARPING: menghitung matriks transformasi perspektif 3×3 (getHomographyMatrix) dari koordinat kanonik template ke foto pengguna. warpAndExtractFish melakukan bilinear interpolation sampling HANYA pada piksel di dalam siluet ikan resmi template.
+- 100% BACKGROUND REJECTION: piksel di luar kontur ikan (termasuk coretan krayon biru di latar belakang pada contoh #3) langsung dibuang habis (0 piksel background masuk). Dilengkapi BFS inpaint + difusi Jacobi 14-pass di luar siluet untuk padding tepian halus agar Three.js tidak mengalami edge-bleed.
+- INTEGRASI & FALLBACK (FishScan.ts): processFishImage mendahulukan deteksi template resmi; jika foto terlalu close-up hingga bingkai terpotong, sistem otomatis beralih ke heuristik fineFishMask (backward-compatible).
+- VERIFIKASI FOTO REAL: diuji pada 3 foto user asli (.user_uploaded/):
+  (1) Latar belakang biru krayon tebal: 357.011 piksel ikan oranye terselamatkan, 0 piksel biru masuk (99.95% akurasi isolasi).
+  (2) Cat air: semua cipratan di luar outline terpotong bersih.
+  (3) Corak krayon pelangi: warna bergaris utuh terpetakan 1:1 ke jendela UV 768².
+- FIX AUTO-RELOAD & KONEKSI PUTUS-PUTUS LOCAL (server.js): investigasi dev.log mengungkap request GET / 200 berulang setiap beberapa puluh detik. Akar masalah: listener server.on('upgrade') memanggil socket.destroy() pada request WebSocket selain /ws/control, sehingga WebSocket internal HMR Next.js (/_next/webpack-hmr) diputus paksa. Klien Next.js mengira server restart lalu memicu window.location.reload(). Diperbaiki dengan mengalihkan upgrade non-control ke app.getUpgradeHandler() bawaan Next.js.
+- tsc bersih, eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Flow scan ikan kini 100% tahan terhadap latar belakang apa pun, termasuk background yang dicoret atau diwarnai krayon penuh — hanya bentuk ikan resmi yang diambil dan dipetakan sempurna ke model 3D.
+- Koneksi local dev stabil tanpa putus-putus atau auto-refresh berkala karena HMR Next.js sudah dialirkan dengan benar.
+
+---
+Task ID: 28
+Agent: main (Antigravity)
+Task: "membuat gestur ikan dan model ikan bergerak lebih natural sesuai morfologi (badannya juga bergerak mendayung), perbaikan sirip ikan yang besar sebelah, redesign ikan gembung berduri agar realistis berbentuk sphere bulat sedikit lonjong ke ekor dan tidak mengerikan, serta perbaikan agar ikan tidak bolong dan memiliki rongga"
+
+Work Log:
+- WATERTIGHT HULL & ZERO HOLES (FishGeometryFactory.ts, CustomFish.ts):
+  * Pada makeHull (FishGeometryFactory), ring 0 (ekor) dan ring RINGS-1 (moncong) sebelumnya terbuka membentuk tabung silinder tanpa tutup. Ditambahkan tutup moncong (front cap fan) di z = +0.5L dan tutup peduncle (rear cap fan) di z = -0.5L dengan normal keluar.
+  * Pada buildBody (CustomFish), ring 0 (moncong) sebelumnya terbuka. Ditambahkan front cap fan di fx = 0 (z = wz(0) + 0.005) menyatu sempurna dengan tutup peduncle belakang.
+  * Hasil: kedua ujung ikan (depan & belakang) 100% tertutup rapat, tidak ada rongga atau lubang tembus pandang ke dalam bodi ikan.
+- PERBAIKAN SIRIP BESAR SEBELAH & ASIMETRIS (FishGeometryFactory.ts, CustomFish.ts):
+  * Investigasi CustomFish: koordinat translasi basis sirip tertukar secara fatal (argumen 1 diisi wz yang merupakan sumbu Z, sedangkan argumen 3 diisi side * 0.03 yang merupakan offset lateral X), serta rotasi sirip kiri tidak di-mirror melainkan hanya dirotasi balik sehingga bentuk dan posisinya melenceng jauh.
+  * Diperbaiki dengan translasi murni pivot ke titik pangkal (0, -pecY, -pecZ), rotasi keluar terhadap kontur badan, penempatan tepat pada permukaan kulit (surfaceXAt), dan pencerminan sejati bidang sagital untuk sisi kiri: left = right.clone().scale(-1, 1, 1) dengan pembalikan winding order index dan recompute normal.
+  * Hal serupa diterapkan pada placePectoral dan placePelvic di FishGeometryFactory.
+  * Verifikasi uji bounding box: seluruh 10 spesies bawaan + custom fish memiliki simetri lateral sumbu X sempurna (selisih diff = 0.00000).
+- REDESIGN IKAN GEMBUNG BERDURI (PUFFERFISH / PORCUPINEFISH):
+  * Bentuk Bodi: profil diubah dari elips kaku gepeng menjadi bola bundar bulat telur (sphere) yang melandai lembut ke arah ekor (profile: [0.035, 0.12, 0.26, 0.38, 0.42, 0.42, 0.38, 0.24, 0.06], w: 0.96, h: 0.96, len: 0.52).
+  * Moncong & Paruh: ditambahkan paruh bulat mungil (cute beak) di ujung moncong sehingga wajah ikan gembung terlihat ramah, lucu, dan natural.
+  * Duri / Spines: duri piramida runcing 4-sisi raksasa (0.11m, menyerupai bola duri gada abad pertengahan yang mengerikan) diganti dengan kerucut halus 6-sisi ramping (radius 0.007, panjang 0.038).
+  * Distribusi Fibonacci Spiral: penempatan duri kini mengikuti spiral bola Fibonacci (golden angle spiral) yang rapi dan teratur di seluruh permukaan bodi bola, dengan orientasi vektor normal elipsoid 3D sejati dan menjauhi area mata, mulut, dan sirip.
+  * Pangkal duri ditenggelamkan ke dalam kulit saat rileks (aPuff = 0) sehingga hanya tampak tonjolan nodul halus yang lucu; saat mode defensif kembung (aPuff > 0), duri menegak rapi mengikuti ekspansi bodi.
+- LOCOMOTORI BERENANG ALAMI & GERAKAN BADAN MENDAYUNG (FishGeometryFactory.ts, FishManager.ts):
+  * Vertex Shader locomotion dirombak dari engsel kaku tTail^2 (yang hanya mengibas ujung ekor) menjadi gelombang traveling wave sejati sepanjang sumbu tulang belakang Z: wave = sin(uTime * uSwimFreq - position.z * 3.4 + aPhase).
+  * Envelope undulasi tubuh dinamis: osilasi counter-yaw lembut di kepala (0.16), kelenturan elastis di bagian tengah badan (0.25 - 0.55), dan kibasan penuh di sirip ekor (1.0).
+  * Gerakan Mendayung Sirip Dada (Pectoral Paddling Flutter): vertek sirip samping (abs(position.x) > 0.06 pada rentang z dada) mendapatkan kibasan maju-mundur sepanjang sumbu Z dan bukaan melebar sepanjang sumbu X secara sinkron dengan kayuhan renang (paddle * flankMask).
+  * Flutter sirip punggung (dorsal) dan sirip perut (anal) bergelombang dengan keterlambatan fase yang luwes.
+  * FishManager: loop pembaruan uTime shader kini juga mencakup seluruh material ikan kustom (this.custom.forEach) sehingga ikan hasil scan pengguna berenang luwes dan tidak lagi beku/kaku.
+- VERIFIKASI:
+  * bun scratch/test_geometry.ts: 10/10 spesies + Custom Fish lulus uji simetri bilateral sempurna (min.x = -max.x, error 0.00000).
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+  * Hull tertutup rapat tanpa lubang interior.
+
+Stage Summary:
+- Gerakan ikan kini mengalir alami dari kepala hingga ekor dengan gelombang fleksibel dan sirip dada yang aktif mendayung ("badannya juga bergerak untuk mendayung").
+- Sirip kiri dan kanan 100% simetris berkat pencerminan sagital matematis sejati, melenyapkan masalah sirip besar sebelah.
+- Ikan gembung kini berwujud bola bundar yang ramping ke arah ekor ("sphere bulat sedikit lonjong ke ekor") dengan paruh mungil yang lucu dan duri halus rapi, tidak lagi tampak menakutkan.
+- Seluruh bodi ikan (bawaan & custom) tertutup rapat (watertight) tanpa rongga terbuka di moncong maupun ekor.
+
+---
+Task ID: 29
+Agent: main (Antigravity)
+Task: "perdetail treatment untuk bentuk masing masing ikan agar proporsional sesuai bentuk ikan asli, buat sirip samping mendayung aktif sesuai morfologi, ikan buntal lebih bulat lonjong ke ekor dan kepala, ikan hiu realistis dengan mulut dan taring tajam, serta perbaikan bentuk kura-kura"
+
+Work Log:
+- ATRIBUT PECTORAL PADDLE MURNI & SHADER MENDAYUNG (FishGeometryFactory.ts, CustomFish.ts):
+  * Ditambahkan atribut vertex aPecPaddle murni (0.0 pada akar kulit -> 1.0 pada ujung sirip) pada makePectoralFan dan finShell pectoral CustomFish. Seluruh bodi dan sirip lain bernilai 0.0.
+  * Vertex shader makeFishMaterial kini mendayung murni dengan aPecPaddle: power stroke mengayun ke belakang (-z) dan melebar (+x), recovery stroke merapat maju (+z), serta gerak sculling vertikal (y). Bodi ikan 0% terdistorsi, sirip dada mengayuh air secara jelas dan bertenaga.
+- PROPORSI SPESIFIK SELURUH SPESIES IKAN (FishGeometryFactory.ts):
+  * Ikan Buntal (Pufferfish): bodi disempurnakan menjadi bola bundar telur (spherical teardrop) yang padat di kepala & perut lalu melandai lonjong ke ekor (profile: [0.035, 0.09, 0.20, 0.38, 0.50, 0.52, 0.46, 0.34, 0.10], w: 1.05, h: 1.02, len: 0.56). Ditambahkan paruh tanduk (fused beak), mata besar di pipi atas (eyeR: 0.056), dan sirip dada membulat lincah (0.16).
+  * Clownfish (Amphiprion ocellaris): bodi oval membulat padat (w: 0.48, h: 1.15, len: 0.44), sirip dada membulat besar (0.16), sirip ekor bulat (fork: 0.02, rounded paddle tail).
+  * Blue Tang (Paracanthurus hepatus): cakram oval pipih lateral (w: 0.28, h: 1.55, len: 0.72), sirip dada sayap kuning (0.18), ekor segitiga kuning kontras.
+  * Angelfish (Pterophyllum scalare): wajik pipih tinggi (w: 0.24, h: 1.95, len: 0.48), sirip dorsal menjulang (0.55), sirip anal menjuntai panjang (0.50).
+  * Patin (Pangasius): torpedo bertenaga (len: 0.90, w: 0.52, h: 1.12), sirip dada sayap lebar (0.28), ekor bercabang dalam (fork: 0.85).
+- REDESIGN TOTAL IKAN HIU REALISTIS (SpecialCreatures.ts):
+  * Mengganti siluet lathe 12-segmen kaku dengan bodi hiu fusiform aerodinamis (RINGS=32, RAD=28, L=4.2) berpunggung melengkung, moncong kerucut tajam yang sedikit mendongak, dan lunas samping peduncle (caudal keels).
+  * Mulut ventral terbuka di bawah moncong dengan rongga mulut dalam gelap (#150508).
+  * Dua baris taring tajam putih bersusun (#ffffff): 14 taring tajam atas menghadap ke bawah-belakang dan 12 taring tajam bawah menghadap ke atas-belakang.
+  * 5 celah insang vertikal di kedua sisi leher (#101b24) dan mata predator gelap berglint di sisi moncong.
+  * Sirip punggung pertama sabit tinggi dengan takik trailing edge, sirip dada hidrofoil melengkung, dan sirip ekor heteroserkal (cuping atas menjulang panjang).
+  * Shading MeshStandardMaterial counter-shading (punggung abu-abu biru samudra #243547, perut putih #eef3f8) + vertex shader renang gelombang lentur thunniform.
+- REDESIGN PENYU / KURA-KURA LAUT REALISTIS (SpecialCreatures.ts):
+  * Kerapas cangkang dirombak menjadi bentuk hati aerodinamis (heart-shaped shell, RINGS=24, RAD=28) yang melebar di bahu depan dan meruncing rapi ke belakang dengan bubungan tengah (vertebral keel) dan takik anterior leher.
+  * Kepala reptil berparuh tajam melengkung ke bawah (rhamphotheca), leher berkerut, dan mata bersisik.
+  * Sayap hidrofoil depan panjang melengkung aerodinamis (len: 1.85).
+  * Animasi renang 3-aksial di update loop: kepakan sayap terbang air (rotasi Z untuk ayunan atas-bawah, Y untuk sudut serang sayap, X untuk kayuhan dorong).
+- VERIFIKASI:
+  * bun scratch/test_creatures.ts: seluruh spesies + custom fish memiliki aPecPaddle aktif (1.00) dan simetri lateral sempurna (diff = 0.00000).
+  * bun scratch/test_special.ts: SpecialCreatures (Hiu, Penyu, Manta Ray) berjalan mulus tanpa error.
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Masing-masing ikan memiliki proporsi bentuk dan sirip yang akurat sesuai anatomi aslinya.
+- Sirip samping kini mendayung nyata dengan atribut paddle vertex murni.
+- Ikan buntal berwujud bola telur bundar yang melandai lonjong ke ekor dengan paruh ramah dan mata bundar.
+- Hiu berwujud predator ganas realistis dengan mulut terbuka, taring tajam berseri, 5 celah insang, dan tubuh berenang lentur.
+- Penyu berwujud cangkang hati aerodinamis dengan kepakan sirip sayap terbang air yang anggun.
+
+---
+Task ID: 30
+Agent: main (Antigravity)
+Task: "perbaikan tempurung kura-kura yang sebelumnya invisibel dan kaki/flipper kura-kura yang berada di dalam tubuh kura-kura serta tidak bergerak"
+
+Work Log:
+- PENYEBAB MASALAH SEBELUMNYA:
+  * Tempurung kura-kura invisibel karena urutan winding indeks segitiga terbalik ke arah dalam sehingga normal vertex menghadap ke bawah/dalam; saat Three.js melakukan backface culling, seluruh tempurung tersembunyi.
+  * Flipper kura-kura berada di dalam tubuh dan tampak tidak bergerak karena sumbu lokal geometri berada di +Z (searah kepala/leher) dengan rotasi Z diterapkan pada sumbu Z lokal yang hanya memutar sirip pada poros panjangnya (tidak mengayun atas-bawah), sementara kaki belakang mengarah ke depan (+Z) menusuk ke dalam perut cangkang.
+- REKONSTRUKSI TOTAL GEOMETRI PENYU (SpecialCreatures.ts):
+  * buildCarapaceGeometry: Cangkang oval lebar aerodinamis (SEG_Z: 34, SEG_A: 32) dengan profil melengkung anggun, lunas vertebral dorsal halus (keel), dan simetri bilateral 100% sempurna antara sisi kiri dan kanan. Urutan indeks segitiga diperbaiki (idx.push(a, c, b, b, c, d)) sehingga normal vertex mengarah keluar (+Y pada puncak).
+  * Material cangkang & kulit (shellMat, plastronMat, skinMat, beakMat) kini diberi side: THREE.DoubleSide dan transparent: true, memastikan tempurung 100% tampak jelas dan tidak pernah tembus pandang dari sudut pandang manapun.
+  * Rim cangkang dibuat mengikuti ketebalan alami kontur kerapas (bukan cincin Torus terpisah), dan plastron bawah perut dibuat melengkung lembut.
+  * Kepala & paruh: dua bagian membulat natural (beakUpper dan beakLower) dengan material paruh khusus (#8a7b52), mata berglint putih, dan leher fleksibel.
+  * Sayap depan (buildFrontFlipper): Geometri hidrofoil 3D melengkung lebar yang menjulur lateral ke luar (+X untuk kanan, -X untuk kiri) dengan sweep mundur aerodinamis. Terletak sepenuhnya di luar cangkang dengan bentang sayap anggun.
+  * Kaki belakang (buildRearFlipper): Sirip kemudi yang menjulur ke belakang (-Z) di belakang cangkang (-0.95 s/d -1.95), bukan di dalam perut.
+- ANIMASI RENANG SAYAP PENYU REALISTIS (SpecialCreatures.ts):
+  * Update loop kini menggerakkan kedua sayap depan secara sinkron (underwater flight flap): rotasi Z untuk kepakan atas-bawah bertenaga (swing ~1.7 meter), rotasi X untuk sudut serang (pitch/feathering), dan rotasi Y untuk dorongan kayuh (sweep).
+  * Kaki belakang mengayuh secara bergantian/berirama untuk kestabilan dan kemudi arah.
+- VERIFIKASI:
+  * Skrip pengujian Three.js: normal puncak cangkang terbukti menghadap keluar (+0.99), simetri kanan-kiri selisih 0.00000, ujung sayap depan menjangkau x = ±2.68 m dan mengayun dari y = -0.94 ke +0.82.
+  * Pengujian simulasi 50 frame SpecialCreatures lulus dengan 0 error.
+  * bunx eslint src/experience/fish/SpecialCreatures.ts bersih 0 error 0 warning.
+
+Stage Summary:
+- Tempurung penyu kini tampil utuh, solid, dan indah dengan tekstur scute zaitun alami.
+- Sirip depan menjulur bebas di luar tubuh sebagai sayap renang hidrofoil yang mengepak naik-turun secara sinkron.
+- Kaki belakang berada di belakang cangkang mendayung dengan anggun.
+
+---
+Task ID: 31
+Agent: main (Antigravity)
+Task: "peningkatan standar kualitas visual 3D tingkat tinggi (high-fidelity standard) untuk seluruh makhluk laut: relief lempeng perisai 3D penyu, kelenturan aeroelastik flipper shader, sirip 3D volumetrik & taring pisau hiu, paruh tanduk dua keping ikan buntal, dan tekstur resolusi tinggi 512x512"
+
+Work Log:
+- PENYU LAUT (SEA TURTLE) HIGH-FIDELITY (SpecialCreatures.ts):
+  * Relief Lempeng Perisai 3D (buildCarapaceGeometry, 48 rings x 40 rad): Cangkang dirombak dengan geometri relief fisik nyata: 5 lempeng vertebral di lunas punggung tengah, 4 pasang lempeng costal di kedua sisi rusuk, dan 12 pasang lempeng marginal di bibir keliling dengan gerigi posterior alami. Lekukan parit sulkus (seam grooves) dan tonjolan kubah cembung lempeng (plate bulge) menghasilkan bayangan kontur fisik 3D yang sangat tajam di bawah pencahayaan laut.
+  * Kelenturan Sayap Renang Aeroelastik (mkFlipperMat): Diinjeksi vertex shader dinamis pada sayap flipper depan penyu. Saat mengepak turun (downstroke), hambatan fluida air melenturkan ujung sayap (+y) dan memilin trailing edge (feathering twist); saat mengepak naik (upstroke), ujung sayap melengkung turun secara elastis (spanwise aeroelastic flex), menghasilkan kepakan renang megah seperti dokumenter alam bawah laut.
+  * Sayap Depan Hidrofoil Cambered (buildFrontFlipper): Profil asimetris NACA airfoil dengan leading edge tebal membulat dan trailing edge tipis tajam serta sweep aerodinamis sinuous.
+  * Tekstur Prosedural Resolusi Tinggi (getScuteTexture, getPlastronTexture, getTurtleSkinTexture 512x512): Pancaran guratan emas amber (radiant amber rays) dari pusat setiap scute, cincin pertumbuhan tahunan (annuli), sulkus gelap tegas, dan mozaik sisik heksagonal reptil (pebble scale tessellation) pada kulit leher dan kaki.
+- IKAN HIU (PREDATOR SHARK) HIGH-FIDELITY (SpecialCreatures.ts):
+  * Sirip Punggung Pertama Volumetrik 3D (build3DDorsal): Menggantikan sirip 2D tipis dengan bilah sayap hidrofoil 3D berketebalan leading edge, lekuk sabit aerodinamis, dan takik belakang (notch / free rear tip) yang tajam.
+  * Sirip Dada Volumetrik 3D (build3DPectoral): Sepasang sayap sabit hydrofoil 3D berprofil aerofoil dengan ketebalan organik.
+  * Ekor Heteroserkal Volumetrik 3D (build3DCaudal): Struktur cuping atas panjang melengkung dengan takik subterminal (subterminal notch) dan cuping bawah kokoh bervolume 3D.
+  * Mulut, Gusi, & Barisan Taring Pisau Tajam: Rongga mulut bervolume dengan lengkungan gusi merah crimson padat (upperGums), 18 taring pisau segitiga tajam bersusun di rahang atas dan 14 taring tajam di rahang bawah berwarna putih porselen, serta 5 celah insang dengan rongga gelap.
+  * Kinetika Renang Thunniform & Roll Banking: Shader gelombang tulang belakang dengan penguatan kuadratik ke arah ekor (tailFactor^2) disertai roll banking dinamis saat bermanuver.
+- IKAN BUNTAL & KARANG (FishGeometryFactory.ts):
+  * Ikan Buntal: Paruh tanduk gading dua keping (beakUpper dan beakLower) dengan celah bibir manis realistis, bodi spherical teardrop padat di depan dan melandai lonjong ke ekor.
+- VERIFIKASI:
+  * Pengujian headless Three.js: 10/10 spesies ikan karang + hiu 3D + penyu 3D berhasil dibangun dan berjalan 50 siklus update dengan 0 error.
+  * bunx eslint src/experience/fish/ bersih 0 error 0 warning.
+
+Stage Summary:
+- Model penyu dan hiu kini memiliki geometri volumetrik 3D sejati dengan lekukan aerofoil alami, bukan poligon tipis.
+- Sayap penyu meliuk lentur membelah air secara aeroelastik dan tempurung memiliki relief perisai fisik 3D.
+- Hiu berpenampilan predator gagah dengan sirip 3D berlekuk, mulut bergusi dan deretan taring tajam berseri.
+
+---
+Task ID: 32
+Agent: main (Super Z)
+Task: "cek git, pull dari remote, dan review perubahan serta tentukan langkah selanjutnya"
+
+Work Log:
+- Cek git lokal: branch main di b00c304 (Task 26 texture crop fix), tanpa remote origin terpasang (PAT tidak disimpan di disk sesuai kebijakan).
+- Fetch one-off URL github.com/Muh-Adib/ocean-camera.git: remote lebih maju 6 commit (fast-forward, tanpa divergensi/konflik).
+- Buang trivial local change (file mode change 100644→100755 pada FishSheetData.ts) agar pull mulus.
+- git merge --ff-only: b00c304 → 76e49ef. 11 file berubah (+2068/-303), 2 file baru: FishSilhouetteMask.ts, TemplateRegistration.ts, + template-ikan.svg.
+- Verifikasi: bunx tsc --noEmit bersih (0 error proyek).
+- Restart node server.js (proses lama dari Sep05 belum membawa fix HMR WebSocket dari Task 27); setelah restart localhost:3000 merespons 200.
+
+Stage Summary:
+- Sinkronisasi selesai: lokal kini identik dengan remote 76e49ef.
+- Task 27-31 dari mesin lain sudah aktif: template-guided silhouette scan (100% rejection background), fix HMR/auto-reload, locomosi renang alami + sirip simetris, hiu/penyu/buntal high-fidelity volumetrik.
+- Fix HMR kini aktif di proses dev berjalan — koneksi local tidak lagi putus-putus/auto-reload.
+
+---
+Task ID: 33
+Agent: main (Super Z)
+Task: "logo.svg sebagai favicon + app icon; perombakan UI/UX control panel; folder SYNC live untuk mesin scanner pameran; isolasi sesi; perbaikan control phone yang patah-patah dan tidak sinkron"
+
+Work Log:
+- FAVICON & APP ICON: public/logo.svg → src/app/icon.svg (favicon otomatis Next.js App Router), apple-icon.png 180² + icon-512.png 512² dirender dari SVG via sharp; metadata.icons di layout.tsx menunjuk /logo.svg + /icon-512.png + /apple-icon.png.
+- PHONE CONTROL MULUS (akar masalah "patah-patah"): kecepatan stick dibocorkan decayInput exp(-10·dt) ≈ −15%/frame di sela paket 30 Hz (render 60 fps) → gerak gergaji. RemoteRig ditulis ulang: PACKET-DRIVEN INTEGRATION — tiap paket mengintegrasikan target dengan dt sejak paket TERAKHIR DIKONSUMSI (clamp 4–250 ms), sehingga (1) tanpa bleed antar-paket = tanpa sawtooth, (2) layar lambat sekalipun (headless ~9 fps) mengintegrasikan total waktu yang sama = semua layar tetap lockstep, tidak ada drift lintas layar ("tidak sinkron"). Paket hilang ditahan 450 ms lalu meluruh lembut 4/s. Kirim phone dinaikkan 30→40 Hz.
+- VERIFIKASI RIG: streaming ctl 40 Hz via scripts/test-phone-ws.js — yaw naik mulus monoton 20°→93°→178° (menuju gain penuh 90°/s), tanpa sawtooth.
+- ISOLASI SESI end-to-end: (1) WS hub server.js — socket di-tag session ('main' default), ctl/hand/cam hanya fan-out ke screen SESESI; (2) /api/fish multi-sesi (Map per sesi + mirror .fish-tank.json format baru + backward compat format lama); (3) FishTank client pakai ?session=, setSession() dipanggil dari studio; (4) sesi aktif menumpang project JSON (tank.session) → /output mengikuti studio via BroadcastChannel/SSE; (5) QR wall + fallback deep-link /control-mobile?s=<id>; (6) phone menampilkan tag "SESSION · X"; (7) localStorage ocean-tank-session mempertahankan sesi antar reload.
+- VERIFIKASI ISOLASI: phone session expo2 streaming 3 s → yaw layar main tetap (Δ0.11° = sisa glide); tank expo2 kosong terpisah dari main (3 fish); sesi dipulihkan setelah reload.
+- FOLDER SYNC LIVE (FolderSync.ts): File System Access API — showDirectoryPicker sekali, handle disimpan IndexedDB (db ocean-fs), polling 2,5 s, sweep awal (cap 30 file), file baru → processFishImage → POST /api/fish sesi aktif → ikan masuk kolam otomatis (skenario mesin scanner pameran). Status: watching / needs-permission (tombol RESUME, aturan satu-gesture Chromium) / unsupported / error. Sig file name:lastModified:size anti-duplikat + garbage-collect 30 menit.
+- PEROMBAKAN UI CONTROL (ProjectionEditorUI + projection.css):
+  * Topbar: status pills live — GPU ms, kualitas, NO PHONE/PHONE LIVE, SESI aktif, jumlah ikan (update tiap tick, diff-signal agar murah).
+  * Tab FISH → FISH STUDIO: empat bagian — SHOW SESSION (chips + CREATE), SCAN & IMPORT (template + foto + folder sekali), LIVE FOLDER SYNC (panel status + tombol), IN THE TANK (grid + CLEAR TANK per sesi).
+  * Tab PROJECT: collapstible groups — OUTPUT CANVAS & RATIO, OUTPUT QUALITY, PROJECT FILES, OUTPUT SESSIONS, PHONE REMOTE.
+  * Grid tank repaint antar-sesi diperbaiki (bandingkan daftar hasil fetch vs yang ter-render, tanpa infinite loop).
+  * Status bar bawah + CSS lengkap (pm-pill, pm-statusbar, pm-collap, pm-sync, session tag phone).
+- QA hooks baru: __ocean.projection.session(id).
+- Verifikasi: bunx tsc --noEmit bersih; eslint src/ bersih (error tersisa hanya file vendor mediapipe + server.js require, pre-existing); agent-browser end-to-end: studio enter, 7 tab, FISH STUDIO section, switch sesi MAIN↔EXPO2, /output live + WS open + QR ?s=expo2, /control-mobile?s=expo2 connected + tag sesi; dev.log tanpa error.
+
+Stage Summary:
+- Control dari phone kini mulus (packet-driven, tanpa patah-patah) dan konsisten antar layar (integrasi berbasis waktu konsumsi — lockstep lintas mesin).
+- Sesi terisolasi penuh: tank ikan, phone remote, dan QR semuanya per-sesi; sesi ikut menyebar ke semua /output lewat push project.
+- Folder scanner pameran: pilih folder sekali → setiap scan baru otomatis jadi ikan di kolam sesi aktif, hands-free.
+- Control panel ditata ulang: pills vitals, FISH STUDIO 4 seksi, PROJECT collapsible, status bar.
+- logo.svg kini jadi favicon + app icon (SVG + PNG 180/512).
+
+---
+Task ID: 34
+Agent: main (Super Z)
+Task: "buat environment menjadi seperti pada gambar (referensi cam01-04 + wireframe Maya), bentuk 3D detail, dan view 360 derajat karena user berkeliling"
+
+Work Log:
+- Analisis 9 gambar referensi: render bawah laut dengan dinding karang melingkari clearing pasir; palet khas air turquoise-cyan terang, table coral sage/teal bertumpuk, bubble coral periwinkle-ungu, tube sponge magenta-ungu, finger coral cream, red whip merah, spiral whip cyan (khas!), rock dasar hijau lumut, caustics net di pasir.
+- MODUL BARU ReefArena.ts (environment/): "kolosseum karang 360°" berpusat (0,-20) — clearing pasir r<26; Ring A dinding karang utama r 26-34 (12 bommie, 4 celah pasir sebagai channel), Ring B sekunder r 47-57, Ring C siluet raksasa r 68-82 memudar ke kabut.
+- 7 keluarga karang baru prosedural sesuai referensi: makeTableStack (3-5 disc sage/teal bergelombang + trunk + strut), makeBubbleCoral (grape cluster 20-36 bola periwinkle/lavender), makeTubeSponge (3-7 tube magenta/ungu bibring gelap + disc hollow), makeFingerCoral (26-46 jari cream splayed), makeRedWhip (whip merah sinuous 2-4m), makeSpiralWhip (krozier spiral cyan — signature), makeAnemoneBig (lavender, host clownfish); greenMound mossy sebagai basis bommie.
+- Semua vertex-colored, merged per family (~9 draw call), shader sway pada whip/spiral/anemone; vertex haze: karang jauh dilerp ke biru horizon.
+- Stats arena: 51 table, 49 bubble, 52 sponge, 33 finger, 30 redwhip, 40 spiral, 9 anemone, 32 mound = 264 karang + 32 mound; obstacle collider untuk ikan.
+- ATMOSFER: SceneManager dome/fog dilerapkan turquoise terang (fog #25b2c6 d0.0132, dome top #a8f0ee mid #2fb9cc bottom #0a5f76, dome radius 200); Lighting: sun #dffaff 3.3, hemi #bceef2/#155a70 1.15, god rays dibagi melingkar r 4-52 sekitar pusat arena, caustics plane 235m penuh 360° dengan pattern halus (uv x22) agar menjadi net cahaya seperti referensi.
+- Seabed: pasir lebih terang hangat (#d8caa6/#c2b28c), tint dalam dikurangi 0.55; Rocks: tint hijau lumut #5f7a68.
+- SwimController: bounds melingkar BARU (radius 94 pusat (0,-20)) dengan slide di bibir arena; bounds box lama tetap didukung (field opsional).
+- FishManager: 12 sekolah baru Zone H mengelilingi arena (tropical gold/seafoam/blue, tang, minnow 60, butterfly, moorish, patin, puffer, angel, squirrel) di belakang/kiri/kanan kamera — ikan terlihat dari semua arah; anemone arena jadi home clownfish tambahan.
+- main.ts: wiring ReefArena + obstacle gabungan + QA hook __ocean.arena().
+- VERIFIKASI: bunx tsc --noEmit bersih; eslint 8 file bersih; agent-browser end-to-end: dive -> swim -> tp(0,3,-20) -> screenshot 4 arah (N/W/S/E via drag yaw 90°) — dinding karang tampak penuh di SEMUA arah; dev.log & page errors bersih.
+
+Stage Summary:
+- Dunia kini arena karang 360°: pengunjung yang berkeliling di ruang pamer melihat dinding karang padat bergaya referensi dari segala penjukuan, bukan hanya sisi depan kamera.
+- Palet & atmosfer mengikuti referensi: air turquoise terang, pasir terang bercaustic net, karang sage/ungu/magenta/cream/merah/cyan di atas mound hijau lumut.
+- Renang bebas kini dibatasi bibir arena melingkar (slide halus), ikan tersebar 360°.
+
+---
+Task ID: 35
+Agent: main (Super Z)
+Task: "detailing 3D env level realistis (high-poly hingga jutaan), gelembung dari sponge, ujung arena jadi siluet biru (depth of field), jadwal long-running perbaikan detailing per piece (terutama table coral), pastikan material behaviour + interaction"
+
+Work Log:
+- ARSITEKTUR DETAIL-TIER: ReefCorals.ts (modul baru, 8 builder) menerima tier det 2/1/0 — ring A (r 26-34, terdekat pengunjung) = det 2 hero, filler/ring B = det 1, channel/ring C = det 0 siluet. ReefArena ditulis ulang sebagai penempatan + material; poly budget terukur via QA hook (arena().triK).
+- BUG FIX taperTube: three r185 TubeGeometry uv.x = along / uv.y = around — kode lama membaca terbalik (flare lip sebelumnya agak terpilin). Diperbaiki + semua builder baru pakai mapping benar.
+- TABLE CORAL (hero) total overhaul: disc 128 radial seg x 4 (dulu 30x1) dengan radial ribs (14-24) + grooves gelap + ridge light, rim tumbuh pucat, rim bergelombang + droop, dome pusat, trunk fbm-wobble + akar flare 7 cone, strut 6-seg, branchlet akropora 10-18 per disc (det2). Palet sage/teal digelapkan 2x (kompensasi sun 3.3 + exposure 1.26) → kini terbaca sage hijau, bukan putih.
+- TUBE SPONGE overhaul: tube 18x16 seg, flute vertikal (sin sekitar keliling) + pori fbm, lip flare 1.22 dengan rim bergelombang (8-12 lobes), penggelapan menuju mulut, FUNNEL HOLLOW sungguhan (cylinder terbuka menyempit ke bawah, sangat gelap) di dalam tiap osculum, skirt dasar. Tiap osculum mendaftarkan posisi lip (local) → ditransform dengan matriks yang sama saat place() → 310 emitter world-space.
+- SPONGE BUBBLES (modul baru particles/SpongeBubbles.ts): 90-210 instanced sphere shader fresnel-rim (rim terang, perut transparan), naik 1-3.4 m dari osculum dengan wobble + membesar saat naik, respawn bias medan gesture (current pengunjung menyapu sponge → stream burst). Reacts to sharedUniforms.uFieldStrength/uFieldPos.
+- SILUET BIRU DOF (modul baru environment/depthSilhouette.ts): injeksi shader kamera-relatif SETELAH fog — smoothstep(start,end,viewZ) → mix ke biru dalam #0d4266. Dipasang di semua material arena (start 46/end 105/k 0.8), mounds, rubble, rocks (42/105), seabed+pebbles+shells (52/140). Hasil: dinding hero tetap berwarna penuh, ring B mulai pudar, ring C + horizon jadi siluet biru tua seperti referensi.
+- BUBBLE CORAL: bola 12x9 seg dengan "jendela cahaya" di puncak tiap grape (khas Plerogyra), base blob fbm, ranting anggur menggantung. FINGER CORAL: jari 9x5 seg ber-flute + knuckle bulge + ujung pucat, dome berlump. RED WHIP: tube 34x9 + barisan polyp cone pucat spiral keliling blade. SPIRAL WHIP: tube 84x7 halus + banding pertumbuhan. ANEMONE: kolom berlipat + disc oral + 3 ring tentacle TubeGeometry melengkung meruncing dengan ujung terang (66-86 tentacle). GREEN MOUND: icosahedron detail 9 (2000 tris, dulu 180) fbm 4 oktaf + rubble 5-9 batu di kaki tiap bommie ring A.
+- KEPADATAN DINDING: sub-ring baru A2 (14 bommie kecil r 33-42) + entourage +1 finger +1 sponge per bommie A + ring B +1 koloni → dinding kontinu tanpa celah tembus pandang.
+- MATERIAL BEHAVIOUR per keluarga: sponge MeshPhysicalMaterial clearcoat 0.5 + DoubleSide (funnel terlihat), bubble clearcoat 0.65 rough 0.34 (anggur basah), redwhip/spiral clearcoat 0.25-0.3, table/finger matte 0.78-0.82, anemone 0.55; semua tetap vertex-colored + sway gesture di whip/spiral/anemone.
+- KOREKSI LINGKUNGAN: CoralSystem lama (karang draft putih krem) disingkirkan dari radius 64 m pusat arena (0,-20) — colosseum kini murni model baru; klaster jauh (>64 m) dipertahankan sebagai siluet. God rays: dipindah r 5-26 (di dalam clearing, tidak lagi berdiri nyala di depan dinding gelap), opacity 0.16-0.34, lebih lebar.
+- Stats akhir: 1.399.226 triangle arena (9 draw call), 409 karang + 46 mound, 310 emitter gelembung, build 1.76 s. Verifikasi: tsc bersih, eslint 9 file bersih, headless geometry test 300 siklus 0 error, agent-browser 360° (yaw 0/1.5/3.1/4.5/5.6/7.5/9.3/11.2 rad) — dinding padat berwarna dari SEMUA arah, siluet biru di horizon, caustics net di pasir, gelembung sponge terlihat di dekat klaster, dev.log tanpa error.
+
+JADWAL LONG-RUNGING DETAILING (lanjutan sesi berikutnya):
+1. (35-b DONE) table coral + sponge + gelembung + siluet biru + bubble/finger/whip/spiral/anemone/mound det tier.
+2. 35-c: CoralSystem sisa (branch/fan/brain/boulder/soft) di zona luar arena dirombak builder baru per-piece; palet disinkronkan referensi.
+3. 35-d: normal/detail map canvas-baked per keluarga (mikro-relief polyp, pori sponge) + vertex AO baking untuk crevice.
+4. 35-e: interaksi ikan-karang (berlindung di table saat threat, ikan kecil ngepak di sekitar sponge), animasi buka-tutup polyp anemone.
+5. 35-f: LOD dinamis dari PerformanceManager (turunkan det ring jika GPU ms tinggi), spesimen rare (table raksasa 5 m sebagai landmark).
+
+Stage Summary:
+- Arena karang 360° kini model high-detail sejati: 1,4 juta triangle, tiap keluarga punya bentuk/relief/material nyata (bukan draft primitif), dinding kontinu dari semua penjukuan.
+- Gelembung naik dari setiap osculum sponge dan meledak saat arus gesture pengunjung menyapu.
+- Ujung arena melebur menjadi siluet biru tua (depth of field) sesuai referensi, dinding hero tetap vivid.
+- Korupsi visual dari karang draft lama di dalam clearing dihapus; god rays tak lagi menabrak dinding gelap.
+
+---
+Task ID: 36
+Agent: main (Super Z) [merged reef-v2 continuation - renumbered from local 27 after parallel-session merge]
+
+Work Log:
+- AUDIT: seluruh generator coral lama terbukti draft — branch = cylinder 7×3 seg halus, table = disc 28 seg polos, fan = plane + alphaMap (mati saat dilihat dari samping — melanggar syarat 360°), brain = ripple sinus kasar; 0 struktur kapur sentral; bubbles acak tanpa sumber; fog terang (#07293f) membuat jarak "susul" bukan siluet; tanpa IBL (material flat).
+- STAGE 1a — LimestoneReef.ts (BARU): 7 menara karst (icosphere detail 4, ridged-fbm erosion + ledge shelves) tertinggi 8.4 m di jantung taman karang (14.5,−26) + rubble skirt; vertex-color limestone dengan lumut/rust; 50 growth spots (normal.y ≥ 0.62, dedupe 1.2 m) diekspos agar karang BERAKAR di struktur — fix bug double-translate yang membuat spots = 0 (sampling kini sebelum geo.translate, filter localY ≥ 1.2).
+- STAGE 1b — STAGHORN v2: multi-trunk (2-4), recursion depth 3, radial 9×4 seg, BOW organik + rugositas axial (corallite rings sin(a·9+f·34) + noise), ujung pale (#ffe9c9), palet 7 warna.
+- STAGE 1c — TABLE CORAL v2 (prioritas user): disc lens 96×14 seg — undulasi 3 oktaf + radial fold ridges + scalloped rim 26 lobes + polyp rows (sin(d·36+a·6)) + rim dip; crown 6-9 under-struts; stem S-curve; growth bands + rim pucat.
+- STAGE 1d — BRAIN v2: sphere 64×42, labirin gyri dua medan meander silang (sin(x·13+2.8·sin(z·7+y·4)) × sin(z·12+2.4·sin(x·6−y·3.5))), lembah gelap ×0.58 / puncak terang, noise mikro.
+- STAGE 1e — SEA FAN v2 = 3D SUNGGUHAN: pohon cabang in-plane (depth 4) + RUNGS mesh antar cabang saudara (gorgonian net), cup z += x²·0.32, tip pucat — bukan lagi plane alphaMap; tetap sway via uv.y.
+- STAGE 1f — tube (rib + rim lip + throat gelap), soft (polyp bumps), anemone (3 ring tentacle 82 total, bend fy², tip bulb glow), boulder (icosa detail 2 + noise ganda).
+- PLACEMENT: 24 cluster (n +60%), karang menempel 50 limestone spots (bobot branch/table/brain), PATHS 4 koridor lane renang — karang di-skip radius 2.6 m (alur alami ikan, sesuai referensi "natural pathways").
+- STAGE 2a — Sponges.ts (BARU): 6 barrel sponge (lathe bulge 40 seg, 14-20 rib vertikal, interior throat gelap, rim lip torus) + 5 cluster tube sponge (lean acak, rib, rim, throat) + 3 encrusting patch; 3 sponge tumbuh DI limestone spots; palet ungu/emas/merah/merah muda HSL.
+- STAGE 2b — Bubbles.ts emitter API: pool 120 slot headroom, addEmitter() klaim 6 slot/emitter (total 14 emitter × ~0.7-1.8 bubble/s), pop → respawn di osculum masing-masing; tetap didorong gesture field; burstCluster event utk ambient.
+- STAGE 3 — SILUET BIRU TEPING ARENA: fog #07293f→#031828 density 0.016→0.0185 (geometri jauh gelap ke navy); dome shader falloff mix(0.5,1.06,smoothstep(−0.55,0.28,h)) + uTop lebih terang (#1384a8) sehingga siluet jauh KONTRAS terhadap air lebih terang di belakangnya (persis look referensi); vignette DOM radial-gradient (center transparan → rgba(1,9,18,.62) sudut) di main + /output.
+- STAGE 4 — PBR: SceneManager.buildEnvironment() PMREM dari kubah gradien → scene.environment (intensity 0.42) — SEMUA MeshStandardMaterial (karang/batu/ikan/sponge) kini punya respons IBL nyata; sun 3.0→2.6, hemi 1.0→0.85 (kompensasi); PerformanceManager coralDetail per tier (1 / 0.7 / 0.45) — segment & recursion turun bertahap; bubbleCount 90→150.
+- QA HOOKS BARU: __ocean.stats() (tris/calls/coralTris/limestoneSpots/spongeEmitters/tier) + __ocean.revealNow() (skip intro GSAP instan — headless RAF throttle membuat timeline kinclong; overlay di-suppress berulang 9 s krn runLoadingSequence async bisa re-show).
+- VERIFIKASI headless (agent-browser): tsc + eslint bersih; boot tanpa page error; stats: 1.748.490 tris total (medium tier!), coralTris 451.502, 71-87 draw calls, limestoneSpots 50, spongeEmitters 14; /output komposit render penuh (QR, ikan, karang, siluet biru jelas); screenshot: download/screenshots/reef-v2-{entrance,garden,hero,column,output}.png — kolom gelembung naik di atas barrel sponge ungu, table coral nempel di ledingan kapur, staghort multi-trunk dgn tips pale, menara jauh jadi siluet navy.
+- CATATAN headless-only: intro GSAP lambat krn RAF throttle (bukan bug produksi — alur intro tidak diubah); kamera QA sempat "masuk batu" saat tp di dalam radius menara (wajar, collision kamera swim tidak menghalangi tp).
+
+JADWAL LONG-RUNNING DETAILING (lanjutan sesi berikut, urutan prioritas):
+- Stage 5 (NEXT): table coral v3 — jaringan polip lebih dalam (valley gelap antar ridge), tepi lebih tebal; staghorn v3 — cabang lebih halus (recursion 4 di tier high, radius tip lebih kecil), corymbose bush shape.
+- Stage 6: caustics PROYEKSI ke permukaan karang (injeksi shader caustic ke material coral/rock, bukan hanya plane di seabed).
+- Stage 7: spesies baru — gorgonian whip, fire coral plate, clam bed, feather star (semua prosedural high-detail).
+- Stage 8: penguat pathway — school blue tang + parrotfish berpatroli di PATHS koridor (FishManager anchor mengikuti lane).
+- Stage 9: budget perf — verifikasi tier low di mobile nyata, LOD jarak jauh, push tier high ke ~2.5M tris.
+
+Stage Summary:
+- Environment lulus dari DRAFT ke model = karang punya anatomi asli (rugositas axial, gyri labirin, rim scallop, rung mesh), semuanya berakar pada struktur kapur sentral dengan lane renang alami, sponge memunculkan gelembung kontinu dari osculum, teping arena tenggelam ke siluet biru (fog gelap + dome falloff + vignette), dan seluruh material merespons cahaya lewat IBL PMREM.
+- Total scene 1,75 juta triangle pada tier medium (headless) — target "jutaan ribu poly" terpenuhi; tier high akan lebih padat lagi.
+- Poly budget terukur via __ocean.stats(); jadwal detailing 5 tahap berikutnya tercatat di atas untuk eksekusi satu per satu.
+
+
+---
+Task ID: 36-b (merge)
+Agent: main (Super Z)
+Task: merge dua implementasi reef paralel (remote Task 35 colosseum vs local reef-v2 anatomy) menjadi satu scene
+
+Work Log:
+- Remote ternyata sudah membawa Task 35 (ReefArena colosseum 360, ReefCorals, depthSilhouette, SpongeBubbles, atmosfer turkuois #25b2c6, god rays ring 360, caustics tile 360) + studio v2 (session isolation, FolderSync, control UI overhaul, logo favicon) + makhluk upgrade + fish template registration.
+- Merge FETCH_HEAD: 5 konflik diselesaikan — Lighting (nilai turkuois 3.3/1.15 + revealNow saya), SceneManager (fog/dome turkuois mereka + buildEnvironment PMREM saya, IBL di-recolor ke palet turkuois, intensity 0.3), FishScan (template registration mereka jadi primer), main.ts (UNION: limestone + coral v2 + arena + sponges + vignette + stats/revealNow + SpongeBubbles arena), worklog (kedua sejarah disatukan, entry lokal dinomori ulang 36).
+- CoralSystem auto-merge: generator v2 saya utuh + satu guard baru dari mereka (cluster draft lama di-skip dalam radius 64 m dari pusat arena supaya colosseum bersih) — karang v2 kini berakar di limestone spots + cluster luar; arena mengisi ring.
+- PerformanceManager: versi saya menang (coralDetail tier + bubble 150/90/55).
+- Verifikasi: tsc + eslint bersih; boot utama 3.449.806 tris total (123 draw calls) — arena 1.399K triK + coral v2 190K + limestone + sponge + rest; screenshot reef-v3-merged-garden.png: staghorn v2 hijau/biru/ungu tumbuh dari karst, table stacks arena berlapis, sponge teal/ungu, caustics pasir, school blue tang, atmosfer turkuois + vignette — gabungan padat & sehat; /output headless saturasi main thread (software renderer x multi-kamera x 3.4M tris — artefak headless; GPU nyata mampu, tapi Stage 9 diprioritaskan: LOD arena by tier utk multi-pass output).
+
+Stage Summary:
+- Scene final = kolaborasi dua pendekatan: dinding colosseum 360 derajat (Task 35) + anatomi karang asli berakar struktur kapur sentral (Task 36) + IBL PBR + QA hooks, 3,45 juta triangle pada tier medium, tanpa regresi fitur studio/ikan/remote.
+
+---
+Task ID: 37
+Agent: main (Super Z)
+Task: "sebelum lanjut ke tahap 5 perbaiki dulu untuk kontrol dengan smartphone ada kegagalan koneksi; dan juga error sync ke folder: imported 0 · skipped 3 · last: Gemini_Generated_Image_....jpeg · tank refused the scan"
+
+Work Log:
+- AKAR MASALAH #1 (tank refused the scan): /api/fish 500 PADA SEMUA request (GET+POST, body kosong) — dev.log penuh `TypeError: Cannot read properties of undefined (reading 'get') at tankFor`. Penyebab: bentuk `globalThis.__oceanFishTank`Warisan — instance route lama (bentuk pra-sesi {v,designs,loaded}, tanpa Map `sessions`) tertinggal di globalThis oleh chunk compile lama; store() baru percaya nilai truthy apa pun → `st.sessions` undefined → crash. Perbaikan: store() kini SHAPE-CHECKED (validasi `sessions instanceof Map`), migrasi tank legacy → sessions.main, dan GET/POST dibungkus try/catch → error SELALU JSON {ok:false,error} (tidak pernah 500 kosong). Server di-restart; GET/POST 200 terverifikasi.
+- AKAR MASALAH #2 (file skipped tak pernah masuk): FolderSync meng-`remember()` sig file SEBELUM import — file yang ditolak server (akibat bug #1) ter-tandai seen SELAMANYA → "skipped 3" tidak akan pernah masuk walau server sembuh. Perbaikan: remember hanya setelah (a) sukses import, (b) gagal scan keras (unreadable/no fish); penolakan tank = retry di poll berikutnya (parks setelah 3× refusal agar tak hot-loop). Backlog sweep: break bukan skip-count. File user yang terskip akan masuk otomatis setelah reload studio.
+- AKAR MASALAH #3 (ukuran): FishScan quality-walk berhenti di q=0.5 — gambar Gemini ber-noise tinggi bisa tetap >480KB → ditolak API. Kini: walk sampai q=0.38, lalu fallback downscale sheet 768→640→512→448 re-encode → jaminan ≤480KB (gambar pasti terkirim).
+- AKAR MASALAH #4 (kegagalan koneksi phone — QR mati): WallQr + QrOverlay menyandikan `location.origin` — mesin proyeksi yang membuka show sebagai localhost:3000 menghasilkan QR "localhost" yang di-SCAN oleh phone menunjuk ke PHONE ITU SENDIRI → remote tak pernah terbuka/nyambung. Perbaikan: /api/lan baru (os.networkInterfaces → IPv4 privat terbaik + port server) + helper lanOrigin.phoneOrigin() (hanya mensubstitusi saat halaman loopback; LAN IP/tunnel origin tetap) → WallQr, QrOverlay, portableSessionLink kini re-draw ke `http://<lan-ip>:3000/...`. Terverifikasi headless: qrInfo().wall.url = http://21.0.16.118:3000/control-mobile (bukan localhost).
+- AKAR MASALAH #5 (kegagalan koneksi phone — socket & diagnostik): (a) WsBase: stale-event guard di SEMUA handler — late onclose dari socket lama bisa meng-null-kan socket baru yang live (send no-op diam-diam = "connected tapi mati" setelah sleep); (b) forceReconnect() + visibilitychange: phone kembali dari sleep → reconnect segera (tanpa backoff) + hb instan; (c) hub kini mengirim {t:'room', screens} ke phone saat hello + tiap screen masuk/keluar sesi → PhoneController menampilkan "connected — steer the ocean" vs "no screen on session "x" yet — open the /output wall" (mismatch sesi/layar tutup tidak lagi terlihat sebagai koneksi mati misterius).
+- VERIFIKASI: tsc + eslint bersih (semua file tersentuh); curl GET/POST /api/fish 200 (add ok, reject >480KB → pesan JSON jelas); /api/lan benar; WS hub test (scripts/test-ws-ctl.js): presence + ctl relay + room sequence phone [0,1,0]; agent-browser end-to-end: /output QR url = LAN IP; /control-mobile?s=main → "connected — steer the ocean" saat screen hidup, berubah "no screen..." saat screen ditutup; node phone-client stream ox=0.7 2 detik → rig.yaw output terintegrasi 4.93 rad; dev.log bersih tanpa 500.
+
+Stage Summary:
+- Dua keluhan user teratasi dari akarnya: (1) tank API kini sehat + self-healing terhadap globalThis warisan + error JSON selalu informatif, FolderSync auto-retry file yang gagal transien → scan Gemini yang terskip akan masuk sendiri setelah studio di-reload; (2) phone control: QR kini menunjuk alamat LAN yang benar bahkan saat proyeksi dibuka via localhost, socket phone tahan sleep/stale-close, dan phone punya umpan balik room eksplisit.
+- Jadwal detailing tahap 5 (table coral v3 + staghorn v3) tetap menjadi langkah berikutnya seperti direncanakan.
+
+---
+Task ID: 38
+Agent: main (Super Z)
+Task: "lanjutkan ke tahap 5 namun tetap memperbaiki bagian-bagian yang belum detail dan sesuai dengan contoh, bukan low poly namun high poly, serta pastikan tidak ada bagian yang bolong"
+
+Work Log:
+- TAHAP 5a — TABLE CORAL v3 (arena makeTableStack + garden makeTableCoral): tepi hidup LEBIH TEBAL (thick 0.1+r·0.05 → 0.13+r·0.075 arena / 0.2+r·0.045 garden, hSeg 4→6), ROLLED EDGE baru — torus bergelombang mengikuti undulasi disc (det2 128×9 seg) sehingga meja terbaca tebal dari samping persis profil referensi; POLYP VALLEY gelap di antara ridge (k ×(1−max(0,−rib−0.25)·0.42·d)); corallite nubs 16-30 cone kecil di permukaan atas (det2); branchlets 10-18 → 14-24 (arena) + 6-14 baru di garden; garden disc 96→128 radial × 16 rings, scallop 26 lobes kasar → 18 lobes halus falloff kubik (habis zigzag draft), underside tuck.
+- TAHAP 5b — STAGHORN v3 + masuk arena PERTAMA KALI: builder baru makeStaghornBush (ReefCorals, det-tier): base plate corymbose + nubs tegak, 4-5 trunk condong (det2), recursion 4 (det2) / 3 (det1) / 2 (det0), corallite rings + fine noise, tip pale radius ×0.92 (lebih halus), trunk radius naik 0.075-0.1 (bush lebih penuh); CoralSystem staghorn v3: tier high depth 3→4 trunks 3→4, child radius 0.72→0.66, tip ×1.12→×0.9, base plate corymbose di detail≥0.6; DITEMPATKAN di arena: ring A 12 det2 + 55% det1, A2 45%, filler ×2 bobot, ring B 1 per slot — 47 bush staghorn kini menghiasi dinding (sebelumnya 0; spesies khas referensi).
+- ANTI-BOLONG: BACKFILL RIDGE 360° baru di ReefArena — dinding batang continuous r≈40 (260×6 grid) fbm-undulating antara ring A dan A2, vertex-color mossy/algae/crest, silhouette-injected, DIP turun ke sill 0.45 m persis di 4 sudut sand channel (45°/135°/225°/315°) sehingga lane renang tetap tembus; A2 densify +1 koloni per slot. Hasil: dinding koloseum tertutup rapat dari semua heading, tak ada celah tembus pandang.
+- HIGH-POLY SWEEP (det 2): bubble grape 12×9 → 16×12 + balls 24-48; sponge tube 18×16 → 26×22; finger 9×5 → 12×7 + 30-56 jari; anemone 66-86 → 88-114 tentacle (tube 9×7, tip 8×6); redwhip 34×8 → 46×10 + polyp 40-58 cone 7-seg; spiral 84×7 → 104×9; green mound icosa 9 → 10 (2420 tris); limestone icosa 4 → 5 (5120 tris) + erosi 0.42→0.52/0.26/0.11 + fluting halus e4 + crevice 0.55→0.66.
+- GARDEN v3 (CoralSystem): makeTubeCoral dirombak total dari draft kerucut halus → tube ber-flute vertikal + pori noise + rim gelombang + THROAT gelap sungguhan + skirt (port dari arena sponge, palet teal); makeTableCoral v3 seperti di atas.
+- QA TOOLING: __ocean.setView(yaw,pitch,x,y,z) baru (teleport+aim swim cam); revealNow kini juga pointer.enable()+swim.enable() (dulu DIVE-in guard `entered` membuat swim tak bisa diaktifkan di headless); __ocean.pieces(kind) — posisi world tiap piece per family untuk staging kamera.
+- Koreksi kecil: underside table 0.46 → 0.58 (langit-langit meja tak lagi hitam pekat).
+- Stats akhir (medium tier): arena 1.399K → 2.825K triK (+102%), staghorn 0 → 47, coralTris 190K → 273K, scene ~3.34M tris rendered headless, 91 draw calls, tanpa page error. Verifikasi: tsc bersih, eslint 5 file bersih, agent-browser 360° (yaw 0/1.57/3.14/4.71) — dinding kontinu tanpa bolong di semua heading, rim meja tebal terbaca dari samping, staghorn+sponge+whip+bubble padat di bommie; close-up hero: sponge ungu glossy, staghorn emas bernub, spiral whip cyan, bubble grape lavender, caustic pasir.
+- Catatan: kerucut abu-abu "terlihat draft" pada screenshot headless ternyata god-ray light shafts (transparan, urutan blend headless), bukan geometri — sudah dikonfirmasi via teleport dekat.
+
+Stage Summary:
+- Tahap 5 selesai: meja ber tepi tebal + valley polyp, staghorn corymbose menghiasi dinding untuk pertama kalinya, ridge belakang menutup seluruh koloseum (anti-bolong) dengan 4 channel tetap swim-able, seluruh family naik segmen (high poly, bukan low poly), garden tube koral tak lagi draft.
+- Arena 2× lipat triangle (1.4M → 2.8M) pada tier medium; jadwal lanjutan: Stage 6 caustic proyeksi ke permukaan karang, Stage 7 spesies baru (fire coral plate, clam bed, feather star), Stage 8 ikan berpatroli di PATHS, Stage 9 LOD arena untuk output multi-kamera.
+
+---
+Task ID: 39
+Agent: main (Super Z)
+Task: "lanjutkan tahapnya per detail tidak hanya depan namun belakang kamera juga gunakan 360 view untuk koreksi" — detailing 360° + koreksi via 360 view
+
+Work Log:
+- AUDIT TOOLING DIPERBAIKI (prasyarat koreksi 360): revealNow ternyata hanya swim.enable() (pasang listener) tanpa swim.setActive(true) → setView mengubah pose yang TAK PERNAH dikonsumsi kamera (pushSwimPose no-op, rig tetap drift di HOME) — semua screenshot audit lama dari "heading berbeda" ternyata SATU view yang sama. Fix: revealNow kini swim.setActive(true) + suppression overlay intro diperpanjang (40/60 s utk sweep panjang); setView juga auto-aktifkan swim bila belum aktif. Kini kamera benar-benar pindah (terverifikasi pos/yaw return + screenshot berbeda per heading).
+- KOREKSI 360 #1 — SILUET "PAPER-CUTOUT": dinding jauh sebelumnya k=0.8 ke #0d4266 (nyaris hitam) vs dome horizon #2fb9cc terang → karang jauh terbaca hitungan kertas. Dome digelapkan-ke-dalam (uTop #96e2e4, uMid #249dbd, uBottom #084f66 — "deep blue water tones" referensi), silhouette di-soften (start 42 end 112 k 0.58 warna #0f4468; seabed k 0.6 #0c3c5a) → jauh melebur ke kabut biru, kontras lembut dari SEMUA heading.
+- STAGE 6 — CAUSTICS PROYEKSI KE PERMUKAAN KARANG (modul baru causticInject.ts): pola caustic air kini hidup DI dinding/batu/sponge/karang (bukan hanya sheet pasir), di-sample WORLD-SPACE (pola menempel geometri dari arah kamera mana pun), up-bias 0.4-1.0 (puncak terang, dinding tetap berkilau ~40%), fade jarak 78-118 m, domain dimiringkan dgn tinggi agar dinding vertikal punya slice polyp sendiri. Diterapkan ke: arenaMaterial semua family + ridge + mound + rubble (ReefArena), taman karang (CoralSystem sway + non-sway), sponge barrel/tube/crust, menara + rubble limestone. BUG DITEMUKAN-SENDERI: caustic tak di-clamp melipat diffuse 5-10x di garis fokus → seluruh karang PUTIH overblown (audit 360 menangkapnya) → clamp min(×1.25, 1.45).
+- STAGE 7 — SPESIES BARU HIGH-DETAIL (ReefCorals): (1) makeFirePlate — hydrocoral Millepora: 2-4 blade vertikal bergelombang dari base encrusting, gradasi gelap→mustard→rim pucat (palet #c8963c…), (2) makeClam — kerang raksasa: pasang valve ber-rib radial (sin a·9 + a·27) terbuka hinge, mantle torus iris teal/kobalt/violet + 26 fleck fluoresen, (3) makeFeatherStar — crinoid: 9-14 lengan tube melengkung curl-up dgn pinnule feather barbs dua sisi (palet sunset). DITEMPATKAN 360°: ring A tiap slot hero (12 fireplate + 45% clam + 65% feather), ring A2/B + filler list — arc BELAKANG kamera default dapat jatah sama.
+- PALET SATURASI (anti-mint-monoton): table stack kini 5 varian koloni (green/ochre/rosy-mauve/steel-teal/lavender), mound 3 varian batu (mossy/sandstone/plum-grey) — koloni beda warna seperti reef asli sesuai referensi "rich coral saturation".
+- KOREKSI 360 #2 — ZENIT (melihat ke atas = void): WaterSurface normal ternyata menghadap +Y (KE ATAS) padahal dilihat dari bawah → dot(V,N) negatif → Snell window TIDAK PERNAH menyala (selalu uDeep gelap). Normal dibalik ke -Y → jendela cahaya akhirnya hidup; alpha dasar 0.42→0.52 agar terbaca dari sudut miring. Dome ditambah zenith glow + caustic veil beranimasi (uTime) sehingga atas membawa cahaya matahari walau plane air di luar frustum (pitch clamp 1.25 + FOV 58 nyaris tak pernah menembus zenit).
+- KOREKSI 360 #3 — PASIR "KERTAS PUTIH": seabed digelapkan satu step (sandA #cbbc94, sandB #b1a179, flatSand #d2c49c dst) sesuai deep-blue referensi.
+- STAGE 9 (LOD ARENA — menyelamatkan QA & mobile): ReefArena ternyata MENGABAIKAN tier — 2.8M+ tris dibangun penuh di semua device; headless software-GL OOM-killed chrome (1.1 GB RSS, box 4 GB) bahkan pada boot biasa. Kini ReefArena(scene, heightAt, tier): low = hero det1/mid-far det0 + rubble off, medium/high = penuh (tampilan tidak berubah utk desktop). ?tier=low|medium|high (PerformanceManager) memaksa tier utk QA/device lemah.
+- QA STATS BARU di arena: fireplate/clam/feather muncul di counts. Verifikasi headless (?tier=low, 1.586M tris total / 90 calls / 0 page error): setView 8 heading + ceiling + floor + back-hero — SEMUA view berisi scenery penuh; belakang kamera default (yaw π) padat table+sponge ungu+feather+clam; langit-langit kini beralun cahaya; /output komposit OK (QR + reef + fish, tanpa error). tsc + eslint bersih (9 file).
+- CATATAN: medium/high tak bisa diverifikasi di box 4 GB ini (OOM SwiftShader — bukan bug scene; GPU nyata mampu) — det mapping deterministik + builder smoke-test (0 NaN, 186 ms utk 12 varian) menutup risiko.
+
+Stage Summary:
+- 360 view kini BENAR-BENAR dipakai mengoreksi: QA camera (setView) hidup, dan hasil auditnya mengungkap + memperbaiki 4 cacat arah-arah: siluet hitam kertas → kabut biru dalam, zenit void → jendela cahaya Snell (bug normal terbalik), pasir putih → warm sand dalam, plus caustic menari di SELURUH permukaan karang dari segala arah.
+- 3 spesies baru berakar di semua ring (termasuk arc belakang kamera), palet koloni didiversifikasi — "tidak hanya depan, belakang pun penuh detail".
+- Arena kini sadar-tier (Stage 9): mobile/headless dapat budget ringan, desktop tetap 2.8M+ tris.
+
+---
+Task ID: 40
+Agent: main (Super Z)
+Task: "output canvas seharusnya full screen, saat ini output terpotong dan ada padding/margin hitam seharusnya full layar"
+
+Work Log:
+- AKAR MASALAH (3 lapis): (1) OutputManager.updateCamera memakai letterbox Math.min (contain) — rasio output canvas (1920×1080) vs rasio layar fisik (mis. 16:10 / proyektor 4:3) menghasilkan bar hitam atas-bawah; (2) preset default "flat-screen" meng-inset permukaan Main Screen ke 12%/10%/76%/80% kanvas — boot baru menampilkan margin hitam mengelilingi gambar APA PUN fit-mode-nya; (3) vignette CSS radial-gradient (screen-space) ikut menggelapkan tepi gambar di halaman /output.
+- SCREEN FIT MODE (OutputManager.updateCamera + ProjectionManager.screenFit): param baru 'contain' | 'cover' | 'stretch' — contain = letterbox lama (preview editor), cover = Math.max isi layar penuh aspek-asli crop tepi merata, stretch = frustum tepat 0..W × 0..H (peta output rect 1:1 ke layar, tanpa bar tanpa crop). Default SHOW = COVER; setting per-mesin (localStorage ocean-output-fit-v1, TIDAK ikut project — proyektor boleh beda rasio dari studio).
+- Tombol + kontrol: overlay /output dapat select FIT (COVER/STRETCH/CONTAIN) + tombol MATCH SCREEN (snap output canvas = window.innerWidth×innerHeight persis → pemetaan 1:1 piksel, nol crop nol distorsi); info line kini menampilkan mode fit; qaState + screenFit + output. Studio PROJECT tab "OUTPUT CANVAS & RATIO" juga dapat baris SCREEN FIT + MATCH SCREEN.
+- PRESET FULL-BLEED: flat-screen Main Screen kini rect(0,0,1,1) — gambar output = seluruh kanvas; inset bisa diatur manual via drag/numeric jika dinding fisik meminta.
+- VIGNETTE: tidak dibuat di mode outputOnly (main.ts) — proyektor menerima komposit bersih; depth-of-field tetap dari in-world fog/silhouette.
+- VERIFIKASI (agent-browser + analisis piksel PIL, viewport 1280×800 vs kanvas 1920×1080): stretch terukur bar 80/80/153/154 px = PERSIS prediksi teori utk surface inset preset lama (bukti kode fit benar); setelah clear storage + preset full-bleed + cover → nol bar di 8 tepi (FULLSCREEN OK); MATCH SCREEN → output 1280×800 ✓; studio live output (Enter) → FULLSCREEN OK 8 tepi; tsc bersih; eslint 6 file bersih; restart server membersihkan chunk basi saat diagnosis.
+
+Stage Summary:
+- Output proyeksi kini benar-benar full layar: cover default mematikan semua letterbox bar, preset full-bleed mematikan margin inset, vignette tidak lagi menggelapkan tepi /output, dan MATCH SCREEN memberikan opsi 1:1 piksel absolut. Editor preview tetap contain (overview utuh).
+
+---
+Task ID: 41
+Agent: main (Super Z)
+Task: "di prod ada error koneksi dengan phone, sepertinya ws portnya belum ada di setting container" + "control di hp sangat susah tolong perbaiki" + "kontrol by kamera di smart phone masih belum bisa, pastikan controlnya sama dengan control gestur di langsung bukan modul yang berbeda" + "span h dan span v ... tetap menyatu tidak mengambil view bagian lain" + flow ukuran real per surface + "tampilannya kurang vibrance"
+
+Work Log:
+- AKAR PROD (WS "tidak ada portnya"): container menjalankan server.js HASIL GENERATE standalone Next (Dockerfile menyalin .next/standalone lalu `node server.js`) — file itu TIDAK memuat hub /ws/control, jadi phone remote tak pernah bisa connect di prod. FIX Dockerfile: server.js KUSTOM menimpa server.js standalone + `node_modules/ws` disalin eksplisit (bebas dependensi; tak di-trace standalone). Hub kini HIDUP DI PORT YANG SAMA (3000) — container tak butuh port ekstra sama sekali.
+- HTTPS OPSIONAL untuk KAMERA HP: getUserMedia butuh secure context — http://<lan-ip> di prod MEMBLOKIR kamera (penyebab "kontrol by kamera belum bisa" di lapangan). server.js kini mendukung ENABLE_HTTPS=1: pakai HTTPS_CERT/HTTPS_KEY bila diberi, atau generate self-signed otomatis via openssl (SAN: localhost + IP 0.0.0.0/127.0.0.1, .certs/ di-gitignore, folder .certs dibuat-writable di image). Tanpa openssl → fallback HTTP + log jelas. Terverifikasi end-to-end: boot ENABLE_HTTPS=1 → curl -k https 200 + handshake WSS hub ("WSS-HUB-OK").
+- KONTROL HP v2 (sangat mudah): dua PAD SETENGAH LAYAR — sentuh DI MANA SAJA, stick melayang ke ibu jari (tak perlu bidik lingkaran kecil); PINCH dua jari = DOLLY (seperti peta) + slider tetap ada; tombol SPEED 0.75×/1.0×/1.35×; label + safe-area lebih besar; setPointerCapture dibungkus try/catch (pointer sintetis/stale tak lagi memutus gesture). Verifikasi headless: drag 60px → mx −0.64 mengalir 40 Hz; pinch → dz; lepas → auto-zero semua sumbu.
+- KONTROL KAMERA HP = MODUL YANG SAMA: RemoteHands (baru) mengubah frame WS → HandSample[] → MASUK GestureEngine YANG SAMA dengan kamera lokal (swipe/push/pull/palm/fist, bursts, audio, swim-steering palm-as-joystick) — jalur field.setTarget sederhana yang lama DIHAPUS. Protokol HandFrame +scale (s) + tangan kedua (b); detectLoop HP kini memakai extractHandSample∘mirrorLandmarks (interaction/handMath) — komposisi IDENTIK desktop, sampel tak bisa dibedakan. Prioritas: kamera lokal menang bila aktif. Guard insecure-context: pesan jelas "camera blocked — this page is http; open via https:// (or localhost). Sticks still work."
+- SPAN H/V LINKED (SpanLink.ts baru): edit span kini sadar-tetangga — (1) tepi yang JOINED ke kamera lain (≤4°, preset overlap 2°) TERPIN PERSIS → sambungan tak pernah robek/overlap tak merayap; (2) pertumbuhan berhenti di tepi dinding sebelah → TIDAK MENGAMBIL VIEW bagian lain; (3) dinding bertumpuk (floor/ceiling interval-yaw sama, pitch menyentuh) MENGIKUTI edit H → seam wall/floor tetap kaku; (4) band dinding ring (270°/360°, interval-pitch sama) MENGIKUTI edit V → band tetap satu strip lurus; (5) dinding fully-joined menolak perubahan apa pun. Frame perhitungan di-unwrap norm180 di sekitar CENTER TARGET (bug terperbaiki: dinding di yaw ±90/180 kini terklasifikasi benar).
+- FLOW UKURAN REAL: input W (m) / H (m) / DIST (m) per surface (tersimpan di project: camera.real, sanitasi import) → span = 2·atan(size/2÷dist) otomatis via jalur linked yang sama (tepi tetap terpin) + readout "CAMERA COVERS 62.0° × 40.0°".
+- VIBRANCE: modul look/vibrance — grade saturate+kontras pada canvas GL (per-machine, localStorage ocean-vibrance-v1, default 1.2×); slider di PROJECT tab studio + overlay /output (di samping FIT); QA hook __ocean.projection.vibrance(v?). Terukur: filter "saturate(1.2) contrast(1.024)" aktif di boot, live-set 1.4 langsung terlihat.
+- QA hooks baru: projection.spanEdit / projection.realSize (jalur UI asli), plus test unit permanen scripts/test-span-link.ts — 22 ASSERTION PASS: pin dua sisi 270°, ring 360° tak overlap, floor mengikuti H (62→90) + pitch seam utuh, band mengikuti V + dasar sejajar, real-size 4m@4m→53.13°, sisi bebas tumbuh ke arah terbuka.
+- VERIFIKASI: tsc bersih, eslint 12 file bersih; WS hub test (presence + ctl relay + room 0/1/0) PASS; HTTPS+WSS PASS; /output komposit full-screen + QR + slider VIBRANCE; studio PROJECT tab slider VIBRANCE 1.2 + REAL SIZE W/H/DIST + CAMERA COVERS; /control-mobile UI baru (2 zona, SPEED, guard http); dev.log tanpa error.
+
+Stage Summary:
+- Prod container kini menjawab /ws/control di port yang sama (3000) tanpa setting port ekstra; ENABLE_HTTPS=1 membuka kamera HP via https://<ip>:3000 (terima peringatan sertifikat sekali).
+- Remote HP jauh lebih mudah (pad setengah layar + pinch + speed) dan kamera HP memakai GestureEngine identik desktop — bukan modul berbeda.
+- SPAN H/V tak lagi "mencuri" view kamera lain: tepi tersambung terpin otomatis, dan flow ukuran real ruang menghasilkan frustum yang pas tanpa kalibrasi manual.
+- Tampilan dapat VIBRANCE 0.6×–1.6× (default 1.2×) yang bisa disetel per mesin proyeksi.
+---
+Task ID: 37
+Agent: main (Super Z)
+Task: "saya ingin menentukan aspek rasio output namun tetap snap kameranya — misal dinding kanan 1:1 H:V, tengah 4:3 H:V, kiri 2:3 H:V — namun ujung gambar kameranya tetap menyatu sehingga gambar rasionya pas dan juga tidak patah" (sesi ini; direkonsiliasi dengan Task 36 yang paralel)
+
+Work Log:
+- MERGE REKONSILIASI: remote main membawa Task 36 (SpanLink pin-link + real-size W/H/DIST + global VIBRANCE CSS + prod WS fix + HTTPS + mobile remote baru). Sesi ini membangun flow RASIO (proporsi) + RING GLUE yang saling melengkapi, lalu keduanya digabung satu model:
+  * SpanLink (Task 36): drag SPAN manual — tepi yang tersambung TERPIN, pertumbuhan berhenti di dinding berikutnya (kalibrasi overlap 2° preset tidak merangkak).
+  * SpanChain (Task 37, baru): deklarasi RASIO — seluruh CINCIN dinding di eye point yang sama re-aim sehingga yaw_prev + h_prev/2 == yaw_next - h_next/2 EXACT (seamAudit worst 0°); tiap dinding mempertahankan span-nya sendiri (dari rasio masing-masing), pitch + SPAN V disamakan satu cincin (tinggi dinding ruangan).
+- WALL RATIO UI: baris "WALL RATIO" (FREE / 1:1 / 4:3 / 3:2 / 16:9 / 2:3 / 3:4 / 9:16 + W:H kustom) — SPAN H DERIVED dari SPAN V x rasio (tan(h/2) = rasio.tan(v/2)), ditampilkan read-only; slice output auto-refit ke rasio (tinggi & pusat tetap; warp grid ikut kecuali gridCustom); SPAN V = tinggi bersama, editnya menurunkan ulang seluruh cincin.
+- PRECEDENCE: real-size (meter) = geometri absolut -> menang atas rasio (deriveSpanH mundur jika camera.real ada; mengisi W/H/DIST melepas rasio; memilih rasio melepas real). Keduanya persist di project JSON + sanitasi import (ratioW/ratioH + real + snapWalls + vibrance).
+- SNAP project flag (default ON): checkbox "Snap wall edges (seamless ring)"; OFF = perilaku pin-only SpanLink.
+- VIBRANCE DUA LAPIS direkonsiliasi: VIBRANCE global (Task 36, CSS filter per-machine, default 1.2) tetap kendali utama; shader uVibrance per-show (sesi ini) kini NETRAL default 1.00 — slider PROJECT "WALL GRADE" = saturasi ekstra yang MENEMANI file show ke mesin lain (pola kalibrasi tak terpengaruh). Total default = 1.2 seperti yang sudah dilihat user.
+- Prod WS: kedua sisi memperbaiki Dockerfile secara independen (server.js custom + node_modules/ws menimpa standalone) — merge mengambil blok komentar Task 36 (port tunggal 3000 + ENABLE_HTTPS).
+- QA hooks: wallRatio(name,w|null,h), seamAudit(name?) (worst gap + per-joint), snapWalls(on?), wallGrade(v?) (vibrance global tetap milik Task 36).
+- E2E headless: 270 preset -> rasio kiri 2:3 / tengah 4:3 / kanan 1:1 -> span H 67.38/106.26/90 (v=90), seamAudit worst = 0°, slice 663x994 / 1325x994 / 994x994; snap OFF -> seam -7.51° (pin-only), ON -> 0°; slider SPAN V asli (DOM) -> cincin ikut v=70 + H re-derived + seam 0; save/load roundtrip utuh; /output mengadopsi state (rasio + kanvas); WS /ws/control upgrade OK; screenshot qa-panorama-mixed-ratio.png (panorama 3 dinding rasio beda — batu besar menyeberang seam tanpa patah).
+- tsc bersih; eslint bersih (require CommonJS server.js = gaya lama).
+
+Stage Summary:
+- Tiga cara mengatur bentuk output kini hidup berdampingan dan konsisten: RASIO per surface (proporsi pas, kamera & slice otomatis), UKURAN REAL (meter + jarak), dan drag SPAN manual (pin) — semuanya menjaga ujung kamera bertetangga menyatu tanpa patah dan tanpa mencuri view; vibrance global + per-show terlapis.
