@@ -734,3 +734,26 @@ Work Log:
 
 Stage Summary:
 - Texture ikan hasil scan kini = GAMBAR IKANNYA SAJA: frame, meja, background, dan bayangan dipotong total; bagian tak diwarnai di dalam ikan otomatis terwarnai dari warna sekitarnya; pupil/insang/jari-jari dipertahankan; tidak ada lagi bagian putih pada ikan — gambar mewarnai model penuh tepi-ke-tepi.
+
+---
+Task ID: 33
+Agent: main (Super Z)
+Task: "oke lanjut dan per detail aseet asset nya serta buat proper" — detailing aset environment per aset (proper, high-poly, watertight) + 360° audit
+
+Work Log:
+- ROCKS: icosa detail 1 flat-shaded (80 face) → detail 4 (500 face) di-WELD (mergeVertices by position → smooth normals), 3 oktaf displacement (lobes/knobby/grain), vertex-paint mineral banding + algae crevice + crustose coraline pink + crown bleach + barnacle speckle; 3 varian instanced (3 draw call).
+- CORALSYSTEM (10 famili, semua di-rebuild proper): staghorn = rekursi 4 level + segmen ringed 9×4 + tip axial kerucut; brain = sphere 48×32 + labirin domain-warped + lembah gelap/crest terang; table = disc 56 seg + 16 ridge radial + rim wave + kaki akar + groove shading; fan = venation canvas 256² (9 ray × depth 5 + 7 arc cross-vein) + membran wavy ber-cup + batang kayu (UV dipatok ke sudut putih canvas agar tak dimakan alphaTest — penyebab serpihan melayang); tube = dinding ganda + rim torus + mahkota polyp; boulder = icosa detail 2 berlobes; soft = stalk + polyp dimple; anemone = 46-60 tentakel 2-segmen melengkung dengan bulb; SPONGE BARU: barrel sponge lathe 48-seg ber-rib dengan rongga dalam sungguhan (profile closed → watertight, mulut terang/interior gelap) + cluster tube sponge (lathe per tube, flare + kaviti); wet-look MeshPhysicalMaterial clearcoat utk famili padat; palet lebih satur.
+- REEFCORE (BARU — kepala karang batu kapur sesuai referensi): 4 site (hero R5.2 detail 16 ≈ 5 780 face di (2,-34) + 3 satelit), karst displacement multi-oktaf (lobes fbm + ledge stratifikasi + grain), 2 mulut gua gelap (push angular smooth — tetap watertight), lintel arch di mulut gua (torus setengah, bidang ⟂ radial), rubble ring di kaki; CORALS TUMBUH DI PERMUKAANNYA via fungsi radial yang sama (24 karang hero + satelit: staghorn/table/brain/tube/sponge/tubeSponge/soft, lean ke normal 0.42, sink 0.13·scale), 6+2 anemon di ceruk bawah (sway field sama dgn CoralSystem); obstacle collider + sponge mouths + anemonePositions ter-register.
+- REEFSITES (BARU): modul footprint bersama + insideReefFootprint() — CoralSystem/Rocks/Seaweed/ReefDecor kini MENGECEK footprint (margin 1.04–1.14) sehingga tidak ada lagi fan/batu/rumput menembus permukaan karst (akar dari "serpihan gelap" di audit 360°).
+- BIOMES: arch torus 14×44 + weather 2-pass, boulder detail 2 + 2-pass, fins 10×8, spires 12×14 + ledge band strata, bommies 28×20 + encrustation karang hidup (pink/green patch fbm) di mahkota.
+- SEABED: seg 140→200 (≈80k tris), oktaf dune ekstra + micro-ripple, 4 reef mound penopang ReefCore sites.
+- REEFDECOR: populasi naik (stars 8→14, urchins 12→20, shells 16→30), spike landak 5-sisi.
+- MAIN: ReefCore di-wiring (obstacles, anemone clownfish, sponge mouths); gelembung sponge AMBIEN (trickle 5-9 dtk dari mulut acak) + event "sponge exhales" di dynamicEvents; QA hook stats() (tris/calls/geometries) + heading(yawDeg,pitchDeg) utk audit 360°.
+- VIBRANCE: exposure 1.26→1.27 dgn sun 3.05/ambient 1.04 (minim over-exposure yang memucatkan), dome water lebih cerah (#1280a8), palet coral/brain/table/limestone diperdalam.
+- QA TOOLING (scripts/qa-360.sh): audit 360° resilen — override document.hidden (tab headless membekukan frame), sembunyikan intro/loading via DOM (bukan klik enter — tween sinematik GSAP memegang kamera selama introPlaying sehingga pushSwimPose early-return), toggle swim langsung, verifikasi posisi per stasiun + retry.
+- AUDIT 360° (8 stasiun mengelilingi hero + close-up): dome smooth tanpa faset, karang duduk di permukaan, gua terbaca, satelit berdiri sendiri; fix beruntun: merge indexed/non-indexed (icosa vs torus) → toNonIndexed, flat-shading → weldByPosition, arch terkubur → lintel gua, serpihan → footprint exclusion, fan stem alphaTest → UV corner putih.
+
+Verified: bunx tsc --noEmit bersih (kecuali pre-existing examples//skills/); home boot 1.73 juta tris / 88 draw call / 236 ikan / 0 page error; /output komposit hidup (reef core + satelit + QR wall); screenshots download/screenshots/qa-reef-{0,45,90,135,180,225,270,315}.png + qa-dome-close.png + qa-output-page.png.
+
+Stage Summary:
+- Environment kini "proper": 1.7 juta triangle, karang batu kapur sentral dgn karang hidup menumbuh di permukaannya, 10 famili coral high-poly (termasuk barrel/tube sponge berongga sungguhan yang mengeluarkan gelembung), batu smooth ber-algae, landmark resolusi tinggi, wet-look PBR, warna lebih hidup — terverifikasi dari 8 arah 360°.

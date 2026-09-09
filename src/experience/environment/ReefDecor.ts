@@ -7,6 +7,7 @@
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32 } from '../utils/math'
+import { insideReefFootprint } from './ReefSites'
 
 interface ReefDecorCounts {
   stars: number
@@ -14,7 +15,7 @@ interface ReefDecorCounts {
   shells: number
 }
 
-const DEFAULTS: ReefDecorCounts = { stars: 8, urchins: 12, shells: 16 }
+const DEFAULTS: ReefDecorCounts = { stars: 14, urchins: 20, shells: 30 }
 
 /** fills a geometry's color attribute with one colour + tiny variation */
 function tintGeometry(geo: THREE.BufferGeometry, color: THREE.Color, rng: () => number, vary = 0.08) {
@@ -81,7 +82,7 @@ function urchinGeometry(rng: () => number): THREE.BufferGeometry {
       Math.sin(gy) * Math.sin(ga),
     ).normalize()
     const len = spikeLen * (0.65 + rng() * 0.6)
-    const spike = new THREE.ConeGeometry(0.011 + rng() * 0.007, len, 4)
+    const spike = new THREE.ConeGeometry(0.011 + rng() * 0.007, len, 5)
     spike.translate(0, len * 0.42, 0)                 // pivot at base
     spike.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir))
     // seat the spike base into the test surface
@@ -137,6 +138,7 @@ export class ReefDecor {
       const rad = 9 + rng() * 58
       const x = Math.cos(a) * rad
       const z = -20 + Math.sin(a) * rad
+      if (insideReefFootprint(x, z, 1.04)) return   // off the limestone heads
       p.set(x, heightAt(x, z) + lift, z)
       e.set((rng() - 0.5) * tilt, rng() * Math.PI * 2, (rng() - 0.5) * tilt)
       q.setFromEuler(e)

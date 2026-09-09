@@ -156,10 +156,11 @@ export class Biomes {
       parts.push(geo)
     }
 
-    // — canyon arches (SW) —
+    // — canyon arches (SW) — proper sweep: 14×44 tube, two weather passes —
     const arch = (R: number, tube: number, x: number, z: number, rotY: number) => {
-      const g = new THREE.TorusGeometry(R, tube, 9, 24, Math.PI)
+      const g = new THREE.TorusGeometry(R, tube, 14, 44, Math.PI)
       weather(g, 0.32, tube * 0.34, rng() * 9)
+      weather(g, 0.9, tube * 0.1, rng() * 9)
       paintRock(g, rockBase, algae, rng() * 7, 0.45)
       drop(g, x, z, tube * 0.55, rotY, 0.06)
     }
@@ -168,8 +169,9 @@ export class Biomes {
 
     // — boulder piles at the arch feet —
     for (let i = 0; i < 10; i++) {
-      const g = new THREE.IcosahedronGeometry(0.7 + rng() * 1.4, 1)
+      const g = new THREE.IcosahedronGeometry(0.7 + rng() * 1.4, 2)
       weather(g, 0.75, 0.34, rng() * 9)
+      weather(g, 1.8, 0.09, rng() * 9)
       paintRock(g, rockBase.clone().multiplyScalar(0.92), algae, rng() * 7, 0.4)
       const a = rng() * Math.PI * 2
       const cx = -52 + Math.cos(a) * (5 + rng() * 9)
@@ -178,35 +180,67 @@ export class Biomes {
       drop(g, cx, cz, 0.25, rng() * Math.PI * 2, 0.5)
     }
 
-    // — canyon wall fins —
+    // — canyon wall fins — knifed ridges with ledges —
     for (const [fx, fz] of [[-44, -52], [-60, -42], [-56, -56], [-47, -38]]) {
       const h = 5.5 + rng() * 2.6
-      const g = new THREE.CylinderGeometry(1.1 + rng() * 0.7, 2.0 + rng() * 0.8, h, 6, 4)
+      const g = new THREE.CylinderGeometry(1.1 + rng() * 0.7, 2.0 + rng() * 0.8, h, 10, 8)
       g.translate(0, h / 2, 0)
       g.scale(0.5, 1, 1.7)
       weather(g, 0.5, 0.4, rng() * 9)
+      weather(g, 1.6, 0.12, rng() * 9)
       paintRock(g, rockBase.clone().multiplyScalar(0.85), algae, rng() * 7, 0.5)
       drop(g, fx, fz, 0.4, rng() * Math.PI * 2, 0.1)
     }
 
-    // — northern spires on the seamount —
+    // — northern spires on the seamount — karst needles with ledge bands —
     const spires: [number, number, number][] = [
       [-18, -80, 14], [10, -84, 16.5], [32, -76, 11], [-40, -78, 12.5], [-2, -74, 9],
     ]
     for (const [sx, sz, h] of spires) {
-      const g = new THREE.CylinderGeometry(0.9 + rng() * 0.8, 2.7 + rng() * 1.0, h, 7, 6)
+      const g = new THREE.CylinderGeometry(0.9 + rng() * 0.8, 2.7 + rng() * 1.0, h, 12, 14)
       g.translate(0, h / 2, 0)
+      // ledge bands ring the needle like eroded strata
+      {
+        const p = g.attributes.position as THREE.BufferAttribute
+        for (let i = 0; i < p.count; i++) {
+          const y = p.getY(i)
+          const band = Math.sin(y * 2.6) * 0.06
+          const k = 1 + band
+          p.setXYZ(i, p.getX(i) * k, y, p.getZ(i) * k)
+        }
+      }
       weather(g, 0.42, 0.55, rng() * 9)
+      weather(g, 1.5, 0.14, rng() * 9)
       paintRock(g, new THREE.Color('#66686c'), new THREE.Color('#3f5c52'), rng() * 7, 0.5)
       drop(g, sx, sz, 1.3, rng() * Math.PI * 2, 0.09)
     }
 
-    // — sand-flat bommies (SE) —
+    // — sand-flat bommies (SE) — algae domes with a living coral crown —
     for (const [bx, bz, br] of [[38, -14, 3.0], [47, -25, 2.4], [57, -9, 3.4]] as const) {
-      const g = new THREE.SphereGeometry(br, 14, 10)
+      const g = new THREE.SphereGeometry(br, 28, 20)
       g.scale(1.3, 0.62, 1.3)
       weather(g, 0.6, 0.4, rng() * 9)
+      weather(g, 1.7, 0.1, rng() * 9)
       paintRock(g, new THREE.Color('#8d8168'), new THREE.Color('#5d7d4e'), rng() * 7, 0.55)
+      // coral encrustation on the sunlit crown: pink/green living patches
+      {
+        const p = g.attributes.position as THREE.BufferAttribute
+        const col = g.attributes.color as THREE.BufferAttribute
+        const pink = new THREE.Color('#c86a8a')
+        const green = new THREE.Color('#6a9a52')
+        const c = new THREE.Color()
+        for (let i = 0; i < p.count; i++) {
+          const y = p.getY(i)
+          if (y > br * 0.18) {
+            const k = Math.min(1, (y - br * 0.18) / (br * 0.4))
+            const n = fbm2(p.getX(i) * 1.3 + 5, p.getZ(i) * 1.3 - 3, 3)
+            c.fromBufferAttribute(col, i)
+            if (n > 0.02) c.lerp(pink, Math.min(1, n * 3) * k * 0.75)
+            else if (n < -0.08) c.lerp(green, Math.min(1, -n * 2.5) * k * 0.6)
+            col.setXYZ(i, c.r, c.g, c.b)
+          }
+        }
+      }
       drop(g, bx, bz, br * 0.28, rng() * Math.PI * 2, 0.06)
     }
 

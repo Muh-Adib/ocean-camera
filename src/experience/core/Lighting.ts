@@ -17,16 +17,16 @@ export class Lighting {
   private lightEnergy = { value: 1 }
 
   constructor(scene: THREE.Scene) {
-    this.sun = new THREE.DirectionalLight('#c8ecff', 3.0)
+    this.sun = new THREE.DirectionalLight('#d4f0ff', 3.05)
     this.sun.position.set(6, 42, 8)
     this.sun.castShadow = false
     scene.add(this.sun)
 
-    this.ambient = new THREE.HemisphereLight('#a8dce8', '#0d2b3e', 1.0)
+    this.ambient = new THREE.HemisphereLight('#b2e4f0', '#0e3246', 1.04)
     scene.add(this.ambient)
 
     // faint fill from the front so fish bellies never go fully black
-    const fill = new THREE.DirectionalLight('#3388aa', 0.7)
+    const fill = new THREE.DirectionalLight('#3388aa', 0.72)
     fill.position.set(-8, -4, 24)
     scene.add(fill)
 
@@ -168,8 +168,8 @@ export class Lighting {
     gsap.to(this.lightEnergy, {
       value: target, duration: 6, ease: 'power2.inOut',
       onUpdate: () => {
-        this.sun.intensity = 3.0 * this.lightEnergy.value
-        this.ambient.intensity = 1.0 * this.lightEnergy.value
+        this.sun.intensity = 3.05 * this.lightEnergy.value
+        this.ambient.intensity = 1.04 * this.lightEnergy.value
       },
     })
   }

@@ -25,7 +25,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, perf.config.dpr))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.26
+    this.renderer.toneMappingExposure = 1.27
     this.canvas = this.renderer.domElement
     this.canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;'
     container.appendChild(this.canvas)
@@ -66,8 +66,8 @@ export class SceneManager {
       depthWrite: false,
       fog: false,
       uniforms: {
-        uTop: { value: new THREE.Color('#10688c') },
-        uMid: { value: new THREE.Color('#093c58') },
+        uTop: { value: new THREE.Color('#1280a8') },
+        uMid: { value: new THREE.Color('#0a4668') },
         uBottom: { value: new THREE.Color('#010a14') },
         uEnergy: sharedUniforms.uEnergy,
       },

@@ -19,6 +19,7 @@ import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
 import { Biomes } from './environment/Biomes'
+import { ReefCore } from './environment/ReefCore'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
 import { GestureBurst } from './particles/GestureBurst'
@@ -93,7 +94,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles]
+  const reefCore = new ReefCore(sceneMgr.scene, seabed.heightAt)
+  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...reefCore.obstacles]
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
@@ -103,7 +105,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const bursts = new GestureBurst(sceneMgr.scene, cfg.burstPool)
 
   // ---------------- fish ----------------
-  const fish = new FishManager(sceneMgr.scene, obstacles, cfg, coral.anemonePositions)
+  const fish = new FishManager(sceneMgr.scene, obstacles, cfg,
+    [...coral.anemonePositions, ...reefCore.anemonePositions])
   const creatures = new SpecialCreatures(sceneMgr.scene)
   const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
@@ -333,6 +336,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- dynamic ecosystem events ----------------
   let nextEvent = rand(16, 34)
+  let spongeTimer = 4
   function dynamicEvents(dt: number) {
     if (!entered) return
     nextEvent -= dt
@@ -343,6 +347,14 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       () => creatures.triggerTurtle(),
       () => fish.randomImpulse(),
       () => bubbles.burstCluster(rand(-55, 55), rand(-72, -8), 16),
+      () => {
+        // a sponge exhales: bubbles rise from a barrel/tube sponge mouth
+        const mouths = [...coral.spongeMouths, ...reefCore.spongeMouths]
+        if (mouths.length) {
+          const p = pick(mouths)
+          bubbles.burstCluster(p.x, p.z, 9)
+        }
+      },
       () => seaweed.setCurrent(rand(-1, 1), rand(-0.4, 0.4), rand(0.15, 0.55)),
       () => lighting.pulseEnergy(),
     ]
@@ -419,6 +431,17 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     bursts.update(dt)
     dynamicEvents(dt)
 
+    // sponges breathe: a gentle ambient trickle of bubbles from a random mouth
+    spongeTimer -= dt
+    if (spongeTimer <= 0) {
+      spongeTimer = rand(5, 9)
+      const mouths = [...coral.spongeMouths, ...reefCore.spongeMouths]
+      if (mouths.length) {
+        const p = pick(mouths)
+        bubbles.burstCluster(p.x, p.z, 3)
+      }
+    }
+
     // Automation environments (software WebGL) render orders of magnitude
     // slower — skip most frames entirely there so tests stay responsive.
     // Real browsers (navigator.webdriver false) always render 1:1.
@@ -449,6 +472,12 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   // QA/testing hooks (harmless in production, handy in devtools & CI)
   ;(window as unknown as { __ocean: Record<string, unknown> }).__ocean = {
     fast: () => { gsap.ticker.lagSmoothing(false) },
+    /** live GPU stats — triangles/draw-calls of the last rendered frame */
+    stats: () => ({
+      tris: sceneMgr.renderer.info.render.triangles,
+      calls: sceneMgr.renderer.info.render.calls,
+      geometries: sceneMgr.renderer.info.memory.geometries,
+    }),
     yaw: () => (swim.active ? swim.yaw : cameraRig.snapshotSwim().yaw),
     pos: () => (swim.active ? swim.position.toArray() : cameraRig.group.position.toArray()),
     fishCount: () => fish.count(),
@@ -481,6 +510,13 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     tp: (...args: unknown[]) => {
       if (!swim.active) return false
       swim.position.set(Number(args[0]), Number(args[1]), Number(args[2]))
+      return true
+    },
+    /** QA: set the swim heading directly — heading(yawDeg, pitchDeg) for 360° audits */
+    heading: (yawDeg: number, pitchDeg = 0) => {
+      if (!swim.active) return false
+      swim.yaw = (Number(yawDeg) * Math.PI) / 180
+      swim.pitch = (Number(pitchDeg) * Math.PI) / 180
       return true
     },
     projection: {

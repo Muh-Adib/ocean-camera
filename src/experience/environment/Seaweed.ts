@@ -6,6 +6,7 @@
 import * as THREE from 'three'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32 } from '../utils/math'
+import { insideReefFootprint } from './ReefSites'
 
 const VERT = /* glsl */`
   uniform float uTime;
@@ -119,6 +120,7 @@ export class Seaweed {
       const x = cl[0] + Math.cos(a) * d
       const z = cl[1] + Math.sin(a) * d
       if (Math.abs(x) < 5 && z > -16) continue       // keep camera spawn clear
+      if (insideReefFootprint(x, z, 1.04)) continue  // no blades through the karst
       offsets[i * 3] = x
       offsets[i * 3 + 1] = heightAt(x, z) - 0.1
       offsets[i * 3 + 2] = z

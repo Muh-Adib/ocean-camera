@@ -25,17 +25,23 @@ export class Seabed {
    *  • a seamount rising toward the northern monoliths
    */
   private terrain(x: number, n: number) {
-    const dune = fbm2(x * 0.022, n * 0.022, 4) * 3.4
+    const dune = fbm2(x * 0.022, n * 0.022, 4) * 3.4 + fbm2(x * 0.055, n * 0.055, 3) * 1.1
     const ripple = Math.sin(x * 0.55 + fbm2(x * 0.06, n * 0.06, 2) * 5.0) * 0.18
     const ripple2 = Math.sin(n * 0.34 + x * 0.1) * 0.12
+    const micro = Math.sin(x * 1.7 + n * 1.3) * Math.sin(n * 0.9 - x * 0.4) * 0.045
     const canyon = -3.8 * Math.exp(-(((x + 52) ** 2) / 780 + ((n + 26) ** 2) / 640))
     const seamount = 3.2 * Math.exp(-(((x - 10) ** 2) / 640 + ((n + 60) ** 2) / 500))
-    return SEABED_Y + dune + ripple + ripple2 + canyon + seamount
+    // reef mounds that seat the limestone reef heads (match ReefCore SITES)
+    const reefHero = 2.3 * Math.exp(-(((x - 2) ** 2) / 110 + ((n + 14) ** 2) / 80))
+    const reefA = 1.2 * Math.exp(-(((x + 18) ** 2) / 40 + ((n + 28) ** 2) / 36))
+    const reefB = 1.0 * Math.exp(-(((x - 24) ** 2) / 36 + (n * n) / 30))
+    const reefC = 0.9 * Math.exp(-(((x + 4) ** 2) / 30 + ((n + 36) ** 2) / 28))
+    return SEABED_Y + dune + ripple + ripple2 + micro + canyon + seamount + reefHero + reefA + reefB + reefC
   }
 
   private buildTerrain() {
     const size = 250
-    const seg = 140
+    const seg = 200
     const geo = new THREE.PlaneGeometry(size, size, seg, seg)
     geo.rotateX(-Math.PI / 2)
     const pos = geo.attributes.position as THREE.BufferAttribute
