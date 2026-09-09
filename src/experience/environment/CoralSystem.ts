@@ -17,6 +17,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { weldSmooth } from './smoothShading'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, noise2 } from '../utils/math'
 import { injectCaustic } from './causticInject'
@@ -812,7 +813,7 @@ export class CoralSystem {
       const list = buckets[key]
       if (!list.length) continue
       const fam = FAMILIES[key]
-      const merged = mergeGeometries(list, false)!
+      const merged = weldSmooth(mergeGeometries(list, false)!)
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.0 })
       if (fam.sway) addSway(mat, fam.sway[0], fam.sway[1], key)
       else injectCausticInto(mat, key)

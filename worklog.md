@@ -1180,3 +1180,19 @@ Work Log:
 
 Stage Summary:
 - Tiga cara mengatur bentuk output kini hidup berdampingan dan konsisten: RASIO per surface (proporsi pas, kamera & slice otomatis), UKURAN REAL (meter + jarak), dan drag SPAN manual (pin) — semuanya menjaga ujung kamera bertetangga menyatu tanpa patah dan tanpa mencuri view; vibrance global + per-show terlapis.
+
+---
+Task ID: 34
+Agent: main (Super Z)
+Task: lanjutan "per detail asset asset nya serta buat proper" — merge sesi paralel + smooth-shading pass global + limestone tower legibility fix
+
+Work Log:
+- REKONSILIASI: remote main membawa sesi paralel (reef v2 limestone core + ReefArena colosseum + ReefCorals anatomy + Sponges + causticInject + depthSilhouette + wall-ratio/prod-WS/vibrance). Merge 43fbe9e→local; konflik (Lighting/SceneManager/CoralSystem/Rocks/main/worklog) diselesaikan memihak remote (kanonik); worklog digabung dua sisi.
+- SMOOTH-SHADING PASS (akar masalah "low-poly draft"): semua builder procedural mendisplace geometri non-indexed → computeVertexNormals menghasilkan normal per-face (flat/faset). Modul BARU smoothShading.ts: weldSmooth(geo) — mergeVertices by position + computeVertexNormals + pemulihan vertex color via peta hash posisi (warna grup weld pertama). Diterapkan di: ReefArena (koloni per famili + mounds + rubble), Sponges, LimestoneReef (towers + rubble), CoralSystem (merge per famili), Rocks. Hasil: faset hilang di seluruh reef, shading organik; 5.1M tris dipertahankan.
+- ROCKS: icosa detail 1 flat-shaded → detail 3 di-weld smooth + vertex paint (algae crevice/coraline/crown/barnacle) + insideReefFootprint (tidak menembus tower) + tint near-white agar vertex paint terbaca.
+- LIMESTONE TOWER FIX (menara "hilang"): diagnostik berlapis — bbox group benar, mesh 6 860 tris visible, red-test + spawn-test membuktikan mesh TER-RENDER; akar masalah: (a) menara nyaris tak terbedakan dari pasir (base #a39880 ≈ warna pasir, tercuci caustic+fog), (b) 500 face utk menara 8 m + welding → telur halus tanpa karakter karst, (c) seating terlalu tenggelam. FIX: subdiv hero 7 / mid 6 / low 4, relief karst baru (oktaf micro e5, ledge 0.3 overhanging, flute grooves vertikal sin(az·9)), cat kontras (#8f8a7a + shade #46413a 0.78 + algae 0.62 + rust), seating y = heightAt + h·0.02. ReefSites.ts disinkronkan ke posisi tower remote; Seabed mounds dipindah ke kaki tower yang benar; Rocks/Seaweed/ReefDecor/CoralSystem mengecak footprint (tidak ada lagi fan/batu menembus karst).
+- QA: skrip qa-360.sh kini memakai hook remote (revealNow + setView) — tahan crash-restore tab headless; stats() ditambah limestoneBox/limestoneKids/limestoneSpotsSample (diagnostik); triK arena dikoreksi (index.count utk geometri terindeks).
+- VERIFIKASI: bunx tsc bersih; 5.1M tris / 128 draw call / 0 page error; sweep 360° 8 stasiun — menara kini dominan terlihat dari segala arah dgn karang menumbuh di puncaknya, batu smooth, sponge/tube halus; screenshots qa-reef-{0..315}, qa-tower-*.png.
+
+Stage Summary:
+- Reef kini proper: smooth shading global (faset low-poly hilang dari semua coral/batu/sponge/tower), menara batu kapur kini terlihat & berkarakter karst dari segala arah, tidak ada lagi geometri menembus karst, poly budget 5.1M terjaga.

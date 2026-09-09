@@ -32,12 +32,15 @@ export class Seabed {
     const micro = Math.sin(x * 1.7 + n * 1.3) * Math.sin(n * 0.9 - x * 0.4) * 0.045
     const canyon = -3.8 * Math.exp(-(((x + 52) ** 2) / 780 + ((n + 26) ** 2) / 640))
     const seamount = 3.2 * Math.exp(-(((x - 10) ** 2) / 640 + ((n + 60) ** 2) / 500))
-    // reef mounds that seat the limestone reef heads (match ReefCore SITES)
-    const reefHero = 2.3 * Math.exp(-(((x - 2) ** 2) / 110 + ((n + 14) ** 2) / 80))
-    const reefA = 1.2 * Math.exp(-(((x + 18) ** 2) / 40 + ((n + 28) ** 2) / 36))
-    const reefB = 1.0 * Math.exp(-(((x - 24) ** 2) / 36 + (n * n) / 30))
-    const reefC = 0.9 * Math.exp(-(((x + 4) ** 2) / 30 + ((n + 36) ** 2) / 28))
-    return SEABED_Y + dune + ripple + ripple2 + micro + canyon + seamount + reefHero + reefA + reefB + reefC
+    // gentle sand mounds that seat the limestone towers (match LimestoneReef)
+    const m1 = 1.1 * Math.exp(-(((x - 14.5) ** 2) / 60 + ((n + 6) ** 2) / 50))
+    const m2 = 0.8 * Math.exp(-(((x - 11.2) ** 2) / 26 + ((n - 3.4) ** 2) / 22))
+    const m3 = 0.7 * Math.exp(-(((x - 18) ** 2) / 20 + ((n - 3) ** 2) / 18))
+    const m4 = 0.6 * Math.exp(-(((x - 15.8) ** 2) / 18 + ((n + 10.2) ** 2) / 16))
+    const m5 = 0.8 * Math.exp(-(((x + 3.5) ** 2) / 22 + ((n + 13) ** 2) / 20))
+    const m6 = 0.6 * Math.exp(-(((x - 25.5) ** 2) / 16 + ((n + 12.5) ** 2) / 14))
+    const m7 = 0.6 * Math.exp(-(((x - 4) ** 2) / 18 + ((n + 18.5) ** 2) / 16))
+    return SEABED_Y + dune + ripple + ripple2 + micro + canyon + seamount + m1 + m2 + m3 + m4 + m5 + m6 + m7
   }
 
   private buildTerrain() {

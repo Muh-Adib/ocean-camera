@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { weldSmooth } from './smoothShading'
 import { mulberry32, noise2, fbm2 } from '../utils/math'
 import { addCaustic } from './causticInject'
 import type { Obstacle } from './Rocks'
@@ -41,10 +42,10 @@ export class LimestoneReef {
     const h = Math.max(0.001, bb.max.y - bb.min.y)
     const count = geo.attributes.position.count
     const colors = new Float32Array(count * 3)
-    const base = new THREE.Color('#a39880')
-    const shade = new THREE.Color('#6e6553')
-    const algae = new THREE.Color('#5e7a4e')
-    const rust = new THREE.Color('#8a6a4a')
+    const base = new THREE.Color('#8f8a7a')
+    const shade = new THREE.Color('#46413a')
+    const algae = new THREE.Color('#44603f')
+    const rust = new THREE.Color('#6e5238')
     const c = new THREE.Color()
     for (let i = 0; i < count; i++) {
       const x = geo.attributes.position.getX(i)
@@ -52,13 +53,14 @@ export class LimestoneReef {
       const z = geo.attributes.position.getZ(i)
       const t = (y - bb.min.y) / h
       c.copy(base)
-      // crevice darkening toward the base
-      c.lerp(shade, (1 - t) * 0.66)
-      // algae patches + rust stains from fbm field
+      // crevice darkening toward the base — grounds the tower against the sand
+      c.lerp(shade, (1 - t) * 0.78)
+      // algae patches + rust stains from fbm field (strong: the karst must
+      // never melt into the sand tone at a distance)
       const al = Math.max(0, fbm2(x * 0.5 + 9, z * 0.5 - y * 0.4, 3))
-      c.lerp(algae, Math.min(0.5, al * 0.85) * (0.35 + t * 0.4))
+      c.lerp(algae, Math.min(0.62, al * 1.05) * (0.45 + t * 0.4))
       const ru = Math.max(0, noise2(x * 0.9 - 4, y * 0.9 + z * 0.7))
-      c.lerp(rust, ru * 0.35)
+      c.lerp(rust, ru * 0.45)
       // micro variation
       const v = 1 + (rng() - 0.5) * 0.14
       c.multiplyScalar(v)
@@ -70,7 +72,9 @@ export class LimestoneReef {
   /** one karst tower: icosphere sculpted by ridged fbm + ledges */
   private makeTower(seed: number, r: number, h: number, detail: number): THREE.BufferGeometry {
     const rng = mulberry32(seed)
-    const geo = new THREE.IcosahedronGeometry(1, detail === 1 ? 5 : 3)
+    // hero towers need real silhouette detail — 500-face eggs read as blobs
+    const subdiv = detail >= 1 ? 7 : detail >= 0.6 ? 6 : 4
+    const geo = new THREE.IcosahedronGeometry(1, subdiv)
     const p = geo.attributes.position as THREE.BufferAttribute
     const v = new THREE.Vector3()
     for (let i = 0; i < p.count; i++) {
@@ -78,15 +82,19 @@ export class LimestoneReef {
       const ny = v.y                                   // -1..1
       // vertical stretch into a tower
       let rad = 1 + ny * 0.1
-      // ridged limestone erosion (large + medium + fine)
+      // ridged limestone erosion (large + medium + fine + fluting)
       const e1 = 1 - Math.abs(noise2(v.x * 1.4 + seed, v.z * 1.4 - ny * 0.8))
       const e2 = 1 - Math.abs(noise2(v.z * 2.6 - seed, v.x * 2.6 + ny * 1.7))
       const e3 = noise2(v.x * 5.5 + ny * 3, v.z * 5.5)
       const e4 = noise2(v.x * 11 - ny * 5, v.z * 11 + ny * 4)          // v3: fine fluting
-      rad *= 1 + (e1 - 0.45) * 0.52 + (e2 - 0.5) * 0.26 + e3 * 0.11 + e4 * 0.05
-      // horizontal ledge shelves every ~40% of height
-      const ledge = Math.exp(-Math.pow(((ny + 0.25) % 0.9 - 0.45) * 7, 2)) * 0.22
+      const e5 = noise2(v.x * 19 + ny * 9, v.z * 19 - ny * 7)          // v4: micro karst
+      rad *= 1 + (e1 - 0.45) * 0.52 + (e2 - 0.5) * 0.3 + e3 * 0.13 + e4 * 0.075 + e5 * 0.035
+      // horizontal ledge shelves every ~40% of height — deep, overhanging
+      const ledge = Math.exp(-Math.pow(((ny + 0.25) % 0.9 - 0.45) * 7, 2)) * 0.3
       rad += ledge * (0.5 + 0.5 * Math.sin(v.x * 4 + v.z * 3))
+      // vertical flute grooves (weathered karst striping)
+      const flute = Math.sin(Math.atan2(v.z, v.x) * 9 + ny * 2.2) * 0.035
+      rad += flute * (0.4 + 0.6 * Math.max(0, ny))
       // flatten bottom, taper strongly near the sand
       const taper = ny < -0.3 ? 1 + (ny + 0.3) * 0.9 : 1
       rad *= taper
@@ -103,7 +111,7 @@ export class LimestoneReef {
   /** chunky rubble block for the skirt */
   private makeRubble(seed: number): THREE.BufferGeometry {
     const rng = mulberry32(seed)
-    const geo = new THREE.IcosahedronGeometry(1, 1)
+    const geo = new THREE.IcosahedronGeometry(1, 2)
     const p = geo.attributes.position as THREE.BufferAttribute
     const v = new THREE.Vector3()
     for (let i = 0; i < p.count; i++) {
@@ -159,7 +167,7 @@ export class LimestoneReef {
 
     for (const t of towers) {
       const geo = this.makeTower(t.seed, t.r, t.h, detail)
-      const y = this.heightAt(t.x, t.z) - t.r * 0.28
+      const y = this.heightAt(t.x, t.z) + t.h * 0.02
       const world = new THREE.Vector3(t.x, y, t.z)
       const scale = 1
       this.collectGrowthSpots(geo, world, scale)
@@ -185,8 +193,8 @@ export class LimestoneReef {
       this.obstacles.push({ x: t.x, y: y + t.h * 0.4, z: t.z, r: t.r * 1.25 })
     }
 
-    // towers merged into one draw call
-    const towerMeshGeo = mergeGeometries(towerGeos.map((g) => (g.index ? g : g)), false)!
+    // towers merged into one draw call — welded so the karst shades smooth
+    const towerMeshGeo = weldSmooth(mergeGeometries(towerGeos.map((g) => (g.index ? g : g)), false)!)
     const towerMat = new THREE.MeshStandardMaterial({
       vertexColors: true, roughness: 0.94, metalness: 0.0,
     })
@@ -198,7 +206,7 @@ export class LimestoneReef {
     this.meshes.push(towerMesh)
 
     if (rubbleGeos.length) {
-      const rubbleGeo = mergeGeometries(rubbleGeos, false)!
+      const rubbleGeo = weldSmooth(mergeGeometries(rubbleGeos, false)!)
       const rubbleMat = new THREE.MeshStandardMaterial({
         vertexColors: true, roughness: 0.97, metalness: 0.0,
       })

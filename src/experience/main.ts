@@ -531,6 +531,20 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       geometries: sceneMgr.renderer.info.memory.geometries,
       coralTris: Math.round(coral.polyCount),
       limestoneSpots: limestone.growthSpots.length,
+      limestoneSpotsSample: limestone.growthSpots.slice(0, 4).map((s) => s.pos.toArray().map((n) => Math.round(n * 10) / 10)),
+      limestoneKids: limestone.group.children.map((c) => ({
+        tris: (c as THREE.Mesh).geometry
+          ? Math.round(((c as THREE.Mesh).geometry.index
+            ? (c as THREE.Mesh).geometry.index!.count
+            : (c as THREE.Mesh).geometry.attributes.position.count) / 3)
+          : -1,
+        vis: c.visible,
+        pos: c.position.toArray().map((n) => Math.round(n * 10) / 10),
+      })),
+      limestoneBox: (() => {
+        const b = new THREE.Box3().setFromObject(limestone.group)
+        return [b.min.toArray().map((n) => Math.round(n * 10) / 10), b.max.toArray().map((n) => Math.round(n * 10) / 10)]
+      })(),
       spongeEmitters: sponges.emitters.length,
       arena: arena.stats(),
       tier: cfg.tier,

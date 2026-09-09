@@ -20,6 +20,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { weldSmooth } from './smoothShading'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, fbm2 } from '../utils/math'
 import { injectSilhouette } from './depthSilhouette'
@@ -480,8 +481,8 @@ export class ReefArena {
     for (const key of Object.keys(buckets)) {
       const list = buckets[key]
       if (!list.length) continue
-      const merged = mergeGeometries(list, false)!
-      this.tris += merged.attributes.position.count / 3
+      const merged = weldSmooth(mergeGeometries(list, false)!)
+      this.tris += (merged.index ? merged.index.count : merged.attributes.position.count) / 3
 
       // gentle baked depth layering for ring C (the camera-relative
       // silhouette shader does the heavy lifting — this just helps
@@ -504,8 +505,8 @@ export class ReefArena {
 
     // mounds — one merged mossy mesh
     if (mounds.length) {
-      const merged = mergeGeometries(mounds.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
-      this.tris += merged.attributes.position.count / 3
+      const merged = weldSmooth(mergeGeometries(mounds.map((g) => (g.index ? g.toNonIndexed() : g)), false)!)
+      this.tris += (merged.index ? merged.index.count : merged.attributes.position.count) / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01 })
       mat.onBeforeCompile = (shader) => {
         injectCaustic(shader, { scale: 0.4, strength: 0.42 })
@@ -517,8 +518,8 @@ export class ReefArena {
 
     // rubble — one merged mesh
     if (rubble.length) {
-      const merged = mergeGeometries(rubble.map((g) => (g.index ? g.toNonIndexed() : g)), false)!
-      this.tris += merged.attributes.position.count / 3
+      const merged = weldSmooth(mergeGeometries(rubble.map((g) => (g.index ? g.toNonIndexed() : g)), false)!)
+      this.tris += (merged.index ? merged.index.count : merged.attributes.position.count) / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.02 })
       mat.onBeforeCompile = (shader) => {
         injectCaustic(shader, { scale: 0.5, strength: 0.45 })
