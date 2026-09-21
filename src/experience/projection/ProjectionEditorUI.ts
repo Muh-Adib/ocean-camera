@@ -5,6 +5,7 @@
 // a live STATUS BAR, and the fullscreen OUTPUT toggle. Animated with GSAP.
 // ---------------------------------------------------------------
 import gsap from 'gsap'
+import * as THREE from 'three'
 import type { ProjectionManager } from './ProjectionManager'
 import type { ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
 import { QUALITY_PROFILES } from './ProjectionTypes'
@@ -915,6 +916,10 @@ export class ProjectionEditorUI {
       body.appendChild(clearRow)
     }
 
+    // ================= CHOREOGRAPHY — per-school movement control =================
+    body.appendChild(this.sepEl())
+    body.appendChild(this.buildChoreoPanel())
+
     void this.loadFishDesigns().then(() => {
       // repaint the grid once the fetch lands — session switches start from
       // the previous session's list, so repaint whenever the fresh list
@@ -925,6 +930,216 @@ export class ProjectionEditorUI {
       const same = rendered.length === fresh.length && rendered.every((s, i) => s === fresh[i])
       if (!same) this.showTab('fish')
     })
+  }
+
+  /**
+   * CHOREOGRAPHY — per-school movement control. Every school (reef
+   * species group or painted design) gets: show/hide, location
+   * (fish swim over — never teleport), rotation (compass heading),
+   * speed multiplier and the movement flow: FREE swim, PATROL path
+   * (operator waypoints), ORBIT ring or FIGURE-8. Edits apply live
+   * here AND on every /output screen through the tank sync.
+   */
+  private buildChoreoPanel(): HTMLElement {
+    const dir = this.pm.fishTank?.director
+    const wrap = document.createElement('div')
+    wrap.className = 'pm-choreo'
+    if (!dir) {
+      wrap.appendChild(this.sectionEl('CHOREOGRAPHY — movement & visibility per school'))
+      wrap.appendChild(this.hint('Choreography needs the fish tank (server) — it is unavailable on this page.'))
+      return wrap
+    }
+
+    wrap.appendChild(this.sectionEl('CHOREOGRAPHY — movement & visibility per school'))
+
+    const pickerRow = document.createElement('div')
+    pickerRow.className = 'pm-btn-row'
+    const sel = document.createElement('select')
+    sel.className = 'pm-select pm-select-sm'
+    const showAllBtn = this.btn('SHOW ALL', () => { dir.showAll(); render() }, 'pm-btn-sm')
+    const resetBtn = this.btn('RESET SCHOOL', () => { if (sel.value) dir.reset(sel.value); render() }, 'pm-btn-sm pm-btn-danger')
+    pickerRow.append(sel, showAllBtn, resetBtn)
+    wrap.appendChild(pickerRow)
+
+    const readout = document.createElement('div')
+    readout.className = 'pm-readout'
+    readout.style.display = 'block'
+    wrap.appendChild(readout)
+
+    const controls = document.createElement('div')
+    wrap.appendChild(controls)
+
+    // local field builders — fish edits bypass projection undo history
+    const field = (label: string, value: number, step: number, min: number, max: number, set: (v: number) => void): HTMLElement => {
+      const row = document.createElement('label')
+      row.className = 'pm-field'
+      const span = document.createElement('span')
+      span.textContent = label
+      const input = document.createElement('input')
+      input.type = 'number'
+      input.className = 'pm-input'
+      input.step = String(step)
+      input.value = String(Math.round(value * 100) / 100)
+      input.addEventListener('change', () => {
+        const v = parseFloat(input.value)
+        if (Number.isFinite(v)) set(Math.min(max, Math.max(min, v)))
+      })
+      row.append(span, input)
+      return row
+    }
+    const slide = (label: string, value: number, min: number, max: number, step: number, set: (v: number) => void): HTMLElement => {
+      const row = document.createElement('div')
+      row.className = 'pm-slider-row'
+      const span = document.createElement('span')
+      span.className = 'pm-label pm-slider-label'
+      span.textContent = label
+      const input = document.createElement('input')
+      input.type = 'range'
+      input.min = String(min); input.max = String(max); input.step = String(step)
+      input.value = String(value)
+      const val = document.createElement('span')
+      val.className = 'pm-slider-val'
+      val.textContent = String(Math.round(value * 100) / 100)
+      input.addEventListener('input', () => {
+        const v = parseFloat(input.value)
+        set(v); val.textContent = String(Math.round(v * 100) / 100)
+      })
+      row.append(span, input, val)
+      return row
+    }
+    const xyzRow = (lab: string, a: [number, number, number], set: (v: [number, number, number]) => void): HTMLElement => {
+      const row = document.createElement('div')
+      row.className = 'pm-btn-row'
+      row.style.alignItems = 'stretch'
+      const cur: [number, number, number] = [...a]
+      const mk = (i: 0 | 1 | 2, l: string): HTMLElement => field(l, cur[i], 0.5, i === 1 ? -12 : -75, i === 1 ? 15 : 15, (v) => { cur[i] = v; set([...cur]) })
+      const head = document.createElement('span')
+      head.className = 'pm-label pm-slider-label'
+      head.style.minWidth = '3.4rem'
+      head.textContent = lab
+      row.append(head, mk(0, 'X'), mk(1, 'Y'), mk(2, 'Z'))
+      return row
+    }
+
+    const render = () => {
+      const items = dir.list()
+      // (re)fill options — keep the current selection stable
+      const prev = sel.value
+      sel.innerHTML = ''
+      for (const it of items) {
+        const opt = document.createElement('option')
+        opt.value = it.id
+        opt.textContent = `${it.custom ? '★ ' : ''}${it.label}${it.visible ? '' : ' · HIDDEN'}`
+        sel.appendChild(opt)
+      }
+      sel.value = items.some((i) => i.id === prev) ? prev : (items[0]?.id ?? '')
+      const it = items.find((i) => i.id === sel.value)
+      if (!it) return
+      const st = dir.get(it.id)
+      const hasCustom = it.anchor[0] !== 0 || it.anchor[1] !== 2 || it.anchor[2] !== -25
+      const home = hasCustom ? it.anchor : it.centroid
+      readout.textContent = `${it.label} · ${it.visible ? 'VISIBLE' : 'HIDDEN'} · flow ${st.flow.mode.toUpperCase()}${st.flow.mode === 'patrol' ? ` (${st.flow.points.length} wp, ${st.flow.loop ? 'loop' : 'ping-pong'})` : ''} · speed ×${st.speedMul}`
+
+      controls.innerHTML = ''
+
+      // visibility
+      controls.appendChild(this.check('SHOW this school in the ocean', it.visible, (on) => { dir.patch(it.id, { visible: on }); render() }))
+
+      // location — fish swim over (never teleport)
+      const locHead = document.createElement('div')
+      locHead.className = 'pm-panel-head pm-panel-head-sm'
+      locHead.textContent = 'LOCATION (m) — fish swim to the new spot'
+      controls.append(locHead, xyzRow('POS', home, (v) => { dir.patch(it.id, { anchor: v }); render() }))
+
+      // rotation — compass heading bias (0 = natural wander)
+      const rotHead = document.createElement('div')
+      rotHead.className = 'pm-panel-head pm-panel-head-sm'
+      rotHead.textContent = 'ROTATION — facing direction (0 = free)'
+      controls.append(
+        rotHead,
+        slide('HEADING°', it.heading, 0, 355, 5, (v) => { dir.patch(it.id, { heading: v }) }),
+      )
+
+      // speed
+      controls.appendChild(slide('SPEED ×', it.speedMul, 0.25, 3, 0.05, (v) => { dir.patch(it.id, { speedMul: v }) }))
+
+      // movement flow
+      const flowHead = document.createElement('div')
+      flowHead.className = 'pm-panel-head pm-panel-head-sm'
+      flowHead.textContent = 'MOVEMENT FLOW'
+      controls.appendChild(flowHead)
+      const flowSel = document.createElement('select')
+      flowSel.className = 'pm-select pm-select-sm'
+      for (const [m, l] of [['free', 'FREE SWIM — natural wander'], ['patrol', 'PATROL — follow waypoints'], ['orbit', 'ORBIT — circle the anchor'], ['figure8', 'FIGURE-8 — infinity loop']] as const) {
+        const o = document.createElement('option')
+        o.value = m; o.textContent = l
+        flowSel.appendChild(o)
+      }
+      flowSel.value = st.flow.mode
+      flowSel.addEventListener('change', () => {
+        const mode = flowSel.value as 'free' | 'patrol' | 'orbit' | 'figure8'
+        if (mode === 'patrol' && st.flow.points.length < 2) {
+          // seed a first path segment at the school's live position
+          const c = it.centroid
+          dir.setFlow(it.id, 'patrol', { points: [[c[0], c[1], c[2]], [c[0] + 12, c[1], c[2] - 6]] })
+        } else {
+          dir.setFlow(it.id, mode)
+        }
+        render()
+      })
+      controls.appendChild(flowSel)
+
+      if (st.flow.mode === 'patrol') {
+        controls.appendChild(this.check('CLOSED LOOP (off = ping-pong)', st.flow.loop, (on) => { dir.patch(it.id, { flow: { loop: on } }); render() }))
+        controls.appendChild(slide('PATH SPEED m/s', st.flow.speed, 0.3, 9, 0.1, (v) => { dir.patch(it.id, { flow: { speed: v } }) }))
+        const wpHead = document.createElement('div')
+        wpHead.className = 'pm-panel-head pm-panel-head-sm'
+        wpHead.textContent = `WAYPOINTS (${st.flow.points.length})`
+        controls.appendChild(wpHead)
+        st.flow.points.forEach((wp, wi) => {
+          const row = document.createElement('div')
+          row.className = 'pm-btn-row'
+          const del = this.btn('✕', () => {
+            const points = st.flow.points.filter((_, k) => k !== wi)
+            dir.patch(it.id, { flow: { points, ...(points.length < 2 ? { mode: 'free' as const } : {}) } })
+            render()
+          }, 'pm-btn-sm pm-btn-danger')
+          row.appendChild(del)
+          row.appendChild(xyzRow(`WP ${wi + 1}`, wp, (v) => {
+            const points = st.flow.points.map((p, k) => (k === wi ? v : p))
+            dir.patch(it.id, { flow: { points } })
+          }))
+          controls.appendChild(row)
+        })
+        const addRow = document.createElement('div')
+        addRow.className = 'pm-btn-row'
+        addRow.appendChild(this.btn('+ WAYPOINT AT CAMERA', () => {
+          const p = new THREE.Vector3()
+          this.pm.mainCamera.getWorldPosition(p)
+          dir.addWaypoint(it.id, [Math.round(p.x * 10) / 10, Math.round(p.y * 10) / 10, Math.round(p.z * 10) / 10])
+          render()
+        }, 'pm-btn-sm'))
+        addRow.appendChild(this.btn('+ AT SCHOOL', () => {
+          const c = it.centroid
+          dir.addWaypoint(it.id, [c[0], c[1], c[2]])
+          render()
+        }, 'pm-btn-sm'))
+        addRow.appendChild(this.btn('CLEAR PATH', () => { dir.setFlow(it.id, 'free'); render() }, 'pm-btn-sm'))
+        controls.appendChild(addRow)
+        controls.appendChild(this.hint('Swim the camera along the route you want and drop waypoints — the school then cruises the path. Fewer than 2 waypoints returns the school to FREE SWIM.'))
+      }
+      if (st.flow.mode === 'orbit' || st.flow.mode === 'figure8') {
+        controls.appendChild(slide('RADIUS m', st.flow.radius, 2, 50, 0.5, (v) => { dir.patch(it.id, { flow: { radius: v } }) }))
+        controls.appendChild(slide('FLOW SPEED m/s', st.flow.speed, 0.3, 8, 0.1, (v) => { dir.patch(it.id, { flow: { speed: v } }) }))
+        controls.appendChild(this.hint(st.flow.mode === 'orbit'
+          ? 'The school circles its LOCATION anchor — set the anchor first, then the ring radius.'
+          : 'The school swims an infinity loop around its LOCATION anchor.'))
+      }
+    }
+
+    sel.addEventListener('change', render)
+    render()
+    return wrap
   }
 
   /** the LIVE FOLDER SYNC panel — pick once, scans flow in all show long */

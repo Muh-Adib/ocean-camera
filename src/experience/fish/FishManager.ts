@@ -86,11 +86,15 @@ const SCHOOL_DEFS: SchoolDef[] = [
 ]
 
 interface Entry {
+  id: string                 // stable choreography id — 's3' | 'custom:<designId>'
+  label: string              // human label for the choreography UI
+  species: string
   school: School
   mesh: THREE.InstancedMesh
   phaseAttr: THREE.InstancedBufferAttribute
   puffAttr: THREE.InstancedBufferAttribute | null
   dummy: THREE.Object3D
+  visible: boolean           // operator toggle (mesh.visible = visible && guests rule)
 }
 
 /** stable little hash → 1-3 swimmers per painting, same on every screen */
@@ -115,7 +119,8 @@ export class FishManager {
     this.obstacles = obstacles
     const scale = quality.fishScale
 
-    for (const def of SCHOOL_DEFS) {
+    for (let di = 0; di < SCHOOL_DEFS.length; di++) {
+      const def = SCHOOL_DEFS[di]
       const count = Math.max(2, Math.round(def.count * (def.species === 'clownfish' ? Math.max(0.6, scale) : scale)))
       // snap clownfish anchors to actual anemone positions
       let anchor = new THREE.Vector3(...def.anchor)
@@ -161,7 +166,12 @@ export class FishManager {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
 
       this.group.add(mesh)
-      this.entries.push({ school, mesh, phaseAttr, puffAttr, dummy: new THREE.Object3D() })
+      this.entries.push({
+        id: `s${di}`,
+        label: `${def.species.toUpperCase()} · ${count}`,
+        species: def.species,
+        school, mesh, phaseAttr, puffAttr, dummy: new THREE.Object3D(), visible: true,
+      })
     }
 
     scene.add(this.group)
@@ -281,7 +291,12 @@ export class FishManager {
     if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true
     this.group.add(mesh)
 
-    const entry: Entry = { school, mesh, phaseAttr, puffAttr: null, dummy: new THREE.Object3D() }
+    const entry: Entry = {
+      id: `custom:${id}`,
+      label: `PAINTED · ${id.slice(-4).toUpperCase()} · ${n}`,
+      species: 'painted',
+      school, mesh, phaseAttr, puffAttr: null, dummy: new THREE.Object3D(), visible: true,
+    }
     this.entries.push(entry)
     this.custom.set(id, { entry, mat, texture })
     this.refreshGuests()
@@ -307,11 +322,12 @@ export class FishManager {
 
   private refreshGuests() {
     const hide = this.custom.size > 0
-    if (hide === this.guestsHidden) return
-    this.guestsHidden = hide
+    if (hide !== this.guestsHidden) {
+      this.guestsHidden = hide
+    }
     const customEntries = new Set([...this.custom.values()].map((r) => r.entry))
     for (const e of this.entries) {
-      e.mesh.visible = customEntries.has(e) ? true : !hide
+      e.mesh.visible = e.visible && (customEntries.has(e) ? true : !hide)
     }
   }
 
@@ -354,5 +370,84 @@ export class FishManager {
       ;(e.mesh.material as THREE.Material).dispose()
     }
     void BOUNDS
+  }
+
+  // ------------------------------------------------------------ choreography (per-school movement control)
+  private byId(id: string): Entry | null {
+    return this.entries.find((e) => e.id === id) ?? null
+  }
+
+  /**
+   * Apply one choreography setting to a school: visibility, location
+   * (swim-over migration), rotation (compass heading bias), speed
+   * multiplier and the movement flow (free / patrol / orbit / figure8).
+   * Returns false when the id is unknown (design not spawned yet etc.).
+   */
+  applyChoreo(id: string, cfg: {
+    visible?: boolean
+    anchor?: [number, number, number]
+    headingDeg?: number | null
+    speedMul?: number
+    route?: {
+      mode: 'patrol' | 'orbit' | 'figure8' | null
+      points?: [number, number, number][]
+      loop?: boolean
+      speed?: number
+      radius?: number
+    } | null
+  }): boolean {
+    const e = this.byId(id)
+    if (!e) return false
+    if (cfg.visible !== undefined) e.visible = !!cfg.visible
+    if (cfg.anchor) e.school.setAnchor(new THREE.Vector3(...cfg.anchor))
+    if (cfg.headingDeg !== undefined) e.school.setHeadingDeg(cfg.headingDeg)
+    if (cfg.speedMul !== undefined) e.school.speedMul = Math.min(3, Math.max(0.2, cfg.speedMul))
+    if (cfg.route !== undefined) {
+      const r = cfg.route
+      if (!r || !r.mode) {
+        e.school.setRoute(null)
+      } else {
+        e.school.setRoute(
+          r.mode,
+          (r.points ?? []).map((p) => new THREE.Vector3(...p)),
+          r.loop ?? true,
+          r.speed ?? 2.2,
+          r.radius ?? 7,
+        )
+      }
+    }
+    this.refreshGuests()
+    return true
+  }
+
+  /** metadata for the choreography UI / QA — every school + painted design */
+  schoolList(): {
+    id: string; label: string; species: string; count: number; visible: boolean
+    anchor: [number, number, number]
+    centroid: [number, number, number]
+    headingDeg: number | null
+    speedMul: number
+    route: string
+    waypoints: number
+  }[] {
+    return this.entries.map((e) => ({
+      id: e.id,
+      label: e.label,
+      species: e.species,
+      count: e.school.fish.length,
+      visible: e.visible,
+      anchor: e.school.anchor.toArray().map((n) => Math.round(n * 100) / 100) as [number, number, number],
+      centroid: e.school.centroid.toArray().map((n) => Math.round(n * 100) / 100) as [number, number, number],
+      headingDeg: e.school.heading ? Math.round(((Math.atan2(e.school.heading.z, e.school.heading.x) * 180) / Math.PI + 360) % 360) : null,
+      speedMul: e.school.speedMul,
+      route: e.school.route ? e.school.route.mode : 'free',
+      waypoints: e.school.route?.points.length ?? 0,
+    }))
+  }
+
+  /** show every school again (one click after a hide-heavy show) */
+  showAllSchools() {
+    for (const e of this.entries) e.visible = true
+    this.refreshGuests()
   }
 }

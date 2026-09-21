@@ -645,6 +645,30 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       /** QA: QR overlay geometry on /output */
       qrInfo: () => projection.qrInfo(),
       fish: () => ({ ...fishTank.info(), mode: fish.customModeInfo() }),
+      /** fish choreography — per-school movement control (ops + QA) */
+      choreo: {
+        list: () => fishTank.director.list(),
+        get: (id: string) => fishTank.director.get(id),
+        set: (id: string, patch: Record<string, unknown>) =>
+          fishTank.director.patch(id, patch as never),
+        /** vis(id, on) — show/hide one school */
+        vis: (id: string, on: boolean) => fishTank.director.patch(id, { visible: !!on }),
+        /** anchor(id, x, y, z) — school swims over (never teleports) */
+        anchor: (id: string, x: number, y: number, z: number) =>
+          fishTank.director.patch(id, { anchor: [x, y, z] }),
+        /** heading(id, deg) — rotation bias (0 = natural wander) */
+        heading: (id: string, deg: number) => fishTank.director.patch(id, { heading: deg }),
+        speed: (id: string, mul: number) => fishTank.director.patch(id, { speedMul: mul }),
+        /** flow(id, 'free'|'patrol'|'orbit'|'figure8', opts) */
+        flow: (id: string, mode: 'free' | 'patrol' | 'orbit' | 'figure8', opts?: Record<string, unknown>) =>
+          fishTank.director.setFlow(id, mode, opts as never),
+        /** waypoint(id, x, y, z) — append a patrol waypoint */
+        waypoint: (id: string, x: number, y: number, z: number) =>
+          fishTank.director.addWaypoint(id, [x, y, z]),
+        reset: (id?: string) => (id ? fishTank.director.reset(id) : fishTank.director.resetAll()),
+        showAll: () => fishTank.director.showAll(),
+        state: () => fishTank.director.exportState(),
+      },
       /** force an immediate full push to every open /output */
       pushNow: () => projection.qaPush(),
       freeze: (on: boolean) => { projection.qaFrozen = on },

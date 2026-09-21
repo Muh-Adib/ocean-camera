@@ -96,7 +96,8 @@ export class ProjectionManager {
   private outputMgr: OutputManager
   project: ProjectManager
   private ui: ProjectionEditorUI | null = null
-  private mainCamera: THREE.PerspectiveCamera
+  /** the live main viewport camera (read by the fish choreography UI) */
+  mainCamera: THREE.PerspectiveCamera
 
   private unsubs: (() => void)[] = []
   private autosaveTimer = 0

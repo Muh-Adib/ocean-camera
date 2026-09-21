@@ -6,16 +6,22 @@
 // studio imports, /output pages (even on other machines) poll the
 // version and pull new designs — no reload, no pairing, nothing.
 //
+// CHOREOGRAPHY rides the same store: the studio's FishDirector
+// pushes per-school movement settings (visibility, location,
+// rotation, speed, patrol/orbit/figure-8 flows) and every screen
+// picks them up through the same version poll.
+//
 // SESSIONS: every design belongs to one show session (venue). The
 // exhibition's scanner folder sync targets a session; screens only
 // ever poll their own session's tank — two shows on one server stay
 // perfectly isolated.
 //
-//   GET  ?session=X          → { v, items: [{ id, name }] }          (light poll)
-//   GET  ?full=1&session=X   → { v, designs: [{ id, name, url }] }   (full pull)
+//   GET  ?session=X          → { v, items, choreoV }                  (light poll)
+//   GET  ?full=1&session=X   → { v, designs, choreoV, choreo }         (full pull)
 //   POST { action:'add', session, design:{ name, dataUrl } }
 //   POST { action:'remove', session, id }
 //   POST { action:'clear', session }
+//   POST { action:'choreo', session, state }        ← FishDirector push
 //
 // In-memory with a best-effort .fish-tank.json mirror so the tank
 // survives dev-server restarts on the show machine.
@@ -35,6 +41,10 @@ interface FishDesign {
 interface Tank {
   v: number
   designs: FishDesign[]
+  /** choreography version — bumps on every FishDirector push */
+  choreoV: number
+  /** per-school movement choreography document (opaque JSON) */
+  choreo: unknown
 }
 
 interface TankStore {
@@ -45,6 +55,7 @@ interface TankStore {
 const MAX_DESIGNS = 12
 const MAX_DATAURL = 480_000   // ~480 KB per design keeps the poll cheap
 const MAX_SESSIONS = 16       // LRU beyond that — plenty for a venue network
+const MAX_CHOREO = 200_000    // choreography document cap (waypoints are tiny)
 
 /**
  * one store per server process — SHAPE-CHECKED.
@@ -72,6 +83,8 @@ function store(): TankStore {
         designs: ((existing as unknown as { designs: FishDesign[] }).designs || [])
           .filter((d) => d && typeof d.id === 'string' && typeof d.url === 'string' && d.url.length <= MAX_DATAURL)
           .slice(0, MAX_DESIGNS),
+        choreoV: 0,
+        choreo: null,
       })
     } catch { /* never trust the stale value too hard */ }
   }
@@ -90,7 +103,7 @@ function tankFor(session: string): Tank {
   const st = store()
   let t = st.sessions.get(session)
   if (!t) {
-    t = { v: 1, designs: [] }
+    t = { v: 1, designs: [], choreoV: 0, choreo: null }
     st.sessions.set(session, t)
     // LRU cap — drop the least recently used session tanks
     while (st.sessions.size > MAX_SESSIONS) {
@@ -110,14 +123,19 @@ async function loadOnce() {
     const raw = await fs.readFile(FILE(), 'utf8')
     const data = JSON.parse(raw) as {
       designs?: FishDesign[]                       // legacy single-tank format
-      sessions?: Record<string, { v?: number; designs?: FishDesign[] }>
+      sessions?: Record<string, { v?: number; designs?: FishDesign[]; choreoV?: number; choreo?: unknown }>
     }
     if (Array.isArray(data.sessions) || data.sessions && typeof data.sessions === 'object') {
       for (const [sess, t] of Object.entries(data.sessions ?? {})) {
         if (!t || !Array.isArray(t.designs)) continue
-        tankFor(cleanSession(sess)).designs = t.designs
+        const tank = tankFor(cleanSession(sess))
+        tank.designs = t.designs
           .filter((d) => d && typeof d.id === 'string' && typeof d.url === 'string' && d.url.length <= MAX_DATAURL)
           .slice(0, MAX_DESIGNS)
+        if (typeof t.choreoV === 'number' && t.choreoV > 0 && t.choreo) {
+          tank.choreoV = t.choreoV
+          tank.choreo = t.choreo
+        }
       }
     } else if (Array.isArray(data.designs)) {
       // pre-session tank → the 'main' session
@@ -131,8 +149,8 @@ async function loadOnce() {
 async function persist() {
   try {
     const st = store()
-    const sessions: Record<string, { v: number; designs: FishDesign[] }> = {}
-    for (const [sess, t] of st.sessions) sessions[sess] = { v: t.v, designs: t.designs }
+    const sessions: Record<string, { v: number; designs: FishDesign[]; choreoV: number; choreo: unknown }> = {}
+    for (const [sess, t] of st.sessions) sessions[sess] = { v: t.v, designs: t.designs, choreoV: t.choreoV, choreo: t.choreo }
     await fs.writeFile(FILE(), JSON.stringify({ sessions }), 'utf8')
   } catch { /* read-only fs etc. — memory store still works */ }
 }
@@ -159,11 +177,12 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const t = tankFor(cleanSession(url.searchParams.get('session')))
     if (url.searchParams.get('full')) {
-      return Response.json({ v: t.v, designs: t.designs })
+      return Response.json({ v: t.v, designs: t.designs, choreoV: t.choreoV, choreo: t.choreo })
     }
     return Response.json({
       v: t.v,
       items: t.designs.map((d) => ({ id: d.id, name: d.name })),
+      choreoV: t.choreoV,
     })
   } catch (e) {
     return err(`tank store error: ${String((e as Error)?.message ?? e)}`)
@@ -173,7 +192,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     await loadOnce()
-    let body: { action?: string; session?: unknown; design?: { name?: unknown; dataUrl?: unknown }; id?: string }
+    let body: { action?: string; session?: unknown; design?: { name?: unknown; dataUrl?: unknown }; id?: string; state?: unknown }
     try {
       body = await req.json()
     } catch {
@@ -207,6 +226,16 @@ export async function POST(req: Request) {
       t.v++
       void persist()
       return Response.json({ ok: true, v: t.v, designs: t.designs })
+    }
+
+    // fish choreography push — per-school movement settings for the show
+    if (body.action === 'choreo' && body.state && typeof body.state === 'object') {
+      const json = JSON.stringify(body.state)
+      if (json.length > MAX_CHOREO) return err('choreography document too large', 413)
+      t.choreo = body.state
+      t.choreoV++
+      void persist()
+      return Response.json({ ok: true, choreoV: t.choreoV })
     }
 
     return err('unknown action', 400)

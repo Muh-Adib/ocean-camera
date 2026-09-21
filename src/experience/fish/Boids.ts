@@ -4,11 +4,35 @@
 // species behaviours (homebound clownfish, curious pufferfish).
 // Movement is always integrated through acceleration → velocity →
 // position with damping; fish never teleport.
+//
+// CHOREOGRAPHY: a School can carry a ROUTE (patrol polyline, orbit
+// ring, figure-8) that acts as a moving leader target — the flock
+// keeps its natural texture but the FLOW follows the operator's
+// path. A one-shot MIGRATION target moves a school to a new anchor
+// by swimming (never teleporting). A HEADING bias nudges free
+// schools to face a compass direction.
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { BOUNDS, clamp, rand } from '../utils/math'
 import type { Obstacle } from '../environment/Rocks'
 import type { Pellet } from './Feeding'
+
+/** choreography flow modes — 'goto' is the internal migration state */
+export type RouteMode = 'patrol' | 'orbit' | 'figure8' | 'goto'
+
+/** active route runtime on a School (built by School.setRoute) */
+export interface RouteState {
+  mode: RouteMode
+  points: THREE.Vector3[]      // patrol waypoints (world space)
+  loop: boolean                // true = closed loop · false = ping-pong
+  speed: number                // metres / second along the flow
+  radius: number               // orbit & figure-8 radius (m)
+  cum: number[]                // cumulative segment lengths (patrol)
+  total: number                // total polyline length (patrol)
+  dist: number                 // travelled distance (patrol)
+  dir: 1 | -1                  // ping-pong direction
+  angle: number                // orbit / figure-8 phase (rad)
+}
 
 export interface FieldCtx {
   active: boolean
@@ -68,6 +92,13 @@ export class School {
   anchor: THREE.Vector3
   speciesResponse: number   // per-species gesture sensitivity
 
+  // ---- choreography state ----
+  route: RouteState | null = null
+  migrate: THREE.Vector3 | null = null     // one-shot swim-to target
+  heading: THREE.Vector3 | null = null     // free-mode compass bias
+  speedMul = 1                             // per-school speed multiplier
+  centroid = new THREE.Vector3()           // school centre (updated per frame)
+
   constructor(
     public species: string,
     count: number,
@@ -111,14 +142,144 @@ export class School {
     }
   }
 
+  // ------------------------------------------------------------ choreography API
+  /** new home anchor — fish SWIM over (migration), never teleport */
+  setAnchor(v: THREE.Vector3) {
+    this.anchor.copy(v)
+    this.migrate = v.clone()
+  }
+
+  /** free-mode compass heading bias (degrees, 0 = +X/east) — null clears */
+  setHeadingDeg(deg: number | null) {
+    if (deg === null) { this.heading = null; return }
+    const a = THREE.MathUtils.degToRad(deg)
+    this.heading = new THREE.Vector3(Math.cos(a), 0, Math.sin(a))
+  }
+
+  /** install a choreography route — null returns the school to free swimming */
+  setRoute(
+    mode: 'patrol' | 'orbit' | 'figure8' | null,
+    points: THREE.Vector3[] = [],
+    loop = true, speed = 2.2, radius = 7,
+  ) {
+    if (!mode) { this.route = null; return }
+    if (mode === 'patrol' && points.length < 2) { this.route = null; return }
+    const rt: RouteState = {
+      mode, points: points.map((p) => p.clone()),
+      loop, speed: Math.max(0.3, speed), radius: Math.max(2, radius),
+      cum: [], total: 0, dist: 0, dir: 1, angle: 0,
+    }
+    if (mode === 'patrol') {
+      // cumulative lengths — waypoint 0 seeded at the school's current spot
+      let acc = 0
+      rt.cum = [0]
+      for (let i = 1; i < rt.points.length; i++) {
+        acc += rt.points[i].distanceTo(rt.points[i - 1])
+        rt.cum.push(acc)
+      }
+      if (loop && rt.points.length > 2) {
+        acc += rt.points[0].distanceTo(rt.points[rt.points.length - 1])
+        rt.cum.push(acc)
+      }
+      rt.total = Math.max(0.001, acc)
+      // start nearest along the path so the school picks up mid-flow
+      rt.dist = this.nearestOnPolyline(this.centroid)
+    }
+    this.route = rt
+  }
+
+  /** arc length along the patrol polyline closest to a point (path pickup) */
+  private nearestOnPolyline(p: THREE.Vector3): number {
+    const rt = this.route
+    if (!rt || !rt.points.length) return 0
+    const pts = rt.loop && rt.points.length > 2
+      ? [...rt.points, rt.points[0]]
+      : rt.points
+    let best = 0, bestD = Infinity, acc = 0
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i]
+      const abx = b.x - a.x, aby = b.y - a.y, abz = b.z - a.z
+      const apx = p.x - a.x, apy = p.y - a.y, apz = p.z - a.z
+      const len2 = abx * abx + aby * aby + abz * abz || 1e-6
+      const t = Math.max(0, Math.min(1, (apx * abx + apy * aby + apz * abz) / len2))
+      const dx = apx - abx * t, dy = apy - aby * t, dz = apz - abz * t
+      const d = dx * dx + dy * dy + dz * dz
+      if (d < bestD) { bestD = d; best = acc + Math.sqrt(len2) * t }
+      acc += Math.sqrt(len2)
+    }
+    return best
+  }
+
+  /**
+   * evaluate the route/migration leader target for this frame (ONCE per
+   * school — per-fish offsets are derived from each fish's wanderSeed).
+   * Returns false when no target is active this frame.
+   */
+  private evalRouteTarget(dt: number, out: THREE.Vector3): boolean {
+    // one-shot migration always wins until arrival
+    if (this.migrate) {
+      out.copy(this.migrate)
+      if (this.centroid.distanceTo(this.migrate) < 2.6) this.migrate = null
+      return true
+    }
+    const rt = this.route
+    if (!rt) return false
+    if (rt.mode === 'patrol') {
+      if (rt.points.length < 2) return false
+      rt.dist += rt.speed * dt * rt.dir
+      if (rt.loop) {
+        if (rt.dist >= rt.total) rt.dist -= rt.total
+        if (rt.dist < 0) rt.dist += rt.total
+      } else {
+        if (rt.dist >= rt.total) { rt.dist = rt.total; rt.dir = -1 }
+        else if (rt.dist <= 0) { rt.dist = 0; rt.dir = 1 }
+      }
+      // walk cumulative lengths → segment + local t
+      const pts = rt.loop && rt.points.length > 2
+        ? [...rt.points, rt.points[0]]
+        : rt.points
+      let i = 1
+      while (i < rt.cum.length - 1 && rt.cum[i] < rt.dist) i++
+      const segStart = rt.cum[i - 1]
+      const segLen = Math.max(1e-6, rt.cum[i] - segStart)
+      const t = (rt.dist - segStart) / segLen
+      const a = pts[i - 1], b = pts[i]
+      out.set(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t)
+      return true
+    }
+    // parametric rings around the anchor
+    const w = rt.speed / Math.max(2, rt.radius)      // rad / s from tangential m/s
+    rt.angle += w * dt
+    if (rt.mode === 'orbit') {
+      out.set(
+        this.anchor.x + Math.cos(rt.angle) * rt.radius,
+        this.anchor.y + Math.sin(rt.angle * 2.7) * rt.radius * 0.06,
+        this.anchor.z + Math.sin(rt.angle) * rt.radius,
+      )
+    } else {
+      // figure-8 (lemniscate of Gerono) — wide along X, crossed along Z
+      out.set(
+        this.anchor.x + Math.cos(rt.angle) * rt.radius,
+        this.anchor.y + Math.sin(rt.angle * 2) * rt.radius * 0.05,
+        this.anchor.z + Math.sin(rt.angle * 2) * rt.radius * 0.32,
+      )
+    }
+    return true
+  }
+
   update(dt: number, time: number, field: FieldCtx, obstacles: Obstacle[], camera: THREE.Vector3, speedScale = 1, pellets?: Pellet[], threats?: THREE.Vector3[]) {
     const p = this.params
     const fish = this.fish
     const n = fish.length
-    const maxSpeed = p.maxSpeed * speedScale
+    const maxSpeed = p.maxSpeed * speedScale * this.speedMul
     const scatterBoost = 1 + field.scatter * 1.1
     const isPuffer = this.species === 'pufferfish'
     const threats_ = threats && threats.length ? threats : null
+
+    // ---- choreography: one leader target per school per frame ----
+    const routeTgt = new THREE.Vector3()
+    const onRoute = this.evalRouteTarget(dt, routeTgt)
+    let centroidX = 0, centroidY = 0, centroidZ = 0
 
     for (let i = 0; i < n; i++) {
       const f = fish[i]
@@ -232,6 +393,31 @@ export class School {
         }
       }
 
+      // ---- choreography: follow the flow leader (route / migration) ----
+      if (onRoute) {
+        // personal offset so the school spreads around the leader point
+        const ox = Math.sin(f.wanderSeed * 12.9898) * 1.5
+        const oy = Math.sin(f.wanderSeed * 78.233) * 0.55
+        const oz = Math.cos(f.wanderSeed * 39.425) * 1.5
+        _tmp.set(routeTgt.x + ox, routeTgt.y + oy, routeTgt.z + oz).sub(f.pos)
+        const dr = _tmp.length()
+        if (dr > 0.7) {
+          _tmp.multiplyScalar(1 / dr)
+          _tmp.setLength(maxSpeed * (dr < 5 ? 0.55 : 0.95)).sub(f.vel)
+          this.limit(_tmp, p.maxForce * 1.7)
+          f.acc.addScaledVector(_tmp, 2.0)
+        }
+      } else if (this.heading) {
+        // free swim compass bias — a gentle pull to face `heading`,
+        // weak enough that wander keeps its natural texture
+        const hd = f.vel.x * this.heading.x + f.vel.z * this.heading.z
+        if (hd < maxSpeed * 0.5) {
+          _tmp.copy(this.heading).setLength(maxSpeed * 0.45).sub(f.vel)
+          this.limit(_tmp, p.maxForce * 0.45)
+          f.acc.addScaledVector(_tmp, 0.8)
+        }
+      }
+
       // ---- wander ----
       f.acc.x += Math.sin(time * 0.6 + f.wanderSeed) * p.wanderW
       f.acc.y += Math.sin(time * 0.83 + f.wanderSeed * 2.1) * p.wanderW * 0.4
@@ -332,6 +518,14 @@ export class School {
       f.pos.addScaledVector(f.vel, dt)
       f.speedNorm += ((sp / Math.max(0.001, maxSpeed)) - f.speedNorm) * Math.min(1, dt * 4)
       f.phase += dt * (2.5 + f.speedNorm * 7)
+
+      centroidX += f.pos.x; centroidY += f.pos.y; centroidZ += f.pos.z
+    }
+
+    // school centroid (route arrival checks + QA telemetry)
+    if (n > 0) {
+      this.centroid.set(centroidX / n, centroidY / n, centroidZ / n)
+      // migration arrival check rides the centroid — evalRouteTarget clears it
     }
   }
 

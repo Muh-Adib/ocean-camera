@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------
-// FishTank — keeps the painted-fish designs in sync everywhere.
+// FishTank — keeps the painted-fish designs AND the movement
+// choreography in sync everywhere.
 //
 // The studio console imports coloured sheets; this client polls the
 // tank version (cheap, every few seconds — instantly after an own
@@ -8,6 +9,12 @@
 // /output projector machine — new fish simply swim in on all of
 // them without any reload.
 //
+// CHOREOGRAPHY: the same poll watches a second version counter
+// (choreoV). The studio's FishDirector pushes per-school movement
+// settings (show/hide, location, rotation, speed, patrol / orbit /
+// figure-8 flows); every screen applies them — fish keep their
+// paths consistent across the whole show.
+//
 // SESSIONS: each tank is scoped to a show session (venue). Pages
 // follow the session of the last studio push (or their own saved
 // one), so two exhibitions on one server never see each other's
@@ -15,6 +22,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import type { FishManager } from './FishManager'
+import { FishDirector } from './FishDirector'
 
 const POLL_MS = 4000
 const FAST_POLL_MS = 1200
@@ -26,9 +34,12 @@ export class FishTank {
   synced = false
   /** active show session — isolates tanks between venues */
   session: string
+  /** per-school movement choreography (show/hide, location, rotation, flows) */
+  director: FishDirector
 
   private timer = 0
   private v = -1
+  private choreoV = -1
   private busy = false
   private fastUntil = 0
 
@@ -38,6 +49,9 @@ export class FishTank {
     } catch {
       this.session = 'main'
     }
+    this.director = new FishDirector(fish, this.session)
+    // local studio edits: apply instantly (director did) + broadcast
+    this.director.onLocalChange = (state) => { void this.pushChoreo(state) }
   }
 
   /** switch to another show session — clears local designs not in it and re-polls */
@@ -46,7 +60,9 @@ export class FishTank {
     if (clean === this.session) return
     this.session = clean
     try { localStorage.setItem(SESSION_KEY, clean) } catch { /* private mode */ }
+    this.director.setSession(clean)
     this.v = -1
+    this.choreoV = -1
     this.synced = false
     this.schedule(0)
   }
@@ -81,9 +97,10 @@ export class FishTank {
     try {
       const res = await fetch(`/api/fish?session=${encodeURIComponent(this.session)}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`tank ${res.status}`)
-      const data = await res.json() as { v?: number }
+      const data = await res.json() as { v?: number; choreoV?: number }
       const v = typeof data.v === 'number' ? data.v : -1
-      if (v !== this.v) await this.pullFull(v)
+      const cv = typeof data.choreoV === 'number' ? data.choreoV : 0
+      if (v !== this.v || (cv !== this.choreoV && cv > 0)) await this.pullFull(v, cv)
       this.lastError = null
     } catch (e) {
       this.lastError = e instanceof Error ? e.message : 'tank unreachable'
@@ -92,10 +109,10 @@ export class FishTank {
     }
   }
 
-  private async pullFull(v: number) {
+  private async pullFull(v: number, cv = this.choreoV) {
     const res = await fetch(`/api/fish?full=1&session=${encodeURIComponent(this.session)}`, { cache: 'no-store' })
     if (!res.ok) throw new Error(`tank full ${res.status}`)
-    const data = await res.json() as { v?: number; designs?: { id: string; name: string; url: string }[] }
+    const data = await res.json() as { v?: number; designs?: { id: string; name: string; url: string }[]; choreoV?: number; choreo?: unknown }
     const designs = (Array.isArray(data.designs) ? data.designs : [])
       .filter((d) => d && typeof d.id === 'string' && typeof d.url === 'string')
     const ids = new Set(designs.map((d) => d.id))
@@ -105,14 +122,23 @@ export class FishTank {
       if (!ids.has(id)) this.fish.removeCustomDesign(id)
     }
     // additions — textures decode async, add as they arrive
+    let added = false
     await Promise.all(designs.map(async (d) => {
       if (this.fish.hasCustomDesign(d.id)) return
       try {
         const texture = await loadTexture(d.url)
         this.fish.addCustomDesign(d.id, texture)
+        added = true
       } catch { /* broken image — skip this design */ }
     }))
     this.v = typeof data.v === 'number' ? data.v : v
+    // choreography — apply AFTER designs exist so painted schools get theirs
+    if (typeof data.choreoV === 'number' && data.choreoV > 0 && data.choreo) {
+      this.choreoV = data.choreoV
+      this.director.importRemote(data.choreo)
+    } else if (cv === 0 && added) {
+      this.director.applyAll()
+    }
     this.synced = true
   }
 
@@ -121,9 +147,33 @@ export class FishTank {
     return {
       session: this.session,
       v: this.v,
+      choreoV: this.choreoV,
       synced: this.synced,
       lastError: this.lastError,
       designs: this.fish.customInfo(),
+      choreo: this.director.list().filter((s) => s.custom || s.flow !== 'free'),
+    }
+  }
+
+  /**
+   * push a choreography document to the server (studio host only —
+   * fire-and-forget; outputs simply poll the new choreoV).
+   */
+  private async pushChoreo(state: unknown) {
+    try {
+      const res = await fetch('/api/fish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'choreo', session: this.session, state }),
+      })
+      const data = await res.json() as { ok?: boolean; choreoV?: number; error?: string }
+      if (data.ok && typeof data.choreoV === 'number') {
+        this.choreoV = data.choreoV   // our own push — don't re-pull it
+      } else if (data.error) {
+        this.lastError = data.error
+      }
+    } catch {
+      this.lastError = 'choreo push failed — server unreachable'
     }
   }
 }
