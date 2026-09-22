@@ -105,16 +105,16 @@ export interface QualityProfile {
 
 export const QUALITY_PROFILES: Record<Exclude<QualityLevel, 'auto' | 'custom'>, QualityProfile> = {
   performance: {
-    label: 'PERFORMANCE', renderScale: 0.4, rtCap: 1536, msaa: 0,
+    label: 'PERFORMANCE', renderScale: 0.5, rtCap: 1536, msaa: 0,
     hint: 'Weak GPUs / 4+ surfaces — smooth motion first, softness expected',
   },
   balanced: {
-    label: 'BALANCED', renderScale: 0.6, rtCap: 2048, msaa: 0,
-    hint: 'Good on most laptops — the previous default, one notch sharper',
+    label: 'BALANCED', renderScale: 0.75, rtCap: 2560, msaa: 2,
+    hint: 'Good on most laptops — close to the preview\u2019s crispness, light AA',
   },
   high: {
-    label: 'HIGH', renderScale: 0.8, rtCap: 3072, msaa: 2,
-    hint: 'Desktop GPUs and big walls — sharp fish silhouettes, light AA',
+    label: 'HIGH', renderScale: 0.9, rtCap: 3072, msaa: 4,
+    hint: 'Desktop GPUs and big walls — near-pixel-perfect water detail, full AA',
   },
   ultra: {
     label: 'ULTRA', renderScale: 1.0, rtCap: 4096, msaa: 4,
@@ -161,15 +161,15 @@ export interface ResolvedQuality {
 export function resolveQuality(out: Pick<ProjectionOutput, 'quality' | 'renderScale'>): ResolvedQuality {
   switch (out.quality) {
     case 'performance': return { renderScale: QUALITY_PROFILES.performance.renderScale, rtCap: QUALITY_PROFILES.performance.rtCap, msaa: 0 }
-    case 'balanced': return { renderScale: QUALITY_PROFILES.balanced.renderScale, rtCap: QUALITY_PROFILES.balanced.rtCap, msaa: 0 }
+    case 'balanced': return { renderScale: QUALITY_PROFILES.balanced.renderScale, rtCap: QUALITY_PROFILES.balanced.rtCap, msaa: QUALITY_PROFILES.balanced.msaa }
     case 'high': return { renderScale: QUALITY_PROFILES.high.renderScale, rtCap: QUALITY_PROFILES.high.rtCap, msaa: QUALITY_PROFILES.high.msaa }
     case 'ultra': return { renderScale: QUALITY_PROFILES.ultra.renderScale, rtCap: QUALITY_PROFILES.ultra.rtCap, msaa: QUALITY_PROFILES.ultra.msaa }
-    case 'custom': return { renderScale: out.renderScale, rtCap: QUALITY_PROFILES.ultra.rtCap, msaa: 0 }
+    case 'custom': return { renderScale: out.renderScale, rtCap: QUALITY_PROFILES.ultra.rtCap, msaa: 2 }
     case 'auto':
     default: {
       const s = Math.min(1, Math.max(0.25, out.renderScale))
       const cap = s >= 0.9 ? QUALITY_PROFILES.ultra.rtCap : s >= 0.7 ? QUALITY_PROFILES.high.rtCap : s >= 0.5 ? QUALITY_PROFILES.balanced.rtCap : QUALITY_PROFILES.performance.rtCap
-      return { renderScale: s, rtCap: cap, msaa: 0 }
+      return { renderScale: s, rtCap: cap, msaa: s >= 0.7 ? 2 : 0 }
     }
   }
 }
@@ -183,8 +183,11 @@ export interface ProjectionProject {
   version: number
   output: ProjectionOutput
   surfaces: ProjectionSurface[]
-  /** which surface carries the phone-connection QR — 'auto' = largest enabled surface */
-  qr?: { host: string }
+  /** which surface carries the phone-connection QR — 'auto' = largest enabled surface.
+   *  show: 'auto' hides while a phone is linked · 'on' pins the QR visible ·
+   *  'off' removes it entirely — the operator's choice is INDEPENDENT of the
+   *  phone connection state. */
+  qr?: { host: string; show?: QrShowMode }
   /** snap wall edges: span edits re-aim neighbours so seams never break (default on) */
   snapWalls?: boolean
   /** active show session — isolates the fish tank + phone remote per venue */
@@ -195,6 +198,9 @@ export const PROJECT_VERSION = 2
 export const AUTOSAVE_KEY = 'ocean-projection-v1'
 /** published output sessions — every entry is reopenable via /output?s=<id> */
 export const SESSIONS_KEY = 'ocean-projection-sessions-v1'
+
+/** wall-QR visibility mode — decoupled from whether a phone is connected */
+export type QrShowMode = 'auto' | 'on' | 'off'
 
 export interface OutputSessionMeta {
   id: string

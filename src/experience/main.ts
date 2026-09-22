@@ -482,8 +482,14 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // kick everything off
   if (outputOnly) {
-    // no loading theatre on the projector feed — dive straight to the composite
+    // no loading theatre on the projector feed — dive straight to the composite.
+    // The reveal systems MUST still fire: god rays, caustics and the water
+    // ceiling all start at opacity 0 and were previously invisible on /output
+    // (that was the "output lost the water detail and shading" report — the
+    // main page revealed them during the intro, the output page never did).
     entered = true
+    lighting.revealNow()
+    surface.revealNow()
   } else {
     ui.runLoadingSequence(2600)
   }
@@ -644,6 +650,11 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       rigSet: (v: Record<string, number>) => projection.qaRigSet(v as never),
       /** QA: QR overlay geometry on /output */
       qrInfo: () => projection.qrInfo(),
+      /** QA: wall-QR visibility mode — 'auto' | 'on' | 'off' (decoupled from phone) */
+      qrShow: (mode?: 'auto' | 'on' | 'off') => {
+        if (mode === 'auto' || mode === 'on' || mode === 'off') projection.setQrShow(mode)
+        return projection.qrShow
+      },
       fish: () => ({ ...fishTank.info(), mode: fish.customModeInfo() }),
       /** fish choreography — per-school movement control (ops + QA) */
       choreo: {

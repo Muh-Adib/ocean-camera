@@ -704,6 +704,29 @@ export class ProjectionEditorUI {
     fillQr()
     qrSel.addEventListener('change', () => this.pm.setQrHost(qrSel.value))
     gQr.appendChild(qrSel)
+
+    // visibility mode — the operator's choice, independent of any phone:
+    // AUTO fades while a phone is linked, ON pins the invitation on the wall,
+    // OFF removes it entirely (clean wall for the show)
+    const qrShowRow = document.createElement('div')
+    qrShowRow.className = 'pm-row'
+    qrShowRow.appendChild(this.labelEl('QR VISIBILITY'))
+    const qrShowSel = document.createElement('select')
+    qrShowSel.className = 'pm-select'
+    for (const [v, label] of [
+      ['auto', 'AUTO — hide while a phone is connected'],
+      ['on', 'ALWAYS SHOW — even when a phone is connected'],
+      ['off', 'HIDDEN — never show the QR'],
+    ] as const) {
+      const o = document.createElement('option')
+      o.value = v
+      o.textContent = label
+      qrShowSel.appendChild(o)
+    }
+    qrShowSel.value = this.pm.qrShow
+    qrShowSel.addEventListener('change', () => this.pm.setQrShow(qrShowSel.value as 'auto' | 'on' | 'off'))
+    qrShowRow.appendChild(qrShowSel)
+    gQr.appendChild(qrShowRow)
     gQr.appendChild(this.hint('While no phone is connected, a live QR rides ON this surface\u2019s picture — warped with the wall, so it reads perfectly straight on the physical wall and follows every move, morph and preset. It vanishes the moment a phone links and returns when the phone leaves. The QR deep-links the CURRENT show session.'))
   }
 

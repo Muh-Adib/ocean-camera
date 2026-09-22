@@ -6,7 +6,7 @@
 import {
   AUTOSAVE_KEY, PROJECT_VERSION, QUALITY_LEVELS, SESSIONS_KEY, clampNum,
   type OutputSessionMeta, type ProjectionOutput, type ProjectionProject,
-  type ProjectionSurface, type QualityLevel,
+  type ProjectionSurface, type QualityLevel, type QrShowMode,
 } from './ProjectionTypes'
 import { gridFromCorners, cornersFromGrid } from './ProjectionMath'
 import { CalibrationManager } from './CalibrationManager'
@@ -18,7 +18,10 @@ export interface ProjectHost {
   setOutput(o: ProjectionOutput): void
   /** which surface carries the phone QR ('auto' = largest enabled) */
   qrHost: string
-  setQrHost(host: string): void
+  setQrHost(host: string, opts?: { silent?: boolean }): void
+  /** wall-QR visibility — decoupled from the phone connection state */
+  qrShow: QrShowMode
+  setQrShow(mode: QrShowMode, opts?: { silent?: boolean }): void
   /** wall-edge snapping (span edits re-aim neighbours) — live getter */
   snapWalls: boolean
   setSnapWalls(on: boolean): void
@@ -199,7 +202,7 @@ export class ProjectManager {
       version: PROJECT_VERSION,
       output: { ...this.host.output },
       surfaces: this.host.surfaces.serialize(),
-      qr: { host: this.host.qrHost },
+      qr: { host: this.host.qrHost, show: this.host.qrShow },
       snapWalls: this.host.snapWalls,
       tank: { session: this.host.tankSession },
     }
@@ -225,14 +228,17 @@ export class ProjectManager {
     this.host.setOutput({
       width: clampNum(out.width, 1920, 320, 16384),
       height: clampNum(out.height, 1080, 240, 8640),
-      renderScale: clampNum(out.renderScale, 0.6, 0.1, 1),
+      renderScale: clampNum(out.renderScale, 0.75, 0.1, 1),
       quality,
       vibrance: clampNum(out.vibrance, 1, 0.5, 1.8),
     })
     this.host.surfaces.replaceAll(surfaces)
     // QR host setting — 'auto' or a surface id (fall back to auto when stale)
     const qh = typeof p.qr?.host === 'string' ? p.qr.host : 'auto'
-    this.host.setQrHost(qh === 'auto' || surfaces.some((s) => s.id === qh) ? qh : 'auto')
+    this.host.setQrHost(qh === 'auto' || surfaces.some((s) => s.id === qh) ? qh : 'auto', { silent: true })
+    // QR visibility — decoupled from the phone connection state
+    const qs = p.qr?.show
+    this.host.setQrShow(qs === 'on' || qs === 'off' ? qs : 'auto', { silent: true })
     // wall-edge snapping — absent flag on old projects means the default (on)
     this.host.setSnapWalls(p.snapWalls !== false)
     // show session — silent: loading must never echo a state change back

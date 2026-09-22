@@ -27,7 +27,7 @@ import { getVibrance, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN } from '../look/vi
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import { deriveSpanH, fitSliceToRatio, glueWalls, seamAudit } from './SpanChain'
-import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, ScreenFit } from './ProjectionTypes'
+import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, QrShowMode, ScreenFit } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 
 export interface ProjectionDeps {
@@ -73,7 +73,7 @@ export class ProjectionManager {
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
   showFrustums = true
 
-  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.6, quality: 'balanced', vibrance: 1 }
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.75, quality: 'balanced', vibrance: 1 }
 
   /**
    * Wall-edge snapping — when a span-locked camera changes (span, ratio,
@@ -134,6 +134,10 @@ export class ProjectionManager {
   wallQr = new WallQr()
   /** which surface carries the wall QR ('auto' = largest enabled) */
   qrHost = 'auto'
+  /** wall-QR visibility mode — 'auto' hides while a phone is linked, 'on'
+   *  pins the QR on the wall, 'off' removes it. Operator choice, INDEPENDENT
+   *  of the phone connection state. */
+  qrShow: QrShowMode = 'auto'
   /** operator dismissed the wall QR for this session */
   private qrDismissed = false
   /** painted-fish sync client — assigned by main.ts (studio edits, all pages follow) */
@@ -262,6 +266,31 @@ export class ProjectionManager {
       this.scheduleAutosave()
       this.ui?.refreshAll()
     }
+  }
+
+  /**
+   * Studio/output setting: should the wall QR be visible at all?
+   * 'auto' — legacy behaviour: shows while the composite is live AND no
+   *          phone is linked (fades when the phone connects).
+   * 'on'   — PINNED: the QR always rides the wall, even with a phone
+   *          connected (new visitors can still join the show).
+   * 'off'  — never shown, no matter the connection state.
+   */
+  setQrShow(mode: QrShowMode, opts: { silent?: boolean } = {}) {
+    this.qrShow = mode
+    if (!opts.silent) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.ui?.refreshAll()
+    }
+  }
+
+  /** the visibility rule the wall QR follows this frame */
+  private qrWant(): boolean {
+    if (!this.outputLive) return false
+    if (this.qrShow === 'on') return true
+    if (this.qrShow === 'off') return false
+    return !this.phoneOn && !this.qrDismissed
   }
 
   /**
@@ -648,6 +677,13 @@ export class ProjectionManager {
             <span id="pm-out-vib-val">${getVibrance().toFixed(2)}×</span>
           </span>
         </label>
+        <label class="pm-out-field">WALL QR
+          <select id="pm-out-qrshow" class="pm-select pm-select-sm">
+            <option value="auto">AUTO — HIDE WHEN PHONE JOINS</option>
+            <option value="on">ALWAYS SHOW (even when linked)</option>
+            <option value="off">HIDDEN — NEVER SHOW</option>
+          </select>
+        </label>
         <label class="pm-out-field">PATTERN
           <select id="pm-out-pattern" class="pm-select pm-select-sm">
             ${CalibrationManager.patternList.map((p) => `<option value="${p}">${p.toUpperCase()}</option>`).join('')}
@@ -678,6 +714,9 @@ export class ProjectionManager {
     })
     el.querySelector('#pm-out-fit')?.addEventListener('change', (e) => {
       this.setScreenFit((e.target as HTMLSelectElement).value as ScreenFit)
+    })
+    el.querySelector('#pm-out-qrshow')?.addEventListener('change', (e) => {
+      this.setQrShow((e.target as HTMLSelectElement).value as QrShowMode)
     })
     el.querySelector('#pm-out-vib')?.addEventListener('input', (e) => {
       const v = setVibrance(parseFloat((e.target as HTMLInputElement).value))
@@ -715,6 +754,8 @@ export class ProjectionManager {
     const ssel = this.overlay.querySelector('#pm-out-session') as HTMLSelectElement | null
     const vsel = this.overlay.querySelector('#pm-out-vib') as HTMLInputElement | null
     const vval = this.overlay.querySelector('#pm-out-vib-val')
+    const qshow = this.overlay.querySelector('#pm-out-qrshow') as HTMLSelectElement | null
+    if (qshow) qshow.value = this.qrShow
     if (fsel) fsel.value = this.screenFit
     if (vsel) vsel.value = String(getVibrance())
     if (vval) vval.textContent = `${getVibrance().toFixed(2)}×`
@@ -1171,10 +1212,10 @@ export class ProjectionManager {
     const mem = (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? 4
     const mobile = /android|iphone|ipod|mobile|silk/.test(navigator.userAgent.toLowerCase())
     const n = Math.max(1, this.surfaces.surfaces.filter((s) => s.enabled).length)
-    let base = cores >= 8 && mem >= 8 ? 0.8 : cores >= 4 ? 0.6 : 0.45
+    let base = cores >= 8 && mem >= 8 ? 0.9 : cores >= 4 ? 0.75 : 0.5
     if (mobile) base -= 0.15
     base -= Math.max(0, n - 3) * 0.05        // every extra camera costs fill-rate
-    this.output.renderScale = Math.round(Math.min(0.95, Math.max(0.3, base)) * 20) / 20
+    this.output.renderScale = Math.round(Math.min(0.95, Math.max(0.35, base)) * 20) / 20
   }
 
   private autoFrames = 0
@@ -1196,11 +1237,11 @@ export class ProjectionManager {
     const now = performance.now()
     if (now - this.lastAutoStep < 2500) return
     const s = this.output.renderScale
-    if (avg > 30 && s > 0.3) {
-      this.output.renderScale = Math.max(0.3, Math.round((s - 0.1) * 10) / 10)
+    if (avg > 34 && s > 0.35) {
+      this.output.renderScale = Math.max(0.35, Math.round((s - 0.1) * 10) / 10)
       this.lastAutoStep = now
       this.syncOutputOverlay()
-    } else if (avg < 13 && s < 0.95) {
+    } else if (avg < 15 && s < 0.95) {
       this.output.renderScale = Math.min(0.95, Math.round((s + 0.1) * 10) / 10)
       this.lastAutoStep = now
       this.syncOutputOverlay()
@@ -1239,7 +1280,7 @@ export class ProjectionManager {
     this.updateRemote(dt)
     // wall QR: only while the composite is what people see (live output /
     // /output page), never in the editor viewport previews
-    this.wallQr.update(dt, this.outputLive && !this.phoneOn && !this.qrDismissed)
+    this.wallQr.update(dt, this.qrWant())
     const t0 = performance.now()
     this.renderFrameInner()
     this.frameCost = performance.now() - t0
@@ -1392,6 +1433,7 @@ export class ProjectionManager {
       selected: this.surfaces.selected?.name ?? null,
       output: { ...this.output },
       snapWalls: this.snapWalls,
+      qrShow: this.qrShow,
       quality: this.qualityLabel(),
       frameCostMs: Math.round(this.frameCost * 10) / 10,
       rtPerSurface: this.surfaces.surfaces
