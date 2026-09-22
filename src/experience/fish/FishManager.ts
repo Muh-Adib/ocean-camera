@@ -115,6 +115,20 @@ export class FishManager {
   private obstacles: Obstacle[]
   private speedScale = 1
 
+  // ---- painted-fish CAMERA PASS sequencer ----
+  /** live view point the painted fish orbit around — injected by main.ts
+   *  (wall constellation eye in projection mode, swim camera otherwise) */
+  orbitCenter = new THREE.Vector3(0, 2.2, 0)
+  /** pass ring distance from the camera (m) — “mengitari kamera dari dekat” */
+  passRadius = 3.4
+  /** tangential speed along the pass ring (m/s) */
+  passSpeed = 2.2
+  /** rest between two passes (s) — keeps the “satu per satu” rhythm readable */
+  private passGap = 2.4
+  private passTimer = 1.5
+  private passCursor = 0
+  private activePass: { entry: Entry; fish: number } | null = null
+
   constructor(scene: THREE.Scene, obstacles: Obstacle[], quality: QualityConfig, anemones: THREE.Vector3[]) {
     this.obstacles = obstacles
     const scale = quality.fishScale
@@ -181,6 +195,7 @@ export class FishManager {
     for (const e of this.entries) {
       e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale, pellets, threats)
     }
+    this.updatePasses(dt)
     // write matrices
     const camDir = new THREE.Vector3()
     for (const e of this.entries) {
@@ -214,6 +229,9 @@ export class FishManager {
 
   setSpeedScale(s: number) { this.speedScale = s }
 
+  /** swap the obstacle field (tower edits rebuild the reef) */
+  setObstacles(list: Obstacle[]) { this.obstacles = list }
+
   /** ecosystem event: random school changes direction */
   randomImpulse() {
     const s = this.schools[Math.floor(Math.random() * this.schools.length)]
@@ -240,6 +258,87 @@ export class FishManager {
   // ------------------------------------------------------------ custom painted fish
   /** one small school per imported painting, keyed by design id */
   private custom = new Map<string, { entry: Entry; mat: THREE.MeshStandardMaterial; texture: THREE.Texture }>()
+
+  /**
+   * DEFAULT BEHAVIOUR of painted (imported-image) fish — “selalu bergerak
+   * bebas namun mengitari kamera dari dekat dan pastikan lewat satu per
+   * satu”: between passes every painted fish roams FREE; a sequencer
+   * then sends them past the camera ONE BY ONE (never as a clump).
+   * An operator flow override (patrol / orbit / figure-8) on the design
+   * takes precedence and pulls that school out of the queue.
+   */
+  private passEligible(): { entry: Entry; fish: number }[] {
+    const list: { entry: Entry; fish: number }[] = []
+    for (const rec of this.custom.values()) {
+      const e = rec.entry
+      if (!e.visible || !e.mesh.visible) continue
+      if (e.school.route || e.school.migrate) continue   // operator flow wins
+      for (let i = 0; i < e.school.fish.length; i++) list.push({ entry: e, fish: i })
+    }
+    return list
+  }
+
+  private updatePasses(dt: number) {
+    // a pass that lost its subject (design removed / hidden / overridden) ends early
+    if (this.activePass) {
+      const { entry, fish } = this.activePass
+      const stillThere = entry.school.fish[fish] && entry.visible && entry.mesh.visible
+        && !entry.school.route && !entry.school.migrate
+      if (!stillThere || entry.school.pass?.done || !entry.school.pass) {
+        entry.school.pass = null
+        this.activePass = null
+        this.passTimer = this.passGap
+      }
+    }
+
+    if (this.activePass) return
+    this.passTimer -= dt
+    if (this.passTimer > 0) return
+
+    const queue = this.passEligible()
+    if (!queue.length) { this.passTimer = 1.5; return }
+    this.passCursor = (this.passCursor + 1) % queue.length
+    const pick = queue[this.passCursor]
+    const f = pick.entry.school.fish[pick.fish]
+    // seed the ring phase from the fish's current bearing → it BLEEDS into
+    // the arc instead of turning across it
+    const dx = f.pos.x - this.orbitCenter.x
+    const dz = f.pos.z - this.orbitCenter.z
+    const seed = Math.atan2(dz, dx)
+    pick.entry.school.pass = {
+      fish: pick.fish,
+      center: this.orbitCenter,          // live reference — tracks the camera
+      radius: this.passRadius,
+      speed: this.passSpeed,
+      angle: seed,
+      travel: 0,
+      travelGoal: Math.PI * 2 + 0.9,     // a full loop, then it drifts free
+      done: false,
+    }
+    this.activePass = pick
+  }
+
+  /** QA: painted-pass sequencer state */
+  passInfo() {
+    const ap = this.activePass
+    return {
+      active: ap
+        ? {
+          design: ap.entry.id.replace('custom:', ''),
+          fish: ap.fish,
+          /** radians traversed of the pass arc (goal ≈ 7.2) */
+          travel: Math.round((ap.entry.school.pass?.travel ?? 0) * 100) / 100,
+          goal: ap.entry.school.pass?.travelGoal ?? 0,
+        }
+        : null,
+      queue: this.passEligible().length,
+      cursor: this.passCursor,
+      radius: this.passRadius,
+      speed: this.passSpeed,
+      orbitCenter: this.orbitCenter.toArray().map((n) => Math.round(n * 100) / 100),
+      cooldown: Math.round(Math.max(0, this.passTimer) * 10) / 10,
+    }
+  }
 
   /** how many painted designs are swimming right now */
   get customCount(): number {

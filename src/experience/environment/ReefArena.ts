@@ -32,6 +32,7 @@ import {
   paint, pickF, rand, type Rng, type Det,
 } from './ReefCorals'
 import type { Obstacle } from './Rocks'
+import { insideReefFootprint } from './ReefSites'
 
 // arena centre matches the seabed focus + camera gaze target
 const CX = 0
@@ -332,6 +333,85 @@ export class ReefArena {
       const kind = pickF(['bubble', 'sponge', 'spiral', 'finger'], rng)
       place(kind, x, z, rand(0.9, 1.4, rng), 0.05, this.det.filler)
       if (kind === 'anemone') this.anemonePositions.push(new THREE.Vector3(x, this.heightAt(x, z) + 0.4, z))
+    }
+
+    // ---------- MID-BELT — the reef fills the RIGHT / LEFT / FRONT walls ----------
+    // The colosseum rings live at r≥30, which left the whole mid-ground the
+    // room's side walls look across as bare sand. These two arcs (east and
+    // west of the clearing, r 12-26) plus a northern sprinkle pack the
+    // wall-facing mid-distance with layered reef — mounds, staghorn, table
+    // stacks, fire plates, sponges, clams, feather stars — exactly like the
+    // reference aquarium where coral covers the ground up to the horizon.
+    const beltSlot = (a: number, r: number, rich: boolean) => {
+      const x = CX + Math.cos(a) * r + rand(-1.6, 1.6, rng)
+      const z = CZ + Math.sin(a) * r + rand(-1.6, 1.6, rng)
+      if (insideReefFootprint(x, z, 1.35)) return          // karst towers own these spots
+      if (rich) {
+        const R = rand(1.3, 2.3, rng)
+        const H = rand(1.0, 2.2, rng)
+        addMound(x, z, R, H, this.det.mid)
+        place('table', x + rand(-0.9, 0.9, rng), z + rand(-0.9, 0.9, rng), rand(1.4, 2.3, rng), 0.2, this.det.mid)
+        place('staghorn', x + rand(-1.5, 1.5, rng), z + rand(-1.5, 1.5, rng), rand(1.1, 1.8, rng), 0.1, this.det.mid)
+        place(pickF(['bubble', 'finger'], rng), x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(1.1, 1.7, rng), 0.08, this.det.mid)
+        place(pickF(['sponge', 'redwhip', 'spiral'], rng), x + rand(-2, 2, rng), z + rand(-2, 2, rng), rand(1.0, 1.6, rng), 0.07, this.det.mid)
+        if (rng() < 0.6) place('fireplate', x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(1.0, 1.5, rng), 0.06, this.det.mid)
+        if (rng() < 0.4) place('clam', x + rand(-1.8, 1.8, rng), z + rand(-1.8, 1.8, rng), rand(0.7, 1.1, rng), 0.05, this.det.mid)
+        if (rng() < 0.55) place('feather', x + rand(-1.9, 1.9, rng), z + rand(-1.9, 1.9, rng), rand(0.8, 1.3, rng), 0.04, this.det.mid)
+      } else {
+        place(pickF(['staghorn', 'table', 'fireplate'], rng), x, z, rand(1.0, 1.6, rng), 0.08, this.det.filler)
+        place(pickF(['bubble', 'sponge', 'finger', 'spiral', 'redwhip'], rng), x + rand(-1.6, 1.6, rng), z + rand(-1.6, 1.6, rng), rand(0.9, 1.4, rng), 0.06, this.det.filler)
+        if (rng() < 0.35) place('feather', x + rand(-1.5, 1.5, rng), z + rand(-1.5, 1.5, rng), rand(0.7, 1.1, rng), 0.04, this.det.filler)
+      }
+    }
+    // east + west arcs — what the RIGHT and LEFT walls look across
+    for (const base of [0, Math.PI]) {
+      for (let s = 0; s < 13; s++) {
+        const a = base + rand(-0.8, 0.8, rng)
+        const r = 10.5 + (s / 13) * 15 + rand(-1.5, 1.5, rng)
+        beltSlot(a, r, rng() < 0.55)
+      }
+      // second pass — fill between the rich slots so no sand voids remain
+      for (let s = 0; s < 9; s++) {
+        const a = base + rand(-0.85, 0.85, rng)
+        const r = 11 + (s / 9) * 14 + rand(-1.2, 1.2, rng)
+        beltSlot(a, r, false)
+      }
+    }
+    // north arc — extra depth for the FRONT wall's far half
+    for (let s = 0; s < 7; s++) {
+      const a = -Math.PI / 2 + rand(-0.55, 0.55, rng)
+      const r = 12 + (s / 7) * 12 + rand(-1.4, 1.4, rng)
+      beltSlot(a, r, rng() < 0.5)
+    }
+
+    // ---------- reef lawn — no bare sand anywhere the walls look ----------
+    // hundreds of tiny colonies, rubble chunks and low weeds pepper the
+    // mid-ground between the belt clusters — the ground plane reads as
+    // LIVE reef floor, not an empty swimming pool. det 0 silhouettes on
+    // purpose: at lawn scale (viewed from metres away) the simplified
+    // forms read identically while keeping the boot-time weld affordable.
+    const lawnN = this.det.filler >= 1 ? 280 : 170
+    for (let i = 0; i < lawnN; i++) {
+      const a = rng() * Math.PI * 2
+      const r = 7.5 + rng() * 21
+      const x = CX + Math.cos(a) * r + rand(-2, 2, rng)
+      const z = CZ + Math.sin(a) * r + rand(-2, 2, rng)
+      if (insideReefFootprint(x, z, 1.2)) continue
+      const roll = rng()
+      if (roll < 0.34) {
+        // small rubble / pebble chunk
+        const rock = new THREE.IcosahedronGeometry(0.12 + rng() * 0.34, 1)
+        const rp = rock.attributes.position as THREE.BufferAttribute
+        for (let j = 0; j < rp.count; j++) rp.setY(j, rp.getY(j) * (0.5 + rng() * 0.35))
+        rock.computeVertexNormals()
+        rock.rotateY(rng() * Math.PI * 2)
+        rock.translate(x, this.groundAt(x, z) + 0.03, z)
+        rubble.push(paint(rock, new THREE.Color(pickF(['#5f7a68', '#6b8272', '#587869', '#7a8a76'], rng)), 0.3, rng, 0.25))
+      } else if (roll < 0.72) {
+        place(pickF(['finger', 'bubble', 'spiral'], rng), x, z, rand(0.6, 1.2, rng), 0.04, 0)
+      } else {
+        place(pickF(['feather', 'redwhip', 'staghorn'], rng), x, z, rand(0.5, 1.0, rng), 0.03, 0)
+      }
     }
 
     // ---------- sand channels — whips & curls line the paths ----------

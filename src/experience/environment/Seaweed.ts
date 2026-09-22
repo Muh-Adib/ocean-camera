@@ -77,6 +77,8 @@ const FRAG = /* glsl */`
     // darken the very base where it roots into sand
     col *= mix(0.55, 1.0, smoothstep(0.0, 0.35, vUv.y));
     gl_FragColor = vec4(col, alpha);
+    // OUTPUT/PREVIEW PARITY — see SceneManager dome note
+    #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `

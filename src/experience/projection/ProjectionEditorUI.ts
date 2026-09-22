@@ -18,6 +18,8 @@ import { getVibrance, onVibranceChange, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN 
 import { downloadFishTemplate, TEMPLATE_URL } from '../fish/FishTemplate'
 import { processFishImage } from '../fish/FishScan'
 import { FolderSync } from '../fish/FolderSync'
+import { REEF_SITES } from '../environment/ReefSites'
+import type { FishDirector, SchoolFlow } from '../fish/FishDirector'
 
 const AIM_TARGET: [number, number, number] = [0, 1.4, -8]
 /** remembered show sessions for the FISH-studio chips */
@@ -594,6 +596,66 @@ export class ProjectionEditorUI {
     }
     gQuality.appendChild(this.hint(`Quality profiles set how many real pixels each surface renders before warping. ${QUALITY_PROFILES.balanced.hint}. AUTO measures frame cost and moves between ~30% and 95% on its own — pick PERFORMANCE on weak machines or ULTRA when the projector wall deserves every pixel.`))
 
+    // ---- karst towers — reshape the limestone reef (syncs with the show) ----
+    const gTowers = this.collap(body, 'REEF TOWERS (MENARA KARST)', false)
+    const cfgRaw = this.pm.towerCfg ?? { v: 1, global: true, towers: {} }
+    const cfg = cfgRaw as { global?: boolean; towers: Record<string, { on?: boolean; h?: number; x?: number; z?: number; rot?: number }> }
+    const towerNames = ['HERO (tall)', 'HERO (mid)', 'HERO (small)', 'HERO (satellite)', 'WEST BOMMIE', 'PATH PINNACLE', 'PATH PINNACLE B']
+    const applyTowers = () => { this.pm.setTowerCfg({ v: 1, global: cfg.global !== false, towers: cfg.towers }) }
+    gTowers.appendChild(this.check('SHOW the limestone reef', cfg.global !== false, (on) => {
+      cfg.global = on; applyTowers(); this.showTab('project')
+    }))
+    for (let ti = 0; ti < 7; ti++) {
+      const ov = cfg.towers[String(ti)] ?? {}
+      const row = document.createElement('div')
+      row.className = 'pm-btn-row'
+      row.style.alignItems = 'center'
+      row.style.flexWrap = 'wrap'
+      const name = document.createElement('span')
+      name.className = 'pm-label pm-slider-label'
+      name.style.minWidth = '8.2rem'
+      name.textContent = `${ti + 1} · ${towerNames[ti]}`
+      row.appendChild(name)
+      row.appendChild(this.check('show', ov.on !== false, (on) => {
+        cfg.towers[String(ti)] = { ...ov, on }; applyTowers()
+      }))
+      row.appendChild(this.slide2('HEIGHT ×', ov.h ?? 1, 0.4, 2, 0.05, (v) => {
+        cfg.towers[String(ti)] = { on: true, h: v, x: ov.x ?? 0, z: ov.z ?? 0, rot: ov.rot ?? 0 }
+        applyTowers()
+      }))
+      gTowers.appendChild(row)
+      const posRow = document.createElement('div')
+      posRow.className = 'pm-btn-row'
+      posRow.style.alignItems = 'stretch'
+      const num = (lab: string, val: number, set: (v: number) => void): HTMLElement => {
+        const wrap = document.createElement('label')
+        wrap.className = 'pm-field'
+        const s = document.createElement('span')
+        s.textContent = lab
+        const input = document.createElement('input')
+        input.type = 'number'
+        input.className = 'pm-input'
+        input.step = '0.5'
+        input.value = String(Math.round(val * 100) / 100)
+        input.addEventListener('change', () => {
+          const v = parseFloat(input.value)
+          if (Number.isFinite(v)) set(v)
+        })
+        wrap.append(s, input)
+        return wrap
+      }
+      const cur = cfg.towers[String(ti)] ?? {}
+      posRow.appendChild(num('X', cur.x ?? 0, (v) => { cfg.towers[String(ti)] = { on: true, h: cur.h ?? 1, x: v, z: cur.z ?? 0, rot: cur.rot ?? 0 }; applyTowers() }))
+      posRow.appendChild(num('Z', cur.z ?? 0, (v) => { cfg.towers[String(ti)] = { on: true, h: cur.h ?? 1, x: cur.x ?? 0, z: v, rot: cur.rot ?? 0 }; applyTowers() }))
+      posRow.appendChild(num('ROT°', cur.rot ?? 0, (v) => { cfg.towers[String(ti)] = { on: true, h: cur.h ?? 1, x: cur.x ?? 0, z: cur.z ?? 0, rot: v }; applyTowers() }))
+      gTowers.appendChild(posRow)
+    }
+    gTowers.appendChild(this.btn('RESET ALL TOWERS', () => {
+      this.pm.setTowerCfg({ v: 1, global: true, towers: {} })
+      this.showTab('project')
+    }, 'pm-btn-sm pm-btn-danger'))
+    gTowers.appendChild(this.hint('Move, shrink, spin or hide each karst tower — corals and sponges rooted on its ledges re-plant automatically on the fresh rock. The layout rides the show file, so every output screen rebuilds the same reef.'))
+
     // ---- project files ----
     const gFiles = this.collap(body, 'PROJECT FILES — save / export / import', false)
     const fileRow = document.createElement('div')
@@ -975,6 +1037,32 @@ export class ProjectionEditorUI {
 
     wrap.appendChild(this.sectionEl('CHOREOGRAPHY — movement & visibility per school'))
 
+    // ---- DEFAULT MOVEMENT — every school without its own override ----
+    const def = dir.getDefaults()
+    const defBox = document.createElement('div')
+    defBox.className = 'pm-choreo-defaults'
+    const defHead = document.createElement('div')
+    defHead.className = 'pm-panel-head pm-panel-head-sm'
+    defHead.textContent = 'DEFAULT MOVEMENT — applied to every fish without its own settings'
+    defBox.appendChild(defHead)
+    const defSel = document.createElement('select')
+    defSel.className = 'pm-select pm-select-sm'
+    for (const [m, l] of [['free', 'FREE SWIM — natural wander'], ['orbit', 'ORBIT — circle the anchor'], ['figure8', 'FIGURE-8 — infinity loop']] as const) {
+      const o = document.createElement('option')
+      o.value = m; o.textContent = l
+      defSel.appendChild(o)
+    }
+    defSel.value = def.flow.mode
+    defSel.addEventListener('change', () => { dir.patchDefaults({ flow: { mode: defSel.value as 'free' | 'orbit' | 'figure8' } }); render() })
+    defBox.appendChild(defSel)
+    defBox.appendChild(this.slide2('DEFAULT SPEED ×', def.speedMul, 0.25, 3, 0.05, (v) => { dir.patchDefaults({ speedMul: v }) }))
+    if (def.flow.mode === 'orbit' || def.flow.mode === 'figure8') {
+      defBox.appendChild(this.slide2('DEFAULT RADIUS m', def.flow.radius, 2, 50, 0.5, (v) => { dir.patchDefaults({ flow: { radius: v } }) }))
+      defBox.appendChild(this.slide2('DEFAULT FLOW SPEED m/s', def.flow.speed, 0.3, 8, 0.1, (v) => { dir.patchDefaults({ flow: { speed: v } }) }))
+    }
+    defBox.appendChild(this.hint('Defaults ride the show sync — new painted fish inherit them too. Individual school settings below always win.'))
+    wrap.appendChild(defBox)
+
     const pickerRow = document.createElement('div')
     pickerRow.className = 'pm-btn-row'
     const sel = document.createElement('select')
@@ -1115,6 +1203,8 @@ export class ProjectionEditorUI {
       if (st.flow.mode === 'patrol') {
         controls.appendChild(this.check('CLOSED LOOP (off = ping-pong)', st.flow.loop, (on) => { dir.patch(it.id, { flow: { loop: on } }); render() }))
         controls.appendChild(slide('PATH SPEED m/s', st.flow.speed, 0.3, 9, 0.1, (v) => { dir.patch(it.id, { flow: { speed: v } }) }))
+        // ---- MINI WAYPOINT MAP — top-down tank view, drag the path ----
+        controls.appendChild(this.buildWaypointMap(it.id, st, dir, render))
         const wpHead = document.createElement('div')
         wpHead.className = 'pm-panel-head pm-panel-head-sm'
         wpHead.textContent = `WAYPOINTS (${st.flow.points.length})`
@@ -1645,6 +1735,242 @@ export class ProjectionEditorUI {
     lab.append(input, document.createTextNode(` ${label}`))
     return lab
   }
+
+  /** generic slider row (used outside the choreo render closure too) */
+  private slide2(label: string, value: number, min: number, max: number, step: number, set: (v: number) => void): HTMLElement {
+    const row = document.createElement('div')
+    row.className = 'pm-slider-row'
+    const span = document.createElement('span')
+    span.className = 'pm-label pm-slider-label'
+    span.textContent = label
+    const input = document.createElement('input')
+    input.type = 'range'
+    input.min = String(min); input.max = String(max); input.step = String(step)
+    input.value = String(value)
+    const val = document.createElement('span')
+    val.className = 'pm-slider-val'
+    val.textContent = String(Math.round(value * 100) / 100)
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value)
+      set(v); val.textContent = String(Math.round(v * 100) / 100)
+    })
+    row.append(span, input, val)
+    return row
+  }
+
+  /**
+   * MINI WAYPOINT MAP — a top-down plan of the tank (X: −75..75 m,
+   * Z: −95..15 m) drawn on a small canvas: reef towers, the 360° arena
+   * ring, the school's live position, the camera and the patrol path.
+   * DRAG a waypoint to move it, TAP open water to add one, DOUBLE-TAP
+   * a waypoint to delete it. The map re-draws live so the operator can
+   * shape the swim path exactly like moving pins on a floor plan.
+   */
+  private buildWaypointMap(schoolId: string, st: { flow: SchoolFlow }, dir: FishDirector, refresh: () => void): HTMLElement {
+    const box = document.createElement('div')
+    box.className = 'pm-wpmap'
+    const head = document.createElement('div')
+    head.className = 'pm-panel-head pm-panel-head-sm'
+    head.textContent = 'WAYPOINT MAP — drag pins · tap water = add · double-tap pin = delete'
+    box.appendChild(head)
+
+    const CW = 620, CH = 455
+    const px = CW / 150                       // pixels per metre
+    const map = (x: number, z: number): [number, number] => [(x + 75) * px, (z + 95) * px]
+    const unmap = (mx: number, my: number): [number, number, number] => [
+      Math.round((mx / px - 75) * 10) / 10,
+      0,
+      Math.round((my / px - 95) * 10) / 10,
+    ]
+
+    const canvas = document.createElement('canvas')
+    canvas.width = CW; canvas.height = CH
+    canvas.className = 'pm-wpmap-canvas'
+    box.appendChild(canvas)
+    const ctx = canvas.getContext('2d')
+
+    const readout = document.createElement('div')
+    readout.className = 'pm-readout'
+    readout.style.display = 'block'
+    box.appendChild(readout)
+
+    if (!ctx) return box
+
+    const draw = () => {
+      // ---- backdrop ----
+      ctx.fillStyle = '#0b2b38'
+      ctx.fillRect(0, 0, CW, CH)
+      ctx.strokeStyle = 'rgba(140, 220, 235, 0.07)'
+      ctx.lineWidth = 1
+      for (let gx = -70; gx <= 70; gx += 10) {
+        const [a, b] = map(gx, -95)
+        ctx.beginPath(); ctx.moveTo(a, b); ctx.lineTo(a, CH); ctx.stroke()
+      }
+      for (let gz = -90; gz <= 10; gz += 10) {
+        const [a, b] = map(-75, gz)
+        ctx.beginPath(); ctx.moveTo(0, b); ctx.lineTo(CW, b); ctx.stroke()
+      }
+
+      // ---- 360° arena ring ----
+      const [acx, acy] = map(0, -20)
+      ctx.setLineDash([6, 7])
+      ctx.strokeStyle = 'rgba(120, 200, 215, 0.28)'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.arc(acx, acy, 40 * px, 0, Math.PI * 2); ctx.stroke()
+      ctx.setLineDash([])
+      ctx.fillStyle = 'rgba(150, 220, 235, 0.5)'
+      ctx.font = '600 15px system-ui, sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('360° ARENA', acx, acy - 40 * px - 8)
+
+      // ---- reef towers ----
+      for (const s of REEF_SITES) {
+        const [tx, ty] = map(s.x, s.z)
+        ctx.fillStyle = 'rgba(196, 168, 122, 0.65)'
+        ctx.beginPath(); ctx.arc(tx, ty, Math.max(4, s.R * px * 0.8), 0, Math.PI * 2); ctx.fill()
+      }
+
+      // ---- other schools (faint, for orientation) ----
+      for (const other of dir.list()) {
+        if (other.id === schoolId) continue
+        const [ox, oy] = map(other.centroid[0], other.centroid[2])
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.16)'
+        ctx.beginPath(); ctx.arc(ox, oy, 4, 0, Math.PI * 2); ctx.fill()
+      }
+
+      // ---- this school: anchor + live centroid ----
+      const meta = dir.list().find((m) => m.id === schoolId)
+      if (meta) {
+        const [ax, ay] = map(meta.anchor[0], meta.anchor[2])
+        ctx.strokeStyle = '#ffd76a'
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(ax - 7, ay); ctx.lineTo(ax + 7, ay); ctx.moveTo(ax, ay - 7); ctx.lineTo(ax, ay + 7); ctx.stroke()
+        const [cxp, cyp] = map(meta.centroid[0], meta.centroid[2])
+        ctx.fillStyle = '#59e0ff'
+        ctx.beginPath(); ctx.arc(cxp, cyp, 7, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = 'rgba(89, 224, 255, 0.85)'
+        ctx.font = '600 14px system-ui, sans-serif'
+        ctx.textAlign = 'left'
+        ctx.fillText('SCHOOL', cxp + 11, cyp + 5)
+
+        // ---- camera marker ----
+        const cam = new THREE.Vector3()
+        this.pm.mainCamera.getWorldPosition(cam)
+        const [kmx, kmy] = map(cam.x, cam.z)
+        ctx.strokeStyle = '#ff9d5c'
+        ctx.lineWidth = 2
+        ctx.beginPath(); ctx.arc(kmx, kmy, 8, 0, Math.PI * 2); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(kmx - 3, kmy); ctx.lineTo(kmx + 3, kmy); ctx.moveTo(kmx, kmy - 3); ctx.lineTo(kmx, kmy + 3); ctx.stroke()
+      }
+
+      // ---- the path ----
+      const pts = st.flow.points
+      if (pts.length >= 2) {
+        ctx.strokeStyle = '#7df0c0'
+        ctx.lineWidth = 3
+        ctx.beginPath()
+        const [x0, y0] = map(pts[0][0], pts[0][2])
+        ctx.moveTo(x0, y0)
+        for (let i = 1; i < pts.length; i++) { const [a, b] = map(pts[i][0], pts[i][2]); ctx.lineTo(a, b) }
+        ctx.stroke()
+        if (st.flow.loop && pts.length > 2) {
+          const [ax2, ay2] = map(pts[pts.length - 1][0], pts[pts.length - 1][2])
+          const [bx2, by2] = map(pts[0][0], pts[0][2])
+          ctx.setLineDash([8, 7])
+          ctx.beginPath(); ctx.moveTo(ax2, ay2); ctx.lineTo(bx2, by2); ctx.stroke()
+          ctx.setLineDash([])
+        }
+      }
+
+      // ---- waypoints ----
+      pts.forEach((wp, i) => {
+        const [wx, wy] = map(wp[0], wp[2])
+        ctx.fillStyle = i === 0 ? '#ffb0e2' : '#7df0c0'
+        ctx.beginPath(); ctx.arc(wx, wy, 11, 0, Math.PI * 2); ctx.fill()
+        ctx.strokeStyle = 'rgba(6, 30, 38, 0.85)'
+        ctx.lineWidth = 3
+        ctx.stroke()
+        ctx.fillStyle = '#06202a'
+        ctx.font = 'bold 14px system-ui, sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(String(i + 1), wx, wy + 5)
+      })
+
+      if (meta) {
+        readout.textContent = `${meta.label} · anchor [${meta.anchor.map((n) => Math.round(n))}] · live [${meta.centroid.map((n) => Math.round(n))}]`
+      }
+    }
+
+    // ---- interaction: drag / add / delete ----
+    let dragIdx = -1
+    let moved = false
+    const hit = (mx: number, my: number): number => {
+      let best = -1, bd = 22 * 22
+      st.flow.points.forEach((wp, i) => {
+        const [wx, wy] = map(wp[0], wp[2])
+        const d = (wx - mx) * (wx - mx) + (wy - my) * (wy - my)
+        if (d < bd) { bd = d; best = i }
+      })
+      return best
+    }
+    const locate = (e: PointerEvent): [number, number] => {
+      const r = canvas.getBoundingClientRect()
+      return [(e.clientX - r.left) * (CW / r.width), (e.clientY - r.top) * (CH / r.height)]
+    }
+    canvas.addEventListener('pointerdown', (e) => {
+      const [mx2, my2] = locate(e)
+      dragIdx = hit(mx2, my2)
+      moved = false
+      if (dragIdx >= 0) canvas.setPointerCapture(e.pointerId)
+    })
+    canvas.addEventListener('pointermove', (e) => {
+      if (dragIdx < 0) return
+      const [mx2, my2] = locate(e)
+      moved = true
+      const [wx, , wz] = unmap(mx2, my2)
+      const points = st.flow.points.map((p, k) => (k === dragIdx ? [wx, p[1], wz] as [number, number, number] : p))
+      dir.patch(schoolId, { flow: { points } })
+      draw()
+    })
+    canvas.addEventListener('pointerup', (e) => {
+      const [mx2, my2] = locate(e)
+      if (dragIdx >= 0) {
+        // double-tap a pin (no drag) deletes it
+        if (!moved) {
+          const now = performance.now()
+          const last = this.wpLastTap
+          if (last && last.idx === dragIdx && now - last.t < 420 && st.flow.points.length > 0) {
+            const points = st.flow.points.filter((_, k) => k !== dragIdx)
+            dir.patch(schoolId, { flow: { points, ...(points.length < 2 ? { mode: 'free' as const } : {}) } })
+            refresh()
+          }
+          this.wpLastTap = { idx: dragIdx, t: now }
+        }
+        dragIdx = -1
+        return
+      }
+      // tap open water → add a waypoint there (Y from the school's live depth)
+      const [wx, , wz] = unmap(mx2, my2)
+      const meta = dir.list().find((m) => m.id === schoolId)
+      const y = meta ? meta.centroid[1] : 2
+      dir.addWaypoint(schoolId, [wx, Math.round(y * 10) / 10, wz])
+      refresh()
+    })
+    canvas.addEventListener('pointerleave', () => { dragIdx = -1 })
+
+    // live redraw while the panel stays mounted
+    const timer = window.setInterval(() => {
+      if (!canvas.isConnected) { window.clearInterval(timer); return }
+      draw()
+    }, 400)
+    this.disposers.push(() => window.clearInterval(timer))
+
+    draw()
+    return box
+  }
+
+  /** last tapped waypoint pin on the mini map (double-tap = delete) */
+  private wpLastTap: { idx: number; t: number } | null = null
 
   /** number field: focus = history snapshot, input = live light update, change = commit */
   private numField(label: string, value: number, step: number, set: (v: number) => void, min: number, max: number): HTMLElement {

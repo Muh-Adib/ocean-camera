@@ -29,6 +29,7 @@ import { WallQr } from '../remote/WallQr'
 import { deriveSpanH, fitSliceToRatio, glueWalls, seamAudit } from './SpanChain'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, QrShowMode, ScreenFit } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
+import { sanitizeTowerConfig, type TowerConfig } from '../environment/LimestoneReef'
 
 export interface ProjectionDeps {
   sceneMgr: SceneManager
@@ -36,6 +37,8 @@ export interface ProjectionDeps {
   toast: (message: string, duration?: number) => void
   /** dedicated /output page: no editor chrome, composite only */
   outputOnly?: boolean
+  /** karst tower config arrived (studio edit / project load / relay push) */
+  onTowerConfig?: (cfg: TowerConfig) => void
 }
 
 const AUTOSAVE_DELAY = 900
@@ -73,7 +76,10 @@ export class ProjectionManager {
   viewportLayout: 'single' | 'quad' | 'all' = 'single'
   showFrustums = true
 
-  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 0.75, quality: 'balanced', vibrance: 1 }
+  // ULTRA by default — the wall picture must match the studio preview's water
+  // detail and shading (operator request). Weak machines can still pick a
+  // lighter profile in the overlay; AUTO adapts on its own.
+  output: ProjectionOutput = { width: 1920, height: 1080, renderScale: 1.0, quality: 'ultra', vibrance: 1 }
 
   /**
    * Wall-edge snapping — when a span-locked camera changes (span, ratio,
@@ -140,6 +146,8 @@ export class ProjectionManager {
   qrShow: QrShowMode = 'auto'
   /** operator dismissed the wall QR for this session */
   private qrDismissed = false
+  /** karst tower configuration — rides the project to every screen */
+  towerCfg: TowerConfig | null = null
   /** painted-fish sync client — assigned by main.ts (studio edits, all pages follow) */
   fishTank: import('../fish/FishTank').FishTank | null = null
   /**
@@ -177,6 +185,10 @@ export class ProjectionManager {
       // live getter — a snapshot value would go stale the moment the host changes
       get qrHost() { return self.qrHost },
       setQrHost: (h) => { self.setQrHost(h, { silent: true }) },
+      get qrShow() { return self.qrShow },
+      setQrShow: (mode, opts) => { self.setQrShow(mode, opts) },
+      get towerCfg() { return self.towerCfg },
+      setTowerCfg: (raw, opts) => { self.setTowerCfg(raw, opts) },
       get snapWalls() { return self.snapWalls },
       setSnapWalls: (on) => { self.snapWalls = on },
       get tankSession() { return self.tankSession },
@@ -279,6 +291,24 @@ export class ProjectionManager {
   setQrShow(mode: QrShowMode, opts: { silent?: boolean } = {}) {
     this.qrShow = mode
     if (!opts.silent) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.ui?.refreshAll()
+    }
+  }
+
+  /**
+   * Studio/output setting: reshape the karst towers (show/hide per tower,
+   * height, position, spin). The environment re-plants its corals through
+   * the deps callback, and (unless silent) the config rides the project
+   * push so every screen rebuilds the same reef.
+   */
+  setTowerCfg(raw: unknown, opts: { silent?: boolean } = {}) {
+    const next = sanitizeTowerConfig(raw)
+    const changed = JSON.stringify(next) !== JSON.stringify(this.towerCfg)
+    this.towerCfg = next
+    this.deps.onTowerConfig?.(next)
+    if (!opts.silent && changed) {
       this.broadcastSoon()
       this.scheduleAutosave()
       this.ui?.refreshAll()
@@ -1268,6 +1298,19 @@ export class ProjectionManager {
     if (!biggest) return null
     const rt = this.outputMgr.expectedRTSize(biggest.output.width, biggest.output.height, q.renderScale, q.rtCap)
     return { w: rt.w, h: rt.h, msaa: q.msaa }
+  }
+
+  /**
+   * The point the WALLS look from — centroid of every enabled surface
+   * camera's base position (the room eye). The painted-fish camera-pass
+   * orbits around it, so the artworks sweep close past every wall.
+   */
+  eyePoint(out = new THREE.Vector3()): THREE.Vector3 {
+    const list = this.surfaces.surfaces.filter((s) => s.enabled)
+    if (!list.length) return out.set(0, 2.2, 0)
+    let x = 0, y = 0, z = 0
+    for (const s of list) { x += s.camera.position[0]; y += s.camera.position[1]; z += s.camera.position[2] }
+    return out.set(x / list.length, y / list.length, z / list.length)
   }
 
   // ------------------------------------------------------------ render pipeline

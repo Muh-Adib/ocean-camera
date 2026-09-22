@@ -34,6 +34,24 @@ export interface RouteState {
   angle: number                // orbit / figure-8 phase (rad)
 }
 
+/**
+ * CAMERA PASS — a single fish performs a close, slow arc AROUND the
+ * view point (the wall constellation eye / the swim camera). Used as
+ * the DEFAULT behaviour of painted (imported-image) fish: they roam
+ * free, but take turns swooping past the camera one by one so every
+ * visitor sees each artwork glide by up close, never as a clump.
+ */
+export interface PassState {
+  fish: number                 // index of the fish performing the pass
+  center: THREE.Vector3        // live view point (tracked every frame)
+  radius: number               // orbit distance from the camera (m)
+  speed: number                // tangential speed along the ring (m/s)
+  angle: number                // ring phase (rad) — seeded from the fish bearing
+  travel: number               // radians traversed so far (done ≥ travelGoal)
+  travelGoal: number           // total arc for this pass (~1.6 loops)
+  done: boolean                // set when the fish may rejoin free swim
+}
+
 export interface FieldCtx {
   active: boolean
   point: THREE.Vector3
@@ -98,6 +116,8 @@ export class School {
   heading: THREE.Vector3 | null = null     // free-mode compass bias
   speedMul = 1                             // per-school speed multiplier
   centroid = new THREE.Vector3()           // school centre (updated per frame)
+  /** per-fish close camera pass (painted-fish default behaviour) */
+  pass: PassState | null = null
 
   constructor(
     public species: string,
@@ -281,6 +301,24 @@ export class School {
     const onRoute = this.evalRouteTarget(dt, routeTgt)
     let centroidX = 0, centroidY = 0, centroidZ = 0
 
+    // ---- camera pass: advance the ring phase for the passing fish ----
+    // (center is tracked LIVE, so the arc stays glued to the camera even
+    // when the operator steers the room around mid-pass)
+    let passTgt: THREE.Vector3 | null = null
+    let passIdx = -1
+    if (this.pass && this.pass.fish < n) {
+      const ps = this.pass
+      ps.angle += (ps.speed / Math.max(1.2, ps.radius)) * dt
+      ps.travel += (ps.speed / Math.max(1.2, ps.radius)) * dt
+      if (ps.travel >= ps.travelGoal) ps.done = true
+      passIdx = ps.fish
+      passTgt = new THREE.Vector3(
+        ps.center.x + Math.cos(ps.angle) * ps.radius,
+        ps.center.y + 0.35 * Math.sin(ps.angle * 2.3),
+        ps.center.z + Math.sin(ps.angle) * ps.radius,
+      )
+    }
+
     for (let i = 0; i < n; i++) {
       const f = fish[i]
       f.acc.set(0, 0, 0)
@@ -394,7 +432,18 @@ export class School {
       }
 
       // ---- choreography: follow the flow leader (route / migration) ----
-      if (onRoute) {
+      if (i === passIdx && passTgt) {
+        // the passing fish hugs its ring point around the camera —
+        // a firm steer (no personal offset) so the arc reads clean
+        _tmp.copy(passTgt).sub(f.pos)
+        const dr = _tmp.length()
+        if (dr > 0.35) {
+          _tmp.multiplyScalar(1 / dr)
+          _tmp.setLength(maxSpeed * (dr < 2.2 ? 0.6 : 1.0)).sub(f.vel)
+          this.limit(_tmp, p.maxForce * 1.9)
+          f.acc.addScaledVector(_tmp, 2.3)
+        }
+      } else if (onRoute) {
         // personal offset so the school spreads around the leader point
         const ox = Math.sin(f.wanderSeed * 12.9898) * 1.5
         const oy = Math.sin(f.wanderSeed * 78.233) * 0.55

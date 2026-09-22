@@ -108,6 +108,11 @@ export class SceneManager {
           c += vec3(0.42, 0.78, 0.9) * zen * (0.3 + 0.3 * veil) * (0.8 + uEnergy * 0.4);
           c *= 0.82 + uEnergy * 0.35;                 // ecosystem energy brightens the water
           gl_FragColor = vec4(c, 1.0);
+          // OUTPUT/PREVIEW PARITY: the composite pass tone maps everything it
+          // draws (three.js skips tone mapping when a scene renders into a
+          // render target). Including the chunk here makes the preview path
+          // apply ACES too — both paths now grade the dome identically.
+          #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
     })

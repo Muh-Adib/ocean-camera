@@ -99,7 +99,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const rocks = new RockSystem(sceneMgr.scene, seabed.heightAt, 64)
   // the central limestone structure first — corals root on its ledges
   const limestone = new LimestoneReef(sceneMgr.scene, seabed.heightAt, cfg.coralDetail)
-  const coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity, {
+  let coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity, {
     detail: cfg.coralDetail,
     attach: limestone.growthSpots,
   })
@@ -111,8 +111,41 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
-  const sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
-  const obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
+  let sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
+  let obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
+
+  /**
+   * TOWER CONTROL — the operator reshapes the karst towers (show/hide,
+   * height, position, spin). The limestone rebuilds cheaply, and the
+   * corals + sponges rooted on its ledges re-plant on the fresh growth
+   * spots so nothing floats and nothing hangs in mid-water. The heavy
+   * re-plant is debounced — slider drags feel instant without rebuilding
+   * the reef on every pixel.
+   */
+  let towerTimer = 0
+  let towerPending: unknown = null
+  const applyTowerConfig = (raw: unknown) => {
+    towerPending = raw
+    window.clearTimeout(towerTimer)
+    towerTimer = window.setTimeout(() => {
+      const cfgNow = towerPending
+      towerPending = null
+      if (!limestone.setConfig(cfgNow)) return
+      coral.dispose()
+      coral = new CoralSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDensity, {
+        detail: cfg.coralDetail,
+        attach: limestone.growthSpots,
+      })
+      sponges.dispose()
+      sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
+      bubbles.resetEmitters()
+      for (const e of sponges.emitters) {
+        bubbles.addEmitter(e.pos, { rate: e.rate, size: e.size, speed: e.speed })
+      }
+      obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
+      fish.setObstacles(obstacles)
+    }, 240)
+  }
 
   // ---------------- particles ----------------
   const particles = new ParticleField(sceneMgr.scene, cfg.microCount, cfg.planktonCount)
@@ -254,8 +287,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     container,
     toast: (m, d) => ui.toast(m, d),
     outputOnly,
+    // tower edits ride the show project — every /output re-plants too
+    onTowerConfig: (raw) => { applyTowerConfig(raw) },
   })
-  if (outputOnly) projection.enterOutputOnly()
+
 
   // ---------------- painted fish tank (colouring-book imports) ----------------
   // The studio console (FISH tab) imports coloured sheets; every page — this
@@ -408,6 +443,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   function loop() {
     raf = requestAnimationFrame(loop)
     if (hidden) return
+
     const dt = Math.min(0.05, clock.getDelta())
     elapsed += dt
     perf.report(dt)
@@ -445,6 +481,10 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     }
     cameraRig.update(dt)
     fish.cameraWorld.copy(cameraRig.group.position)
+    // painted fish orbit around the point the room actually watches from:
+    // the wall constellation eye in projection mode, the swim camera otherwise
+    if (projection.active) projection.eyePoint(fish.orbitCenter)
+    else fish.orbitCenter.copy(cameraRig.group.position)
     lighting.update(dt)
 
     // seaweed current blends ambient wander + gesture bias
@@ -679,6 +719,33 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         reset: (id?: string) => (id ? fishTank.director.reset(id) : fishTank.director.resetAll()),
         showAll: () => fishTank.director.showAll(),
         state: () => fishTank.director.exportState(),
+        /** defaults(speed?, flow?, radius?, fspeed?) — show-wide default movement */
+        defaults: (opts: { speed?: number; flow?: 'free' | 'orbit' | 'figure8'; radius?: number; fspeed?: number }) => {
+          const flow: Record<string, unknown> = {}
+          if (opts.flow) flow.mode = opts.flow
+          if (opts.radius !== undefined) flow.radius = opts.radius
+          if (opts.fspeed !== undefined) flow.speed = opts.fspeed
+          return fishTank.director.patchDefaults({
+            ...(opts.speed !== undefined ? { speedMul: opts.speed } : {}),
+            ...(Object.keys(flow).length ? { flow: flow as never } : {}),
+          })
+        },
+      },
+      /** painted-fish camera-pass sequencer (one by one around the camera) */
+      pass: () => fish.passInfo(),
+      /** karst tower controls — list/set/reset (rides the show project) */
+      towers: {
+        list: () => projection.towerCfg ?? limestone.getConfig(),
+        set: (idx: number, patch: { on?: boolean; h?: number; x?: number; z?: number; rot?: number }) => {
+          const cur = (projection.towerCfg ?? limestone.getConfig()) as unknown as {
+            towers: Record<string, Record<string, unknown>>
+          }
+          const towers = { ...cur.towers, [String(idx)]: { ...(cur.towers[String(idx)] ?? {}), ...patch } }
+          projection.setTowerCfg({ v: 1, global: true, towers })
+          return projection.towerCfg
+        },
+        reset: () => { projection.setTowerCfg({ v: 1, global: true, towers: {} }); return projection.towerCfg },
+        show: (on: boolean) => { projection.setTowerCfg({ v: 1, global: on, towers: projection.towerCfg?.towers ?? {} }); return on },
       },
       /** force an immediate full push to every open /output */
       pushNow: () => projection.qaPush(),

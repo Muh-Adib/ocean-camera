@@ -36,10 +36,18 @@ export interface SchoolSetting {
 
 export interface DirectorState {
   v: 1
+  /** show-wide DEFAULT MOVEMENT — applied to every school WITHOUT its own
+   *  override (new painted designs included). Neutral by default. */
+  defaults: { speedMul: number; flow: SchoolFlow }
   schools: Record<string, SchoolSetting>
 }
 
 export const DEFAULT_FLOW: SchoolFlow = { mode: 'free', points: [], loop: true, speed: 2.2, radius: 7 }
+
+const NEUTRAL_DEFAULTS: { speedMul: number; flow: SchoolFlow } = {
+  speedMul: 1,
+  flow: { mode: 'free', points: [], loop: true, speed: 2.2, radius: 7 },
+}
 
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v))
 
@@ -84,6 +92,7 @@ function sanitizeSetting(raw: unknown): SchoolSetting | null {
 
 function sanitizeState(raw: unknown): DirectorState {
   const schools: Record<string, SchoolSetting> = {}
+  let defaults = { ...NEUTRAL_DEFAULTS, flow: { ...NEUTRAL_DEFAULTS.flow } }
   if (raw && typeof raw === 'object') {
     const rec = (raw as Record<string, unknown>).schools
     if (rec && typeof rec === 'object') {
@@ -93,15 +102,22 @@ function sanitizeState(raw: unknown): DirectorState {
         if (s) schools[id] = s
       }
     }
+    const d = (raw as Record<string, unknown>).defaults
+    if (d && typeof d === 'object') {
+      const dd = d as Record<string, unknown>
+      const speed = typeof dd.speedMul === 'number' && Number.isFinite(dd.speedMul) ? clamp(dd.speedMul, 0.2, 3) : 1
+      const flow = sanitizeFlow(dd.flow)
+      defaults = { speedMul: speed, flow: flow.mode === 'patrol' ? { ...NEUTRAL_DEFAULTS.flow } : flow }
+    }
   }
-  return { v: 1, schools }
+  return { v: 1, defaults, schools }
 }
 
 export class FishDirector {
   /** fired after every LOCAL edit (studio) — host pushes it to the server */
   onLocalChange: ((state: DirectorState) => void) | null = null
 
-  private state: DirectorState = { v: 1, schools: {} }
+  private state: DirectorState = { v: 1, defaults: { ...NEUTRAL_DEFAULTS, flow: { ...NEUTRAL_DEFAULTS.flow } }, schools: {} }
   private session: string
 
   constructor(private fish: FishManager, session: string) {
@@ -126,9 +142,9 @@ export class FishDirector {
   private loadLocal() {
     try {
       const raw = localStorage.getItem(this.key())
-      this.state = raw ? sanitizeState(JSON.parse(raw)) : { v: 1, schools: {} }
+      this.state = raw ? sanitizeState(JSON.parse(raw)) : { v: 1, defaults: { ...NEUTRAL_DEFAULTS, flow: { ...NEUTRAL_DEFAULTS.flow } }, schools: {} }
     } catch {
-      this.state = { v: 1, schools: {} }
+      this.state = { v: 1, defaults: { ...NEUTRAL_DEFAULTS, flow: { ...NEUTRAL_DEFAULTS.flow } }, schools: {} }
     }
   }
 
@@ -143,8 +159,29 @@ export class FishDirector {
 
   get(id: string): SchoolSetting {
     return this.state.schools[id] ?? {
-      visible: true, anchor: [0, 2, -25], heading: 0, speedMul: 1, flow: { ...DEFAULT_FLOW, points: [] },
+      visible: true, anchor: [0, 2, -25], heading: 0,
+      speedMul: this.state.defaults.speedMul,
+      flow: JSON.parse(JSON.stringify(this.state.defaults.flow)) as SchoolFlow,
     }
+  }
+
+  /** the show-wide default movement (UI + QA) */
+  getDefaults(): { speedMul: number; flow: SchoolFlow } {
+    return JSON.parse(JSON.stringify(this.state.defaults))
+  }
+
+  /** change the show-wide default movement; applies to every school
+   *  WITHOUT an explicit override and syncs to all screens */
+  patchDefaults(partial: { speedMul?: number; flow?: Partial<SchoolFlow> }) {
+    const d = this.state.defaults
+    this.state.defaults = {
+      speedMul: partial.speedMul !== undefined ? clamp(partial.speedMul, 0.2, 3) : d.speedMul,
+      flow: partial.flow ? sanitizeFlow({ ...d.flow, ...partial.flow }) : d.flow,
+    }
+    this.applyDefaults()
+    this.persistLocal()
+    this.onLocalChange?.(this.exportState())
+    return this.getDefaults()
   }
 
   /** settings merged with live FishManager metadata — the UI / QA list */
@@ -208,8 +245,10 @@ export class FishDirector {
     this.fish.applyChoreo(id, {
       visible: true,
       headingDeg: null,
-      speedMul: 1,
-      route: null,
+      speedMul: this.state.defaults.speedMul,
+      route: this.state.defaults.flow.mode === 'free'
+        ? null
+        : { mode: this.state.defaults.flow.mode, points: [], loop: this.state.defaults.flow.loop, speed: this.state.defaults.flow.speed, radius: this.state.defaults.flow.radius },
       ...(meta ? { anchor: meta.anchor } : {}),
     })
     this.persistLocal()
@@ -235,6 +274,23 @@ export class FishDirector {
   /** (re)apply every stored setting to the live FishManager */
   applyAll() {
     for (const [id, s] of Object.entries(this.state.schools)) this.apply(id, s)
+    this.applyDefaults()
+  }
+
+  /** push the default movement onto every school that has no own override */
+  private applyDefaults() {
+    const meta = this.fish.schoolList()
+    for (const m of meta) {
+      if (this.state.schools[m.id]) continue        // explicit override wins
+      this.fish.applyChoreo(m.id, {
+        visible: true,
+        headingDeg: null,
+        speedMul: this.state.defaults.speedMul,
+        route: this.state.defaults.flow.mode === 'free'
+          ? null
+          : { mode: this.state.defaults.flow.mode, points: [], loop: this.state.defaults.flow.loop, speed: this.state.defaults.flow.speed, radius: this.state.defaults.flow.radius },
+      })
+    }
   }
 
   private apply(id: string, s: SchoolSetting) {

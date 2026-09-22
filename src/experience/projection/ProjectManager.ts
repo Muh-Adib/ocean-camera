@@ -22,6 +22,9 @@ export interface ProjectHost {
   /** wall-QR visibility — decoupled from the phone connection state */
   qrShow: QrShowMode
   setQrShow(mode: QrShowMode, opts?: { silent?: boolean }): void
+  /** karst tower configuration (raw JSON — sanitized on both ends) */
+  towerCfg: unknown
+  setTowerCfg(raw: unknown, opts?: { silent?: boolean }): void
   /** wall-edge snapping (span edits re-aim neighbours) — live getter */
   snapWalls: boolean
   setSnapWalls(on: boolean): void
@@ -205,6 +208,7 @@ export class ProjectManager {
       qr: { host: this.host.qrHost, show: this.host.qrShow },
       snapWalls: this.host.snapWalls,
       tank: { session: this.host.tankSession },
+      env: { towers: this.host.towerCfg ?? undefined },
     }
   }
 
@@ -224,11 +228,13 @@ export class ProjectManager {
     if (!surfaces.length) return false
 
     const out = p.output ?? ({} as Partial<ProjectionOutput>)
-    const quality = QUALITY_LEVELS.includes(out.quality as never) ? (out.quality as QualityLevel) : 'balanced'
+    // quality: saved value wins; legacy/missing falls to ULTRA — the wall
+    // must match the studio preview's detail (operator request)
+    const quality = QUALITY_LEVELS.includes(out.quality as never) ? (out.quality as QualityLevel) : 'ultra'
     this.host.setOutput({
       width: clampNum(out.width, 1920, 320, 16384),
       height: clampNum(out.height, 1080, 240, 8640),
-      renderScale: clampNum(out.renderScale, 0.75, 0.1, 1),
+      renderScale: clampNum(out.renderScale, 1, 0.1, 1),
       quality,
       vibrance: clampNum(out.vibrance, 1, 0.5, 1.8),
     })
@@ -244,6 +250,11 @@ export class ProjectManager {
     // show session — silent: loading must never echo a state change back
     if (typeof p.tank?.session === 'string') {
       this.host.setTankSession(p.tank.session, { silent: true })
+    }
+    // karst tower configuration — absent on old projects (keep the built reef)
+    const towers = (p.env as { towers?: unknown } | undefined)?.towers
+    if (towers !== undefined && towers !== null) {
+      this.host.setTowerCfg(towers, { silent: true })
     }
     return true
   }

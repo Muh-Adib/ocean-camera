@@ -19,12 +19,59 @@ export interface GrowthSpot {
   normal: THREE.Vector3
 }
 
+/** operator override for ONE karst tower (index-aligned to the build list) */
+export interface TowerOverride {
+  on?: boolean      // false → tower removed from the reef
+  h?: number        // height scale 0.4 .. 2 (footprint stays)
+  x?: number        // position offset (m)
+  z?: number
+  rot?: number      // spin around its axis (deg)
+}
+
+/** full tower control state — rides the show project so every screen agrees */
+export interface TowerConfig {
+  v: 1
+  global: boolean                    // master switch for the whole limestone reef
+  towers: Record<string, TowerOverride>
+}
+
+export const DEFAULT_TOWER_CONFIG: TowerConfig = { v: 1, global: true, towers: {} }
+
+/** number of karst towers built (matches the build list below) */
+export const TOWER_COUNT = 7
+
+export function sanitizeTowerConfig(raw: unknown): TowerConfig {
+  const cfg: TowerConfig = { v: 1, global: true, towers: {} }
+  if (raw && typeof raw === 'object') {
+    const r = raw as Record<string, unknown>
+    cfg.global = r.global !== false
+    if (r.towers && typeof r.towers === 'object') {
+      for (const [k, val] of Object.entries(r.towers as Record<string, unknown>).slice(0, TOWER_COUNT)) {
+        const idx = Number(k)
+        if (!Number.isInteger(idx) || idx < 0 || idx >= TOWER_COUNT || !val || typeof val !== 'object') continue
+        const o = val as Record<string, unknown>
+        const num = (v: unknown, a: number, b: number, fb: number) =>
+          typeof v === 'number' && Number.isFinite(v) ? Math.max(a, Math.min(b, v)) : fb
+        cfg.towers[String(idx)] = {
+          on: o.on !== false,
+          h: num(o.h, 0.4, 2, 1),
+          x: num(o.x, -40, 40, 0),
+          z: num(o.z, -40, 40, 0),
+          rot: num(o.rot, 0, 360, 0),
+        }
+      }
+    }
+  }
+  return cfg
+}
+
 export class LimestoneReef {
   group = new THREE.Group()
   obstacles: Obstacle[] = []
   /** upward-facing surface points where corals can root */
   growthSpots: GrowthSpot[] = []
   private meshes: THREE.Mesh[] = []
+  private cfg: TowerConfig = { v: 1, global: true, towers: {} }
 
   constructor(
     scene: THREE.Scene,
@@ -34,6 +81,35 @@ export class LimestoneReef {
     this.build(detail)
     scene.add(this.group)
   }
+
+  // ------------------------------------------------------------ tower controls
+  getConfig(): TowerConfig {
+    return JSON.parse(JSON.stringify(this.cfg)) as TowerConfig
+  }
+
+  /**
+   * Apply an operator tower configuration — rebuilds the karst (cheap:
+   * ~10k tris), regenerates growth spots and obstacles. Returns true
+   * when something actually changed.
+   */
+  setConfig(raw: unknown): boolean {
+    const next = sanitizeTowerConfig(raw)
+    const prev = JSON.stringify(this.cfg)
+    const cur = JSON.stringify(next)
+    if (prev === cur) return false
+    this.cfg = next
+    this.group.visible = this.cfg.global
+    this.rebuild()
+    return true
+  }
+
+  /** rebuild every tower mesh from the current config */
+  private rebuild() {
+    this.dispose()
+    this.build(this.detail)
+  }
+
+  private detail = 1
 
   /** limestone colour with algae / mineral stains painted per-vertex */
   private paintLimestone(geo: THREE.BufferGeometry, rng: () => number) {
@@ -148,6 +224,7 @@ export class LimestoneReef {
   }
 
   private build(detail: number) {
+    this.detail = detail
     const rng = mulberry32(20260901)
     const towers: { seed: number; x: number; z: number; r: number; h: number }[] = [
       // hero cluster — the central limestone structure of the coral garden
@@ -162,15 +239,26 @@ export class LimestoneReef {
       { seed: 9107, x: 4.0, z: -38.5, r: 1.7, h: 3.4 },
     ]
 
+    this.growthSpots = []
+    this.obstacles = []
     const towerGeos: THREE.BufferGeometry[] = []
     const rubbleGeos: THREE.BufferGeometry[] = []
 
-    for (const t of towers) {
-      const geo = this.makeTower(t.seed, t.r, t.h, detail)
-      const y = this.heightAt(t.x, t.z) + t.h * 0.02
-      const world = new THREE.Vector3(t.x, y, t.z)
-      const scale = 1
-      this.collectGrowthSpots(geo, world, scale)
+    for (let ti = 0; ti < towers.length; ti++) {
+      const t = towers[ti]
+      // operator override — off / height / position / spin
+      const ov = this.cfg.towers[String(ti)] ?? {}
+      if (ov.on === false) continue
+      const hScale = ov.h ?? 1
+      const tx = t.x + (ov.x ?? 0)
+      const tz = t.z + (ov.z ?? 0)
+      const th = t.h * hScale
+
+      const geo = this.makeTower(t.seed, t.r, th, detail)
+      if (ov.rot) geo.rotateY((ov.rot * Math.PI) / 180)
+      const y = this.heightAt(tx, tz) + th * 0.02
+      const world = new THREE.Vector3(tx, y, tz)
+      this.collectGrowthSpots(geo, world, 1)
       geo.translate(world.x, world.y, world.z)
       towerGeos.push(geo)
 
@@ -179,8 +267,8 @@ export class LimestoneReef {
       for (let i = 0; i < n; i++) {
         const a = rng() * Math.PI * 2
         const d = t.r * (1.15 + rng() * 0.75)
-        const rx = t.x + Math.cos(a) * d
-        const rz = t.z + Math.sin(a) * d * 0.85
+        const rx = tx + Math.cos(a) * d
+        const rz = tz + Math.sin(a) * d * 0.85
         const rg = this.makeRubble(t.seed * 31 + i)
         const rs = 0.5 + rng() * 0.9
         const ry = this.heightAt(rx, rz) - 0.12
@@ -190,20 +278,23 @@ export class LimestoneReef {
         rubbleGeos.push(rg)
       }
 
-      this.obstacles.push({ x: t.x, y: y + t.h * 0.4, z: t.z, r: t.r * 1.25 })
+      this.obstacles.push({ x: tx, y: y + th * 0.4, z: tz, r: t.r * 1.25 })
     }
 
     // towers merged into one draw call — welded so the karst shades smooth
-    const towerMeshGeo = weldSmooth(mergeGeometries(towerGeos.map((g) => (g.index ? g : g)), false)!)
-    const towerMat = new THREE.MeshStandardMaterial({
-      vertexColors: true, roughness: 0.94, metalness: 0.0,
-    })
-    // caustic light dances over the limestone towers — the hero centre
-    // shimmers from every side (360°), not just the camera-facing face
-    addCaustic(towerMat, { scale: 0.4, strength: 0.48 }, 'limestone-tower')
-    const towerMesh = new THREE.Mesh(towerMeshGeo, towerMat)
-    this.group.add(towerMesh)
-    this.meshes.push(towerMesh)
+    // (a config can hide EVERY tower — then no mesh is built at all)
+    if (towerGeos.length) {
+      const towerMeshGeo = weldSmooth(mergeGeometries(towerGeos.map((g) => (g.index ? g : g)), false)!)
+      const towerMat = new THREE.MeshStandardMaterial({
+        vertexColors: true, roughness: 0.94, metalness: 0.0,
+      })
+      // caustic light dances over the limestone towers — the hero centre
+      // shimmers from every side (360°), not just the camera-facing face
+      addCaustic(towerMat, { scale: 0.4, strength: 0.48 }, 'limestone-tower')
+      const towerMesh = new THREE.Mesh(towerMeshGeo, towerMat)
+      this.group.add(towerMesh)
+      this.meshes.push(towerMesh)
+    }
 
     if (rubbleGeos.length) {
       const rubbleGeo = weldSmooth(mergeGeometries(rubbleGeos, false)!)

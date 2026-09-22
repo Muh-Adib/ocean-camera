@@ -100,6 +100,22 @@ export class BubbleSystem {
     }
   }
 
+  /**
+   * Drop every emitter and return its pool slots to the ambient pool —
+   * used when the sponge field re-plants (tower moves rebuild the oscula).
+   */
+  resetEmitters() {
+    this.emitters = []
+    for (let i = this.ambientCount; i < this.bubbles.length; i++) {
+      const b = this.bubbles[i]
+      if (typeof b.src === 'number') {
+        b.src = 'ambient'
+        b.alive = false
+        b.pos.set(0, -100, 0)
+      }
+    }
+  }
+
   private spawnAmbient(rng: () => number, anywhere = false): Bubble {
     const x = rand(-62, 62)
     const z = rand(-88, 10)

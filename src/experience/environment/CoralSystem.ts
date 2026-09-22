@@ -822,6 +822,23 @@ export class CoralSystem {
       this.group.add(mesh)
     }
   }
+
+  /** full teardown — the reef re-plants when the karst towers change */
+  dispose() {
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh
+      if (!m.isMesh) return
+      m.geometry.dispose()
+      const mat = m.material as THREE.Material | THREE.Material[]
+      if (Array.isArray(mat)) mat.forEach((x) => x.dispose())
+      else mat.dispose()
+    })
+    this.group.removeFromParent()
+    this.group.clear()
+    this.obstacles = []
+    this.anemonePositions = []
+    this.clusterCenters = []
+  }
 }
 
 function countTris(geo: THREE.BufferGeometry): number {

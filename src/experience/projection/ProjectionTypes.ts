@@ -105,16 +105,16 @@ export interface QualityProfile {
 
 export const QUALITY_PROFILES: Record<Exclude<QualityLevel, 'auto' | 'custom'>, QualityProfile> = {
   performance: {
-    label: 'PERFORMANCE', renderScale: 0.5, rtCap: 1536, msaa: 0,
+    label: 'PERFORMANCE', renderScale: 0.6, rtCap: 1536, msaa: 0,
     hint: 'Weak GPUs / 4+ surfaces — smooth motion first, softness expected',
   },
   balanced: {
-    label: 'BALANCED', renderScale: 0.75, rtCap: 2560, msaa: 2,
-    hint: 'Good on most laptops — close to the preview\u2019s crispness, light AA',
+    label: 'BALANCED', renderScale: 0.9, rtCap: 2880, msaa: 4,
+    hint: 'Good on most laptops — near the preview’s crispness, full AA',
   },
   high: {
-    label: 'HIGH', renderScale: 0.9, rtCap: 3072, msaa: 4,
-    hint: 'Desktop GPUs and big walls — near-pixel-perfect water detail, full AA',
+    label: 'HIGH', renderScale: 1.0, rtCap: 3072, msaa: 4,
+    hint: 'Desktop GPUs and big walls — pixel-perfect water detail, full AA',
   },
   ultra: {
     label: 'ULTRA', renderScale: 1.0, rtCap: 4096, msaa: 4,
@@ -192,6 +192,8 @@ export interface ProjectionProject {
   snapWalls?: boolean
   /** active show session — isolates the fish tank + phone remote per venue */
   tank?: { session?: string }
+  /** environment extras — karst tower configuration (sanitized on apply) */
+  env?: { towers?: unknown }
 }
 
 export const PROJECT_VERSION = 2

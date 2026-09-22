@@ -811,3 +811,33 @@ body.projection-studio-open #gesture-view { display: none !important; }
   color: rgba(160, 210, 230, 0.6);
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------------- choreography: default movement + mini waypoint map ---------------- */
+.pm-choreo-defaults {
+  border: 1px solid rgba(120, 220, 200, 0.3);
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+  margin-bottom: 0.6rem;
+  background: rgba(8, 40, 44, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.pm-wpmap {
+  border: 1px solid rgba(120, 200, 215, 0.3);
+  border-radius: 8px;
+  padding: 0.5rem 0.55rem;
+  background: rgba(6, 28, 36, 0.55);
+  margin: 0.35rem 0 0.5rem;
+}
+.pm-wpmap-canvas {
+  display: block;
+  width: min(100%, 540px);
+  height: auto;
+  margin: 0 auto;
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}

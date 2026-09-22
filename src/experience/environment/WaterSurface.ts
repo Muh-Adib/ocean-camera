@@ -100,6 +100,8 @@ export class WaterSurface {
           // reads from mid-slopes too, not only straight overhead
           float a = uOpacity * edge * (0.52 + win * 0.5);
           gl_FragColor = vec4(col, a);
+          // OUTPUT/PREVIEW PARITY — see SceneManager dome note
+          #include <tonemapping_fragment>
           #include <colorspace_fragment>
         }`,
     })

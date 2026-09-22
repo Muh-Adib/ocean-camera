@@ -85,6 +85,8 @@ const KELP_FRAG = /* glsl */`
     float alpha = smoothstep(0.0, 0.1, vUv.y) * 0.96;
     col *= mix(0.5, 1.0, smoothstep(0.0, 0.3, vUv.y));
     gl_FragColor = vec4(col, alpha);
+    // OUTPUT/PREVIEW PARITY — see SceneManager dome note
+    #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `
