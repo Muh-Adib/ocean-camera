@@ -240,7 +240,7 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   }
   rightPec.setAttribute('aPecPaddle', new THREE.BufferAttribute(paddleArr, 1))
 
-  rightPec.rotateY(-0.5)
+  rightPec.rotateY(-0.32)   // tighter against the flank (was -0.5 — fins spread too wide)
   rightPec.translate(pecSx * 0.82, pecY, pecZ)
   parts.push(rightPec)
 
@@ -264,8 +264,8 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
 
   const rightPel = finShell(PELVIC)
   rightPel.translate(0, -pelY, -pelZ)
-  rightPel.rotateY(-0.22)
-  rightPel.rotateX(-0.35)
+  rightPel.rotateY(-0.14)
+  rightPel.rotateX(-0.22)   // less belly flare (was -0.35)
   rightPel.translate(pelSx * 0.65, pelY, pelZ)
   parts.push(rightPel)
 

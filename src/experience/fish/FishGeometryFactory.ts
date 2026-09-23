@@ -625,7 +625,7 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6, isPa
   const pos: number[] = [], cols: number[] = [], uvs: number[] = [], idx: number[] = []
   const paddles: number[] = []
   for (let k = 0; k < rays; k++) {
-    const psi = ((k / (rays - 1)) * 2 - 1) * 0.55              // fan spread
+    const psi = ((k / (rays - 1)) * 2 - 1) * 0.32              // fan spread (narrow — was 0.55, fins flared too wide)
     const lenK = L * (1 - Math.abs(psi) * 0.4)
     for (let r = 0; r < ROWS.length; r++) {
       const f = ROWS[r]
@@ -663,8 +663,8 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6, isPa
 /** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry and active paddle */
 function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 6, true)
-  g.rotateY(-0.75)
-  g.rotateZ(0.28)
+  g.rotateY(-0.42)   // tighter splay against the flank (was -0.75 — fins spread too wide)
+  g.rotateZ(0.15)
   g.translate(rAt * 0.78, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -684,8 +684,8 @@ function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: numb
 /** paired pelvic fins on the belly with exact bilateral symmetry */
 function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 5, false)
-  g.rotateY(-0.4)
-  g.rotateX(-0.8)
+  g.rotateY(-0.24)
+  g.rotateX(-0.5)    // less belly flare (was -0.8)
   g.translate(rAt * 0.42, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -752,7 +752,7 @@ interface SpeciesDef {
 export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   tropical: {
     body: { profile: [0.02, 0.075, 0.14, 0.19, 0.21, 0.17, 0.105, 0.045, 0.012], w: 0.47, h: 1.05, len: 0.55 },
-    tail: [0.2, 0.15, 0.7],
+    tail: [0.2, 0.12, 0.7],
     dorsal: [[0.14, 0.05], [0.0, 0.11], [-0.16, 0.04]],
     pectoral: 0.15, eyeR: 0.045, eyeIris: '#2a2014',
     finColor: '#ffffff', tailColor: '#ffffff',
@@ -760,7 +760,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   },
   angelfish: {
     body: { profile: [0.015, 0.07, 0.15, 0.21, 0.23, 0.19, 0.12, 0.05, 0.015], w: 0.24, h: 1.95, len: 0.48 },
-    tail: [0.3, 0.2, 0.25],
+    tail: [0.3, 0.16, 0.25],
     dorsal: [[0.18, 0.12], [0.0, 0.55], [-0.3, 0.48], [-0.58, 0.02]],
     anal: [[0.05, 0.12], [-0.1, 0.5], [-0.42, 0.02]],
     pectoral: 0.15, eyeR: 0.045, eyeIris: '#22323c',
@@ -776,7 +776,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   },
   butterflyfish: {
     body: { profile: [0.012, 0.06, 0.12, 0.165, 0.19, 0.155, 0.095, 0.05, 0.03], w: 0.26, h: 1.45, len: 0.46 },
-    tail: [0.18, 0.13, 0.15],
+    tail: [0.18, 0.105, 0.15],
     dorsal: [[0.16, 0.06], [-0.05, 0.16], [-0.3, 0.1]],
     anal: [[0.0, 0.1], [-0.25, 0.08]],
     pectoral: 0.13, eyeR: 0.042, eyeIris: '#6a4a1a',
@@ -793,7 +793,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   },
   clownfish: {
     body: { profile: [0.02, 0.08, 0.16, 0.21, 0.22, 0.18, 0.12, 0.05, 0.02], w: 0.48, h: 1.15, len: 0.44 },
-    tail: [0.16, 0.14, 0.02],
+    tail: [0.16, 0.11, 0.02],
     dorsal: [[0.14, 0.05], [-0.02, 0.1], [-0.18, 0.04]],
     pectoral: 0.16, eyeR: 0.048, eyeIris: '#b07a2a',
     finColor: '#ff8c2e', tailColor: '#ff9a44',
@@ -809,7 +809,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   },
   tang: {
     body: { profile: [0.02, 0.085, 0.16, 0.21, 0.22, 0.18, 0.11, 0.05, 0.015], w: 0.28, h: 1.55, len: 0.72 },
-    tail: [0.22, 0.19, 0.2],
+    tail: [0.22, 0.15, 0.2],
     dorsal: [[0.24, 0.07], [0.0, 0.12], [-0.26, 0.08], [-0.4, 0.04]],
     anal: [[0.05, 0.08], [-0.2, 0.1], [-0.38, 0.03]],
     pectoral: 0.18, eyeR: 0.044, eyeIris: '#1a2a38',
@@ -823,7 +823,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     // porcupinefish / pufferfish — globular spherical egg tapering smoothly
     // into slender caudal peduncle; big round friendly eyes, cute beak
     body: { profile: [0.035, 0.09, 0.20, 0.38, 0.50, 0.52, 0.46, 0.34, 0.10], w: 1.05, h: 1.02, len: 0.56 },
-    tail: [0.15, 0.12, 0.04],
+    tail: [0.15, 0.095, 0.04],
     dorsal: [[0.02, 0.08], [-0.14, 0.05]],
     anal: [[0.0, 0.07], [-0.14, 0.04]],
     pectoral: 0.16, eyeR: 0.056, eyeIris: '#4a3818',
@@ -839,7 +839,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     // Moorish idol — tall compressed body, trailing dorsal filament,
     // bold black bands with a yellow crown
     body: { profile: [0.012, 0.06, 0.125, 0.17, 0.2, 0.16, 0.1, 0.045, 0.018], w: 0.26, h: 1.6, len: 0.52 },
-    tail: [0.24, 0.16, 0.3],
+    tail: [0.24, 0.13, 0.3],
     dorsal: [[0.2, 0.12], [0.05, 0.48], [-0.2, 0.42], [-0.4, 0.3], [-0.58, 0.03]],
     anal: [[0.05, 0.1], [-0.1, 0.3], [-0.32, 0.08]],
     pectoral: 0.13, eyeR: 0.042, eyeIris: '#241a12',
@@ -856,7 +856,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   squirrel: {
     // squirrelfish — reddish with silver horizontal stripes, huge nocturnal eye
     body: { profile: [0.02, 0.08, 0.15, 0.19, 0.21, 0.17, 0.1, 0.045, 0.02], w: 0.44, h: 1.2, len: 0.52 },
-    tail: [0.2, 0.14, 0.25],
+    tail: [0.2, 0.11, 0.25],
     dorsal: [[0.16, 0.1], [0.04, 0.14], [-0.12, 0.09], [-0.26, 0.04]],
     anal: [[0.0, 0.07], [-0.2, 0.08]],
     pectoral: 0.14, eyeR: 0.068, eyeIris: '#2a2f36',
@@ -870,7 +870,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   minnow: {
     // silver baitfish — slim mirror-flanked dart that forms dense bait balls
     body: { profile: [0.012, 0.05, 0.09, 0.115, 0.13, 0.11, 0.07, 0.03, 0.01], w: 0.42, h: 0.95, len: 0.5 },
-    tail: [0.22, 0.15, 0.8],                    // deeply forked
+    tail: [0.22, 0.12, 0.8],                    // deeply forked
     dorsal: [[0.06, 0.07], [-0.06, 0.09], [-0.18, 0.04]],
     anal: [[-0.02, 0.05], [-0.16, 0.06]],
     pectoral: 0.1, eyeR: 0.05, eyeIris: '#39424c',
@@ -885,7 +885,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     // long low dorsal/anal paddles, big pectoral wings, forked tail,
     // twin barbels draping from the upper lip
     body: { profile: [0.02, 0.09, 0.16, 0.19, 0.2, 0.18, 0.145, 0.09, 0.04], w: 0.52, h: 1.12, len: 0.90 },
-    tail: [0.28, 0.24, 0.85],
+    tail: [0.28, 0.19, 0.85],
     dorsal: [[0.12, 0.05], [-0.04, 0.075], [-0.2, 0.055], [-0.36, 0.02]],
     anal: [[-0.02, 0.05], [-0.22, 0.055], [-0.42, 0.015]],
     pectoral: 0.28, eyeR: 0.034, eyeIris: '#243038',

@@ -1236,3 +1236,17 @@ Work Log:
 
 Stage Summary:
 - Delapan permintaan terjawab: (1) peta mini waypoint hidup di Fish Studio — drag/tap/double-tap; (2) DEFAULT MOVEMENT per-show mengatur semua ikan tanpa override; (3) QR bisa dipin/hilang terlepas dari phone (auto/on/off, persist & sinkron); (4) output kini meng-ACES-kan shader air sama seperti preview + default ULTRA 1:1 MSAA4 — detail air & shading setara preview; (5) dinding kanan/kiri/depan terisi terumbu berlapis + rumput karang 360°; (6) menara karst bisa disembunyikan/ditinggikan/digeser/di-putar dengan koral menanam-ulang otomatis dan ikut file show; (7) environment makin akuarium nyata (parity grading, kepadatan, lawn); (8) ikan gambar default berenang bebas lalu satu per satu mendekat mengitari kamera (radius 3.4 m) — terverifikasi sequencer-nya berputar.
+
+---
+Task ID: 43
+Agent: main (Super Z)
+Task: "sirip ikan di karakter 3D terlalu melebar harusnya lebih kecil derajatnya" — persempit sudut sebaran sirip ikan 3D
+
+Work Log:
+- FishGeometryFactory.ts: fan spread sirip dada/perut (makePectoralFan) diturunkan 0.55 → 0.32 rad (±31.5° → ±18.4°); splay placePectoral rotateY −0.75 → −0.42 & rotateZ 0.28 → 0.15; flare placePelvic rotateX −0.8 → −0.5 & rotateY −0.4 → −0.24 — sirip pasangan kini menempel rapat di badan, tidak lagi melebar seperti sayap.
+- FishGeometryFactory.ts: SPREAD SIRIP EKOR semua 10 spesies dipangkas ±20% (tropical .15→.12, angelfish .20→.16, butterfly .13→.105, clown .14→.11, tang .19→.15, puffer .12→.095, moorish .16→.13, squirrel .14→.11, minnow .15→.12, patin .24→.19) — karakter fork/bentuk ekor tiap spesies dipertahankan.
+- CustomFish.ts (ikan 3D dari gambar): flare sirip dada rotateY −0.5 → −0.32; sirip perut rotateY −0.22 → −0.14 & rotateX −0.35 → −0.22 — sirip tempel lebih rapat ke flank, sirip medial (punggung/ekor/anal) tetap persis seperti gambar.
+- VERIFIKASI: tsc bersih, eslint bersih; dev server di-restart (turbopack watcher stale); agent-browser 2560×1440 → school s0/s1 ditarik ke depan kamera dinding via choreo.anchor, screenshot + crop 3× (qa-fin-check{1-5}.png, qa-fin-crop{a-d}.png): ekor fork kompak, dorsal/anal menempel profil badan, pectoral kecil di flank, sirip moorish idol (layar punggung khas spesies) tetap utuh; choreo.reset() membersihkan override QA; tanpa error halaman (hanya warning THREE bawaan).
+
+Stage Summary:
+- Derajat sebaran seluruh sirip ikan 3D (spesies prosedural + ikan gambar) dipangkas: fan sirip dada/perut −42%, splay/flare sudut tempel −30..44%, ekor −20% — sirip tidak lagi melebar, proporsi kini rapat & alami; bentuk khas tiap spesies dipertahankan.
