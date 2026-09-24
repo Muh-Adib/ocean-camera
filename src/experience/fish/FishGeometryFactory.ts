@@ -586,7 +586,7 @@ export function makeRayFin(
       const f = ROWS[r]
       const sag = dir * -hgt * 0.05 * Math.sin(f * Math.PI)      // membrane sag
       const y = baseY + dir * hgt * f * wobble + sag
-      pos.push(0, y, z)
+      pos.push(0, y, z - f * hgt * 0.55)   // swept BACK toward the tail — fins must lean, not stand upright
       const cRow = color.clone().lerp(tipC, f * 0.62)
       const c = f > 0.55 ? cRow : cRow.clone().lerp(rayC, 0.5)
       cols.push(c.r, c.g, c.b)
@@ -663,8 +663,8 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6, isPa
 /** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry and active paddle */
 function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 6, true)
-  g.rotateY(-0.42)   // tighter splay against the flank (was -0.75 — fins spread too wide)
-  g.rotateZ(0.15)
+  g.rotateY(0.78)    // sweep BACKWARD toward the tail + hug the flank (was -0.42 — fins stuck out forward/upright)
+  g.rotateZ(0.12)
   g.translate(rAt * 0.78, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -684,8 +684,8 @@ function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: numb
 /** paired pelvic fins on the belly with exact bilateral symmetry */
 function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 5, false)
-  g.rotateY(-0.24)
-  g.rotateX(-0.5)    // less belly flare (was -0.8)
+  g.rotateY(0.34)    // sweep back toward the tail
+  g.rotateX(-0.42)   // hug the belly (less downward flare)
   g.translate(rAt * 0.42, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -822,7 +822,7 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
   pufferfish: {
     // porcupinefish / pufferfish — globular spherical egg tapering smoothly
     // into slender caudal peduncle; big round friendly eyes, cute beak
-    body: { profile: [0.035, 0.09, 0.20, 0.38, 0.50, 0.52, 0.46, 0.34, 0.10], w: 1.05, h: 1.02, len: 0.56 },
+    body: { profile: [0.05, 0.13, 0.30, 0.45, 0.52, 0.54, 0.52, 0.42, 0.18], w: 1.14, h: 1.0, len: 0.54 },
     tail: [0.15, 0.095, 0.04],
     dorsal: [[0.02, 0.08], [-0.14, 0.05]],
     anal: [[0.0, 0.07], [-0.14, 0.04]],

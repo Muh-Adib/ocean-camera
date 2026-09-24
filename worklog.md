@@ -1250,3 +1250,20 @@ Work Log:
 
 Stage Summary:
 - Derajat sebaran seluruh sirip ikan 3D (spesies prosedural + ikan gambar) dipangkas: fan sirip dada/perut −42%, splay/flare sudut tempel −30..44%, ekor −20% — sirip tidak lagi melebar, proporsi kini rapat & alami; bentuk khas tiap spesies dipertahankan.
+
+---
+Task ID: 44
+Agent: main (Super Z)
+Task: "ikan gembung kurang bulat bentuknya; semua sirip masih tegak — harusnya lebih miring dan mendekat ke badannya"
+
+Work Log:
+- AKAR MASALAH DITEMUKAN (analisis geometri offline, scripts/fin_analysis.ts — bun+three+canvas shim, mengukur sudut verteks sirip tanpa browser): sirip dada prosedural ternyata mengarah 9–22° KE DEPAN dari radial (tanda rotateY terbalik secara anatomi) dan sirip punggung/anal berdiri tepat 90° (nol sweep) — itu sebabnya/user melihat sirip "masih tegak" meski spread sudah dipangkas di Task 43.
+- SIRIP DADA & PERUT (FishGeometryFactory): arah sweep DIBALIK — placePectoral rotateY −0.42 → +0.78 (sirip kini menyapu MUNDUR ±45° menempel flank), placePelvic rotateY −0.24 → +0.34 & rotateX −0.5 → −0.42; terukur kini −35..39° MUNDUR dari radial (tang/clown/tropical), proyeksi lateral menyusut ~30% (tang 0.554→0.391) = sirip miring & dekat badan.
+- SIRIP PUNGGUNG & ANAL (makeRayFin): lean mundur ditambahkan — ujung sirip bergeser ke belakang sebesar f·hgt·0.55 (lean ~29° dari vertikal, base tetap duduk di punggung); berlaku untuk 10 spesies, layar khas angelfish/moorish idol ikut miring alami tanpa hilang.
+- IKAN GEMBUNG (pufferfish): profil badan dibuat lebih bulat — [0.035,0.09,0.20,0.38,0.50,0.52,0.46,0.34,0.10] → [0.05,0.13,0.30,0.45,0.52,0.54,0.52,0.42,0.18] (wajah jauh lebih penuh 0.34→0.42 & 0.10→0.18, belakang lebih gemuk), w 1.05→1.14, len 0.56→0.54 — penampang mendekati lingkaran (half-width 0.48 vs half-height 0.54); screenshot close-up: badan bulat sempurna seperti bola.
+- IKAN GAMBAR (CustomFish): flare sirip dada −0.32 → −0.18, sirip perut rotateY −0.14 → −0.08 & rotateX −0.22 → −0.15 — makin menempel badan.
+- TOOLING: scripts/fin_analysis.ts (analyzer sudut sirip offline, @ts-nocheck + export {}) & scripts/crop_fins.py (crop+zoom screenshot QA) disimpan sebagai artefak reusable.
+- VERIFIKASI: tsc 0 error, eslint bersih; dev server restart; agent-browser: pufferfish/tang/clownfish/moorish ditarik ke depan kamera dinding via choreo.anchor — close-up membuktikan sirip punggung/anal miring ke belakang, pectoral sapu mundur menempel badan, ikan gembung bulat (qa-fin-sweep{1-6}*.png); choreo.reset() membersihkan override QA; tanpa error halaman.
+
+Stage Summary:
+- Semua sirip ikan 3D kini MIRING ke belakang & menempel badan (pectoral +45° sweep mundur — arah salah yang lama dibalik; dorsal/anal lean 29°; pelvic dirapatkan), dan ikan gembung kini bulat seperti bola (profil wajah/belakang dipenuhi, penampang near-circle) — terverifikasi analitik (pengukuran verteks) & visual (close-up screenshot).
