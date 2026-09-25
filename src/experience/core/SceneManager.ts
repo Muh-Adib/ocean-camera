@@ -5,8 +5,8 @@ import * as THREE from 'three'
 import { PerformanceManager } from './PerformanceManager'
 import { sharedUniforms } from './sharedUniforms'
 
-const COLOR_DEEP = new THREE.Color('#0a7893')
-const FOG_COLOR = new THREE.Color('#1dadc4')
+const COLOR_DEEP = new THREE.Color('#054c72')
+const FOG_COLOR = new THREE.Color('#0d6390')
 
 export class SceneManager {
   renderer: THREE.WebGLRenderer
@@ -25,7 +25,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, perf.config.dpr))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.19
+    this.renderer.toneMappingExposure = 1.02
     this.canvas = this.renderer.domElement
     this.canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;'
     this.canvas.dataset.oceanGl = '1'   // vibrance grade hooks this exact canvas
@@ -34,10 +34,11 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    // bright lagoon haze — the reef reads clearly to ~110 m in every direction
-    // (lower density than the first pass: the far rings must stay VISIBLE
-    // layers, not a milky white-blue wall)
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0098)
+    // deep saturated blue haze — the reef reads clearly to ~110 m and the
+    // darker, bluer water makes the fish colours pop against it
+    // (a touch denser than the lagoon pass: distance now sinks into blue,
+    // not milk)
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0115)
     this.scene.fog = this.fog
 
     // ---- camera ----
@@ -69,11 +70,11 @@ export class SceneManager {
       depthWrite: false,
       fog: false,
       uniforms: {
-        // cheerful tropical lagoon: sunlit turquoise zenith, clear cyan mid,
-        // saturated teal depth — vivid, never pale milk
-        uTop: { value: new THREE.Color('#8ce8ec') },
-        uMid: { value: new THREE.Color('#1fa3c6') },
-        uBottom: { value: new THREE.Color('#075a74') },
+        // deep tropical water: sunlit blue zenith, ocean-blue mid,
+        // dark navy depth — bluer + moodier so fish colours carry the frame
+        uTop: { value: new THREE.Color('#4fb3d6') },
+        uMid: { value: new THREE.Color('#0a6a97') },
+        uBottom: { value: new THREE.Color('#022e45') },
         uEnergy: sharedUniforms.uEnergy,
         uTime: sharedUniforms.uTime,
       },
@@ -133,9 +134,9 @@ export class SceneManager {
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       uniforms: {
-        uTop: { value: new THREE.Color('#8ce8ec') },
-        uMid: { value: new THREE.Color('#1fa3c6') },
-        uBottom: { value: new THREE.Color('#075a74') },
+        uTop: { value: new THREE.Color('#4fb3d6') },
+        uMid: { value: new THREE.Color('#0a6a97') },
+        uBottom: { value: new THREE.Color('#022e45') },
       },
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -159,7 +160,7 @@ export class SceneManager {
     temp.add(dome)
     const rt = pmrem.fromScene(temp, 0, 0.1, 200)
     this.scene.environment = rt.texture
-    this.scene.environmentIntensity = 0.42
+    this.scene.environmentIntensity = 0.3
     pmrem.dispose()
     geo.dispose()
     mat.dispose()

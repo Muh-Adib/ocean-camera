@@ -28,7 +28,7 @@ import { BubbleSystem } from './particles/Bubbles'
 import { SpongeBubbles } from './particles/SpongeBubbles'
 import { GestureBurst } from './particles/GestureBurst'
 import { FishManager } from './fish/FishManager'
-import { SpecialCreatures } from './fish/SpecialCreatures'
+import { OceanBackdrop } from './environment/OceanBackdrop'
 import { Feeding } from './fish/Feeding'
 import { FishTank } from './fish/FishTank'
 import { InteractionField } from './interaction/InteractionField'
@@ -91,6 +91,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   lighting.buildGodRays(cfg.lightRayCount)
   lighting.buildCaustics()
   sceneMgr.buildEnvironment()          // image-based lighting → real PBR response
+  // photoreal far-water photo backdrop — the deep sea stays beautiful to
+  // the horizon for one texture + one draw call
+  const backdrop = new OceanBackdrop(sceneMgr.scene, sceneMgr.fog.color)
 
   // ---------------- interaction state (needed early by systems) ----
   const field = new InteractionField()
@@ -184,7 +187,6 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- fish ----------------
   const fish = new FishManager(sceneMgr.scene, obstacles, cfg, [...coral.anemonePositions, ...arena.anemonePositions])
-  const creatures = new SpecialCreatures(sceneMgr.scene)
   const feeding = new Feeding(sceneMgr.scene, seabed.heightAt)
 
   // ---------------- audio / tracking ----------------
@@ -414,8 +416,6 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     if (nextEvent > 0) return
     nextEvent = rand(20, 55)
     const events = [
-      () => creatures.triggerRay(),
-      () => creatures.triggerTurtle(),
       () => fish.randomImpulse(),
       () => bubbles.burstCluster(rand(-55, 55), rand(-72, -8), 16),
       () => seaweed.setCurrent(rand(-1, 1), rand(-0.4, 0.4), rand(0.15, 0.55)),
@@ -498,8 +498,8 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     swU.uCurrentDir.value.y += (seaweedCurrent.z * 0.35 + field.ambientCurrent.y * 0.3 - swU.uCurrentDir.value.y) * blend
     swU.uCurrent.value += ((0.25 + field.strength * 0.5) - swU.uCurrent.value) * blend
 
-    fish.update(dt, elapsed, field.snapshot(), feeding.pellets, creatures.getThreatPoints())
-    creatures.update(dt, elapsed)
+    fish.update(dt, elapsed, field.snapshot(), feeding.pellets)
+    backdrop.update()
     feeding.update(dt, elapsed)
     bubbles.update(dt, elapsed)
     spongeBubbles?.update(dt, elapsed)
@@ -604,9 +604,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     /** QA: world positions of placed pieces for a family (camera staging) */
     pieces: (kind: string) => (arena.piecePos[kind] ?? []).map((p) => p.toArray().map((n) => Math.round(n * 100) / 100)),
     swimMode: () => swim.active,
-    forceShark: () => creatures.triggerPredator(),
-    forceTurtle: () => creatures.triggerTurtle(),
-    forceRay: () => creatures.triggerRay(),
+    backdrop: () => ({ ready: backdrop.ready }),
     puffs: () => fish.schools.filter((s) => s.species === 'pufferfish')
       .map((s) => s.fish.map((f) => Math.round(f.puff * 100) / 100)),
     parkPuffer: (...args: unknown[]) => {
@@ -626,7 +624,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
       f.vel.set(0, 0, 0)
       return true
     },
-    threats: () => creatures.getThreatPoints().map((p) => p.toArray()),
+    threats: () => [] as number[][],
     pufferPos: () => fish.schools.filter((s) => s.species === 'pufferfish')
       .map((s) => s.fish.map((f) => f.pos.toArray().map((n) => Math.round(n * 10) / 10))),
     tp: (...args: unknown[]) => {

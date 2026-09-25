@@ -20,7 +20,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { weldSmooth } from './smoothShading'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, noise2 } from '../utils/math'
-import { injectCaustic } from './causticInject'
+import { injectSeaLight } from './causticInject'
 import type { Obstacle } from './Rocks'
 import type { GrowthSpot } from './LimestoneReef'
 
@@ -587,9 +587,9 @@ function makeBoulderCoral(rng: Rng, detail: number): THREE.BufferGeometry {
 // ---------------- shader sway injection ----------------
 function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cacheKey: string) {
   mat.onBeforeCompile = (shader) => {
-    // Stage 6: caustic light dance on garden corals too — the 360°
-    // garden shimmers from every heading, not just the arena wall
-    injectCaustic(shader, { scale: 0.45, strength: 0.5 })
+    // Stage 6 + sea-light: caustic dance AND water backscatter — the
+    // garden corals glow against the blue like real submerged colonies
+    injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16 })
     shader.uniforms.uTime = sharedUniforms.uTime
     shader.uniforms.uFieldPos = sharedUniforms.uFieldPos
     shader.uniforms.uFieldDir = sharedUniforms.uFieldDir
@@ -624,9 +624,9 @@ function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cache
   mat.customProgramCacheKey = () => `coral-sway-v2-${cacheKey}`
 }
 
-/** caustic-only material wrapper for non-sway coral families */
+/** sea-light material wrapper for non-sway coral families */
 function injectCausticInto(mat: THREE.Material, key: string) {
-  mat.onBeforeCompile = (shader) => { injectCaustic(shader, { scale: 0.45, strength: 0.5 }) }
+  mat.onBeforeCompile = (shader) => { injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16 }) }
   mat.customProgramCacheKey = () => `coral-cau-${key}`
 }
 

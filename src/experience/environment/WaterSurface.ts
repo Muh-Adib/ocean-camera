@@ -29,8 +29,8 @@ export class WaterSurface {
         uFieldRadius: sharedUniforms.uFieldRadius,
         uFieldStrength: sharedUniforms.uFieldStrength,
         uOpacity: { value: 0 },
-        uDeep: { value: new THREE.Color('#0d7d9c') },
-        uBright: { value: new THREE.Color('#dcf8ff') },
+        uDeep: { value: new THREE.Color('#0a6a94') },
+        uBright: { value: new THREE.Color('#d4f2ff') },
       },
       vertexShader: /* glsl */`
         uniform float uTime;

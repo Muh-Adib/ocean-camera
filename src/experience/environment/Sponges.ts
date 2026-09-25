@@ -9,7 +9,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { weldSmooth } from './smoothShading'
 import { mulberry32, noise2 } from '../utils/math'
-import { addCaustic } from './causticInject'
+import { addSeaLight } from './causticInject'
 import type { Obstacle } from './Rocks'
 import type { GrowthSpot } from './LimestoneReef'
 
@@ -235,7 +235,7 @@ export class SpongeSystem {
       const merged = weldSmooth(mergeGeometries(list, false)!)
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0.0 })
       // wet sponge surfaces shimmer with the water-caustic dance too
-      addCaustic(mat, { scale: 0.5, strength: 0.55 }, `sponge-cau-${key}`)
+      addSeaLight(mat, { scale: 0.5, strength: 0.62, rim: 0.18 }, `sponge-cau-${key}`)
       const mesh = new THREE.Mesh(merged, mat)
       this.group.add(mesh)
       this.meshes.push(mesh)

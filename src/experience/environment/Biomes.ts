@@ -12,6 +12,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { sharedUniforms } from '../core/sharedUniforms'
 import { mulberry32, fbm2 } from '../utils/math'
+import { injectSeaLight } from './causticInject'
 
 // ---------------- kelp (instanced, GPU sway) ----------------
 const KELP_VERT = /* glsl */`
@@ -254,6 +255,9 @@ export class Biomes {
       roughness: 0.94,
       metalness: 0.02,
     })
+    // biome landmarks answer the sea light like the rest of the reef
+    mat.onBeforeCompile = (shader) => { injectSeaLight(shader, { scale: 0.44, strength: 0.45, rim: 0.12 }) }
+    mat.customProgramCacheKey = () => 'biomes-statics'
     this.statics = new THREE.Mesh(merged, mat)
     this.group.add(this.statics)
   }

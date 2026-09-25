@@ -7,7 +7,8 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { rand, mulberry32, noise2, fbm2 } from '../utils/math'
-import { addDepthSilhouette } from './depthSilhouette'
+import { injectSilhouette } from './depthSilhouette'
+import { injectSeaLight } from './causticInject'
 import { weldSmooth } from './smoothShading'
 import { insideReefFootprint } from './ReefSites'
 
@@ -73,8 +74,14 @@ export class RockSystem {
   private build(count: number) {
     const rng = mulberry32(777)
     const geo = this.makeRockGeometry(31, 3)
-    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0.02 })
-    addDepthSilhouette(mat, { start: 42, end: 105, k: 0.8, color: '#0d4266' }, 'rocks-sil')
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0.02 })
+    // rocks answer the sea light too — caustic dance + water backscatter
+    // (previously only the sand floor carried the light response)
+    mat.onBeforeCompile = (shader) => {
+      injectSeaLight(shader, { scale: 0.46, strength: 0.5, rim: 0.13 })
+      injectSilhouette(shader, { start: 42, end: 105, k: 0.8, color: '#0d4266' })
+    }
+    mat.customProgramCacheKey = () => 'rocks-sealight'
 
     const mesh = new THREE.InstancedMesh(geo, mat, count)
     const m = new THREE.Matrix4()
