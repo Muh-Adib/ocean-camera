@@ -589,7 +589,7 @@ function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cache
   mat.onBeforeCompile = (shader) => {
     // Stage 6 + sea-light: caustic dance AND water backscatter — the
     // garden corals glow against the blue like real submerged colonies
-    injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16 })
+    injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16, detail: 0.17, bump: 0.4 })
     shader.uniforms.uTime = sharedUniforms.uTime
     shader.uniforms.uFieldPos = sharedUniforms.uFieldPos
     shader.uniforms.uFieldDir = sharedUniforms.uFieldDir
@@ -626,7 +626,7 @@ function addSway(mat: THREE.Material, swayAmp: number, wobbleFreq: number, cache
 
 /** sea-light material wrapper for non-sway coral families */
 function injectCausticInto(mat: THREE.Material, key: string) {
-  mat.onBeforeCompile = (shader) => { injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16 }) }
+  mat.onBeforeCompile = (shader) => { injectSeaLight(shader, { scale: 0.45, strength: 0.58, rim: 0.16, detail: 0.17, bump: 0.4 }) }
   mat.customProgramCacheKey = () => `coral-cau-${key}`
 }
 

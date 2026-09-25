@@ -111,7 +111,7 @@ function arenaMaterial(key: string, spec: MatSpec, sway: [number, number] | unde
     if (sway) swayInjections(shader, sway[0], sway[1])
     // Stage 6 + sea-light: the water-caustic light dance lives ON the reef
     // surfaces AND they backscatter the surrounding blue water
-    injectSeaLight(shader, { scale: 0.45, strength: 0.6, rim: 0.15 })
+    injectSeaLight(shader, { scale: 0.45, strength: 0.6, rim: 0.15, detail: 0.12, bump: 0.42 })
     // the deep-blue silhouette: distant reef melts into dark shapes
     injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
   }
@@ -550,7 +550,7 @@ export class ReefArena {
       this.tris += (idx.length / 3)
       const ridgeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01, side: THREE.DoubleSide })
       ridgeMat.onBeforeCompile = (shader) => {
-        injectSeaLight(shader, { scale: 0.4, strength: 0.46, rim: 0.13 })
+        injectSeaLight(shader, { scale: 0.4, strength: 0.46, rim: 0.13, detail: 0.1, bump: 0.42 })
         injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       ridgeMat.customProgramCacheKey = () => 'arena-ridge'
@@ -589,7 +589,7 @@ export class ReefArena {
       this.tris += (merged.index ? merged.index.count : merged.attributes.position.count) / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0.01 })
       mat.onBeforeCompile = (shader) => {
-        injectSeaLight(shader, { scale: 0.4, strength: 0.48, rim: 0.13 })
+        injectSeaLight(shader, { scale: 0.4, strength: 0.48, rim: 0.13, detail: 0.11, bump: 0.44 })
         injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       mat.customProgramCacheKey = () => 'arena-mound'
@@ -602,7 +602,7 @@ export class ReefArena {
       this.tris += (merged.index ? merged.index.count : merged.attributes.position.count) / 3
       const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.02 })
       mat.onBeforeCompile = (shader) => {
-        injectSeaLight(shader, { scale: 0.5, strength: 0.5, rim: 0.13 })
+        injectSeaLight(shader, { scale: 0.5, strength: 0.5, rim: 0.13, detail: 0.13, bump: 0.46 })
         injectSilhouette(shader, { start: 42, end: 112, k: 0.58, color: '#0f4468' })
       }
       mat.customProgramCacheKey = () => 'arena-rubble'

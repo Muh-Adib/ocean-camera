@@ -290,7 +290,7 @@ export class LimestoneReef {
       })
       // caustic light dances over the limestone towers + water backscatter —
       // the hero centre glows wet from every side (360°)
-      addSeaLight(towerMat, { scale: 0.4, strength: 0.55, rim: 0.15 }, 'limestone-tower')
+      addSeaLight(towerMat, { scale: 0.4, strength: 0.55, rim: 0.15, detail: 0.13, bump: 0.48 }, 'limestone-tower')
       const towerMesh = new THREE.Mesh(towerMeshGeo, towerMat)
       this.group.add(towerMesh)
       this.meshes.push(towerMesh)
@@ -301,7 +301,7 @@ export class LimestoneReef {
       const rubbleMat = new THREE.MeshStandardMaterial({
         vertexColors: true, roughness: 0.97, metalness: 0.0,
       })
-      addSeaLight(rubbleMat, { scale: 0.5, strength: 0.48, rim: 0.13 }, 'limestone-rubble')
+      addSeaLight(rubbleMat, { scale: 0.5, strength: 0.48, rim: 0.13, detail: 0.14, bump: 0.46 }, 'limestone-rubble')
       const rubbleMesh = new THREE.Mesh(rubbleGeo, rubbleMat)
       this.group.add(rubbleMesh)
       this.meshes.push(rubbleMesh)

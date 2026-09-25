@@ -1092,17 +1092,20 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
  *  opts.puff → pufferfish defence display: `aPuff` (per-instance 0..1) inflates
  *  the hull radially while spike tips (aSpike weight) extend off the skin.
  *  opts.roughness/metalness/rim → per-use finish (painted fish go matte).
+ *  opts.vibrance/deepen → colour grade: luminance-anchored saturation lift
+ *  (protects already-vivid species tints, rescues muted pastels) + optional
+ *  deepen so scan art pops out of the blue water.
  *  uGlow — SPAWN CELEBRATION: every freshly scanned painting glows for its
  *  first seconds in the water (FishManager drives the value down to 0). The
  *  uniform exists on ALL fish materials so one shader family serves both. */
 export function makeFishMaterial(
   texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string,
-  opts: { puff?: boolean; roughness?: number; metalness?: number; rim?: number } = {},
+  opts: { puff?: boolean; roughness?: number; metalness?: number; rim?: number; vibrance?: number; deepen?: number } = {},
 ): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     map: texture,
     bumpMap: fishBumpTexture(),
-    bumpScale: 0.5,
+    bumpScale: 0.62,
     vertexColors: true,
     roughness: opts.roughness ?? 0.32,      // wet, slick skin
     metalness: opts.metalness ?? 0.26,      // faint iridescent sheen under the key light
@@ -1116,6 +1119,8 @@ export function makeFishMaterial(
     shader.uniforms.uRimStrength = { value: opts.rim ?? 0.5 }
     shader.uniforms.uGlow = { value: 0 }          // 0..1 spawn-glow envelope
     shader.uniforms.uGlowColor = { value: new THREE.Color('#8ff4ff') }
+    shader.uniforms.uFishVib = { value: opts.vibrance ?? 1.3 }
+    shader.uniforms.uFishDeep = { value: opts.deepen ?? 1.0 }
     shader.vertexShader = `
       uniform float uTime, uSwimAmp, uSwimFreq;
       attribute float aPhase;
@@ -1161,7 +1166,20 @@ export function makeFishMaterial(
       uniform float uTime;
       uniform float uGlow;
       uniform vec3 uGlowColor;
+      uniform float uFishVib, uFishDeep;
     ` + shader.fragmentShader
+    shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `
+      #include <color_fragment>
+      {
+        // fish colour grade — vibrance curve keeps saturated species
+        // tints singing while pale scan drawings get the full lift
+        float flum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
+        float fsat = max( diffuseColor.r, max( diffuseColor.g, diffuseColor.b ) )
+                   - min( diffuseColor.r, min( diffuseColor.g, diffuseColor.b ) );
+        float famt = max( uFishVib * mix( 1.0, 0.7, clamp( fsat * 1.5, 0.0, 1.0 ) ), 1.0 );
+        diffuseColor.rgb = clamp( mix( vec3( flum ), diffuseColor.rgb, famt ), 0.0, 4.0 ) * uFishDeep;
+      }
+    `)
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
       {
         // underwater subsurface-ish rim: soft light wrapping the silhouette
@@ -1177,7 +1195,7 @@ export function makeFishMaterial(
       #include <opaque_fragment>
     `)
   }
-  mat.customProgramCacheKey = () => cacheKey + '-v5'
+  mat.customProgramCacheKey = () => cacheKey + '-v6'
   return mat
 }
 

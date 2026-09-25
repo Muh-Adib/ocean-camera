@@ -25,7 +25,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, perf.config.dpr))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.02
+    this.renderer.toneMappingExposure = 1.09
     this.canvas = this.renderer.domElement
     this.canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;'
     this.canvas.dataset.oceanGl = '1'   // vibrance grade hooks this exact canvas
@@ -160,7 +160,7 @@ export class SceneManager {
     temp.add(dome)
     const rt = pmrem.fromScene(temp, 0, 0.1, 200)
     this.scene.environment = rt.texture
-    this.scene.environmentIntensity = 0.3
+    this.scene.environmentIntensity = 0.36
     pmrem.dispose()
     geo.dispose()
     mat.dispose()

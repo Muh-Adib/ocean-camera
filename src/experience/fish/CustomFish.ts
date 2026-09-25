@@ -318,6 +318,8 @@ export function makeCustomFishMaterial(texture: THREE.Texture): THREE.MeshStanda
     roughness: 0.72,
     metalness: 0.03,
     rim: 0.22,
+    vibrance: 1.5,   // kid scan art is usually pastel paper — full lift
+    deepen: 0.95,    // denser than paper so it reads against the blue water
   })
   mat.bumpScale = 0.12
   return mat

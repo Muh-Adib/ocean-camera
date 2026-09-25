@@ -78,7 +78,7 @@ export class RockSystem {
     // rocks answer the sea light too — caustic dance + water backscatter
     // (previously only the sand floor carried the light response)
     mat.onBeforeCompile = (shader) => {
-      injectSeaLight(shader, { scale: 0.46, strength: 0.5, rim: 0.13 })
+      injectSeaLight(shader, { scale: 0.46, strength: 0.5, rim: 0.13, detail: 0.15, bump: 0.5 })
       injectSilhouette(shader, { start: 42, end: 105, k: 0.8, color: '#0d4266' })
     }
     mat.customProgramCacheKey = () => 'rocks-sealight'

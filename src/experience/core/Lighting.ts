@@ -19,18 +19,18 @@ export class Lighting {
   constructor(scene: THREE.Scene) {
     // sun key stays STRONG — against the darker blue water it is what
     // keeps fish and coral colours singing instead of sinking
-    this.sun = new THREE.DirectionalLight('#eafcff', 3.35)
+    this.sun = new THREE.DirectionalLight('#eafcff', 3.55)
     this.sun.position.set(6, 42, 8)
     this.sun.castShadow = false
     scene.add(this.sun)
 
     // deep-water ambient: saturated blue, noticeably darker than the old
     // pale lagoon wash — the reef picks up the sea-light shader instead
-    this.ambient = new THREE.HemisphereLight('#6db9d6', '#0b3c52', 0.8)
+    this.ambient = new THREE.HemisphereLight('#6db9d6', '#0b3c52', 0.74)
     scene.add(this.ambient)
 
     // faint fill from the front so fish bellies never go fully black
-    const fill = new THREE.DirectionalLight('#2f8fb4', 0.38)
+    const fill = new THREE.DirectionalLight('#2f8fb4', 0.42)
     fill.position.set(-8, -4, 24)
     scene.add(fill)
 
@@ -191,8 +191,8 @@ export class Lighting {
     gsap.to(this.lightEnergy, {
       value: target, duration: 6, ease: 'power2.inOut',
       onUpdate: () => {
-        this.sun.intensity = 3.35 * this.lightEnergy.value
-        this.ambient.intensity = 0.8 * this.lightEnergy.value
+        this.sun.intensity = 3.55 * this.lightEnergy.value
+        this.ambient.intensity = 0.74 * this.lightEnergy.value
       },
     })
   }

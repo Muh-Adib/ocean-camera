@@ -31,12 +31,20 @@ export interface CausticOpts {
   deepen?: number
   /** saturation multiplier toward the channel hue (default 1) */
   saturate?: number
+  /** albedo mottling amount — procedural ± variation that breaks flat surfaces (default 0) */
+  detail?: number
+  /** world-space frequency of the detail field (default 2.6) */
+  detailScale?: number
+  /** micro-bump strength — noise-gradient normal tilt, the actual “detail shading” (default 0) */
+  bump?: number
 }
 
 export function injectCaustic(shader: THREE.WebGLProgramParametersWithUniforms, o: CausticOpts = {}) {
   const scale = o.scale ?? 0.42
   const strength = o.strength ?? 0.5
   const tint = o.tint ?? [0.66, 0.93, 1.0]
+  const detail = o.detail ?? 0
+  const bump = o.bump ?? 0
   shader.uniforms.uCauScale = { value: scale }
   shader.uniforms.uCauStrength = { value: strength }
   shader.uniforms.uCauTint = { value: new THREE.Vector3(...tint) }
@@ -45,6 +53,9 @@ export function injectCaustic(shader: THREE.WebGLProgramParametersWithUniforms, 
   shader.uniforms.uCauSideBias = { value: o.sideBias ?? 0.42 }
   shader.uniforms.uCauDeep = { value: o.deepen ?? 1.0 }
   shader.uniforms.uCauSat = { value: o.saturate ?? 1.0 }
+  shader.uniforms.uCauDetail = { value: detail }
+  shader.uniforms.uCauDetailScale = { value: o.detailScale ?? 2.6 }
+  shader.uniforms.uCauBump = { value: bump }
   shader.uniforms.uCauTime = sharedUniforms.uTime
   shader.uniforms.uCauEnergy = sharedUniforms.uEnergy
 
@@ -64,7 +75,26 @@ export function injectCaustic(shader: THREE.WebGLProgramParametersWithUniforms, 
     varying vec3 vCauW;
     varying vec3 vCauN;
     uniform float uCauScale, uCauStrength, uCauFadeA, uCauFadeB, uCauTime, uCauEnergy, uCauSideBias, uCauDeep, uCauSat;
+    uniform float uCauDetail, uCauDetailScale, uCauBump;
     uniform vec3 uCauTint;
+    // VIBRANCE — luminance-anchored saturation that protects colours which
+    // are already vivid (they keep ~their amount) while muted khakis/pastels
+    // get the full push. A flat lum-mix either clips candy or barely
+    // touches mud — this curve does both jobs at once.
+    vec3 reefVibrance( vec3 c, float vib ) {
+      float lum = dot( c, vec3( 0.299, 0.587, 0.114 ) );
+      float sat = max( c.r, max( c.g, c.b ) ) - min( c.r, min( c.g, c.b ) );
+      float amt = max( vib * mix( 1.0, 0.68, clamp( sat * 1.55, 0.0, 1.0 ) ), 1.0 );
+      return clamp( mix( vec3( lum ), c, amt ), 0.0, 4.0 );
+    }
+    // DETAIL FIELD — continuous 3D trig mottle (no plane seams like 2D
+    // triplanar). Two broad octaves + one fine grain, roughly -1..1.
+    float reefDetail( vec3 p ) {
+      float n = sin( p.x * 1.9 + sin( p.y * 1.3 + p.z * 0.7 ) * 1.6 ) * 0.52;
+      n += sin( p.y * 3.4 + sin( p.z * 2.1 + p.x * 1.2 ) * 1.9 ) * 0.30;
+      n += sin( p.z * 6.3 + sin( p.x * 4.7 + p.y * 3.1 ) * 2.3 ) * 0.18;
+      return n;
+    }
     float cauPat( vec2 p, float t ) {
       vec2 i = p;
       float c = 1.0;
@@ -85,8 +115,10 @@ export function injectCaustic(shader: THREE.WebGLProgramParametersWithUniforms, 
     {
       // rich-reef grade: pastel vertex paint sinks toward saturated candy
       // colours — depth first, then the caustic light dances on top
-      float seaLum = dot( diffuseColor.rgb, vec3( 0.299, 0.587, 0.114 ) );
-      diffuseColor.rgb = clamp( mix( vec3( seaLum ), diffuseColor.rgb, uCauSat ), 0.0, 4.0 ) * uCauDeep;
+      diffuseColor.rgb = reefVibrance( diffuseColor.rgb, uCauSat ) * uCauDeep;
+${detail > 0 ? `      // albedo mottling — organic colour variation that kills the flat,
+      // airbrushed look on large smooth vertex-painted surfaces
+      diffuseColor.rgb *= 1.0 + uCauDetail * reefDetail( vCauW * uCauDetailScale );` : ''}
       // tilt the domain with height so vertical walls get their own
       // pattern slice — no mirrored smearing across the floor plane
       vec2 cuv = vCauW.xz * uCauScale + vec2( vCauW.y * 0.33, -vCauW.y * 0.27 );
@@ -103,6 +135,34 @@ export function injectCaustic(shader: THREE.WebGLProgramParametersWithUniforms, 
         * ( 0.65 + uCauEnergy * 0.55 ) * uCauTint;
     }
   `)
+
+  if (bump > 0) {
+    // MICRO-BUMP — finite-difference gradient of the detail field tilts the
+    // world normal, so the sun, ambient AND caustics all shade the relief.
+    // Gradient is soft-capped so noise spikes never fold the normal.
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_maps>', `
+      #include <normal_fragment_maps>
+      {
+        vec3 wn = normalize( vCauN );
+        float de = 0.14;
+        vec3 sp = vCauW * uCauDetailScale;
+        float n0 = reefDetail( sp );
+        vec3 g = vec3(
+          reefDetail( sp + vec3( de, 0.0, 0.0 ) ) - n0,
+          reefDetail( sp + vec3( 0.0, de, 0.0 ) ) - n0,
+          reefDetail( sp + vec3( 0.0, 0.0, de ) ) - n0
+        ) / de;
+        g -= wn * dot( wn, g );
+        float glen = length( g );
+        g *= uCauBump / ( 1.0 + glen * 0.45 ) / max( glen, 1e-4 );
+        vec3 wnp = normalize( wn - g );
+        vec3 nvv = normalize( ( viewMatrix * vec4( wnp, 0.0 ) ).xyz );
+        // respect double-sided backface flip (fins, leaves, discs)
+        float facing = dot( normal, nvv ) < 0.0 ? -1.0 : 1.0;
+        normal = normalize( nvv * facing );
+      }
+    `)
+  }
 }
 
 /** convenience for plain materials that only want the caustic */
@@ -132,10 +192,12 @@ export function injectSeaLight(shader: THREE.WebGLProgramParametersWithUniforms,
   injectCaustic(shader, {
     scale: o.scale, strength: o.strength, tint: o.tint,
     fadeStart: o.fadeStart, fadeEnd: o.fadeEnd, sideBias: o.sideBias,
-    // rich-reef grade defaults: deepen pale paint + saturate it —
+    // rich-reef grade defaults: deepen pale paint + vibrance-lift it —
     // coral reads as vivid colony, not frosted glass
-    deepen: o.deepen ?? 0.86,
-    saturate: o.saturate ?? 1.24,
+    deepen: o.deepen ?? 0.84,
+    saturate: o.saturate ?? 1.42,
+    detail: o.detail ?? 0.13,
+    bump: o.bump ?? 0.34,
   })
   shader.uniforms.uRimStrength = { value: o.rim ?? 0.18 }
   shader.uniforms.uRimPower = { value: o.rimPower ?? 2.8 }

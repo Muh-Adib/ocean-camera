@@ -6,7 +6,8 @@
 import * as THREE from 'three'
 import { SEABED_Y, fbm2, noise2, rand, mulberry32 } from '../utils/math'
 import { sharedUniforms } from '../core/sharedUniforms'
-import { addDepthSilhouette } from './depthSilhouette'
+import { addDepthSilhouette, injectSilhouette } from './depthSilhouette'
+import { injectCaustic } from './causticInject'
 
 export class Seabed {
   group = new THREE.Group()
@@ -93,9 +94,17 @@ export class Seabed {
       roughness: 0.96,
       metalness: 0,
     })
-    // distant sand eases into a mid-teal depth haze (not dark navy — the
-    // far fade must feel like luminous water, not a black wall)
-    addDepthSilhouette(mat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-terrain')
+    // sand gets the SAME vibrance + grain relief as the reef: mottled
+    // albedo + micro-bump ripples shade under the sun instead of lying flat
+    mat.onBeforeCompile = (shader) => {
+      injectCaustic(shader, {
+        scale: 0.5, strength: 0.1, sideBias: 0.16,
+        deepen: 0.9, saturate: 1.22,
+        detail: 0.1, bump: 0.32, detailScale: 2.2,
+      })
+      injectSilhouette(shader, { start: 58, end: 165, k: 0.42, color: '#0f5270' })
+    }
+    mat.customProgramCacheKey = () => 'seabed-terrain'
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.z = -20
     this.group.add(mesh)
@@ -115,7 +124,11 @@ export class Seabed {
     geo.computeVertexNormals()
 
     const mat = new THREE.MeshStandardMaterial({ color: '#8a8067', roughness: 1 })
-    addDepthSilhouette(mat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-pebbles')
+    mat.onBeforeCompile = (shader) => {
+      injectCaustic(shader, { scale: 0.5, strength: 0.1, sideBias: 0.2, deepen: 0.9, saturate: 1.2, detail: 0.12, bump: 0.36 })
+      injectSilhouette(shader, { start: 58, end: 165, k: 0.42, color: '#0f5270' })
+    }
+    mat.customProgramCacheKey = () => 'seabed-pebbles'
     const mesh = new THREE.InstancedMesh(geo, mat, count)
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
