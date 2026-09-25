@@ -240,8 +240,12 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
   }
   rightPec.setAttribute('aPecPaddle', new THREE.BufferAttribute(paddleArr, 1))
 
-  rightPec.rotateY(-0.18)   // hug the flank — fins must sit close to the body (was -0.32)
-  rightPec.translate(pecSx * 0.82, pecY, pecZ)
+  // Rest pose: the fin plate leans ONTO the flank — rolled (rotateZ) so the
+  // blade tucks down toward the belly, then yawed (rotateY+) so it hugs the
+  // body fore-aft instead of standing upright like a fence panel.
+  rightPec.rotateZ(-0.3)    // roll: tip folds inward-down against the body
+  rightPec.rotateY(0.3)     // yaw: trailing edge tucks toward the flank
+  rightPec.translate(pecSx * 0.92, pecY, pecZ)
   parts.push(rightPec)
 
   const leftPec = rightPec.clone()
@@ -264,9 +268,9 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
 
   const rightPel = finShell(PELVIC)
   rightPel.translate(0, -pelY, -pelZ)
-  rightPel.rotateY(-0.08)
-  rightPel.rotateX(-0.15)   // hug the belly (was -0.22)
-  rightPel.translate(pelSx * 0.65, pelY, pelZ)
+  rightPel.rotateZ(-0.38)   // fold the blade inward under the belly
+  rightPel.rotateY(0.22)    // hug the body line
+  rightPel.translate(pelSx * 0.78, pelY, pelZ)
   parts.push(rightPel)
 
   const leftPel = rightPel.clone()
@@ -304,11 +308,17 @@ export function buildCustomFish(): { geometry: THREE.BufferGeometry } {
 }
 
 /**
- * Material for a painted fish — same swim-bend/rim shader as the reef
- * species, gentle bump so crayon strokes stay readable.
+ * Material for a painted fish — same swim-bend shader family as the reef
+ * species but a MATT, waxy-crayon finish: the child's drawing must read
+ * like painted paper, not polished plastic. Low metalness, higher
+ * roughness, soft rim — no sharp white reflections.
  */
 export function makeCustomFishMaterial(texture: THREE.Texture): THREE.MeshStandardMaterial {
-  const mat = makeFishMaterial(texture as THREE.CanvasTexture, 0.075, 7, `fish-custom-${Math.random().toString(36).slice(2)}`)
+  const mat = makeFishMaterial(texture as THREE.CanvasTexture, 0.075, 7, `fish-custom-${Math.random().toString(36).slice(2)}`, {
+    roughness: 0.72,
+    metalness: 0.03,
+    rim: 0.22,
+  })
   mat.bumpScale = 0.12
   return mat
 }

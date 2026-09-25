@@ -17,16 +17,18 @@ export class Lighting {
   private lightEnergy = { value: 1 }
 
   constructor(scene: THREE.Scene) {
-    this.sun = new THREE.DirectionalLight('#dffaff', 3.3)
+    this.sun = new THREE.DirectionalLight('#eafcff', 3.15)
     this.sun.position.set(6, 42, 8)
     this.sun.castShadow = false
     scene.add(this.sun)
 
-    this.ambient = new THREE.HemisphereLight('#bceef2', '#155a70', 1.15)
+    // saturated lagoon ambient — tinted teal, not pale white, so the
+    // reef keeps its colour instead of washing to pastel
+    this.ambient = new THREE.HemisphereLight('#9fe2ee', '#17647a', 1.0)
     scene.add(this.ambient)
 
     // faint fill from the front so fish bellies never go fully black
-    const fill = new THREE.DirectionalLight('#3fa8c8', 0.65)
+    const fill = new THREE.DirectionalLight('#3fa8c8', 0.5)
     fill.position.set(-8, -4, 24)
     scene.add(fill)
 
@@ -51,13 +53,17 @@ export class Lighting {
         },
         vertexShader: /* glsl */`
           varying vec2 vUv;
+          varying float vDist;
           void main() {
             vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vDist = -mv.z;
+            gl_Position = projectionMatrix * mv;
           }`,
         fragmentShader: /* glsl */`
           uniform float uTime, uSeed, uOpacity, uEnergy;
           varying vec2 vUv;
+          varying float vDist;
           void main() {
             // vertical falloff: bright at surface, gone at depth
             float v = pow(1.0 - vUv.y, 1.6);
@@ -67,7 +73,11 @@ export class Lighting {
             float band = 0.62
               + 0.38 * sin(vUv.x * 9.0 + uSeed)
               + 0.22 * sin(vUv.y * 5.0 - uTime * 0.22 + uSeed * 2.0);
-            float a = v * edge * band * uOpacity * (0.55 + uEnergy * 0.5);
+            // distance falloff — stacked additive shafts must NEVER wash
+            // the whole far view into white (the home camera looks straight
+            // down a 40 m corridor of overlapping planes)
+            float dfade = exp(-max(0.0, vDist - 22.0) * 0.045);
+            float a = v * edge * band * uOpacity * (0.55 + uEnergy * 0.5) * dfade;
             vec3 col = mix(vec3(0.35, 0.75, 0.9), vec3(0.75, 0.95, 1.0), v);
             gl_FragColor = vec4(col * a, a);
           }`,
@@ -142,7 +152,9 @@ export class Lighting {
           float edge = smoothstep(0.0, 0.3, vUv.x) * smoothstep(1.0, 0.7, vUv.x)
                      * smoothstep(0.0, 0.3, vUv.y) * smoothstep(1.0, 0.7, vUv.y);
           float a = c * edge * uOpacity * (0.6 + uEnergy * 0.7);
-          vec3 col = vec3(0.55, 0.97, 1.08) * a * 0.95;
+          // slightly toned-down, turquoise-leaning caustic: the sand keeps
+          // its warm colour instead of being washed to paper white
+          vec3 col = vec3(0.42, 0.88, 0.98) * a * 0.78;
           gl_FragColor = vec4(col, a);
         }`,
     })
@@ -159,16 +171,16 @@ export class Lighting {
   reveal() {
     this.rayMats.forEach((m, i) => {
       setTimeout(() => {
-        gsap.to(m.uniforms.uOpacity, { value: rand(0.16, 0.34), duration: 4, ease: 'power2.inOut' })
+        gsap.to(m.uniforms.uOpacity, { value: rand(0.14, 0.26), duration: 4, ease: 'power2.inOut' })
       }, i * 180)
     })
-    gsap.to(this.causticMat.uniforms.uOpacity, { value: 1.0, duration: 5, ease: 'power2.inOut' })
+    gsap.to(this.causticMat.uniforms.uOpacity, { value: 0.85, duration: 5, ease: 'power2.inOut' })
   }
 
   /** QA: skip the cinematic fade — full light instantly */
   revealNow() {
-    this.rayMats.forEach((m) => { m.uniforms.uOpacity.value = 0.5 })
-    this.causticMat.uniforms.uOpacity.value = 1.0
+    this.rayMats.forEach((m) => { m.uniforms.uOpacity.value = 0.3 })
+    this.causticMat.uniforms.uOpacity.value = 0.85
   }
 
   /** dynamic ecosystem event: subtle light energy shift */
@@ -177,8 +189,8 @@ export class Lighting {
     gsap.to(this.lightEnergy, {
       value: target, duration: 6, ease: 'power2.inOut',
       onUpdate: () => {
-        this.sun.intensity = 3.3 * this.lightEnergy.value
-        this.ambient.intensity = 1.15 * this.lightEnergy.value
+        this.sun.intensity = 3.15 * this.lightEnergy.value
+        this.ambient.intensity = 1.0 * this.lightEnergy.value
       },
     })
   }

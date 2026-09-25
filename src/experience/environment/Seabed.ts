@@ -51,14 +51,15 @@ export class Seabed {
     const pos = geo.attributes.position as THREE.BufferAttribute
     const colors = new Float32Array(pos.count * 3)
 
-    // deepened warm sand (reference: deep blue water, not white paper)
-    const sandA = new THREE.Color('#cbbc94')
-    const sandB = new THREE.Color('#b1a179')
-    const sandDeep = new THREE.Color('#6f8a80')
-    const kelpSand = new THREE.Color('#8e8e66')     // olive drift under the kelp forest
-    const canyonSand = new THREE.Color('#615f4a')   // shadowed canyon floor
-    const flatSand = new THREE.Color('#d2c49c')     // bright shell-rich flats
-    const northSand = new THREE.Color('#72909b')    // cold silty north plain
+    // deepened warm sand — saturated enough to survive the additive
+    // caustic wash without reading as white paper
+    const sandA = new THREE.Color('#c9b483')
+    const sandB = new THREE.Color('#ad9a6f')
+    const sandDeep = new THREE.Color('#5f857c')
+    const kelpSand = new THREE.Color('#86885f')     // olive drift under the kelp forest
+    const canyonSand = new THREE.Color('#5c5a45')   // shadowed canyon floor
+    const flatSand = new THREE.Color('#cdbd8e')     // bright shell-rich flats
+    const northSand = new THREE.Color('#6b8b96')    // cold silty north plain
 
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i)
@@ -92,8 +93,9 @@ export class Seabed {
       roughness: 0.96,
       metalness: 0,
     })
-    // distant sand sinks into the deep-blue depth silhouette too
-    addDepthSilhouette(mat, { start: 52, end: 150, k: 0.6, color: '#0c3c5a' }, 'seabed-terrain')
+    // distant sand eases into a mid-teal depth haze (not dark navy — the
+    // far fade must feel like luminous water, not a black wall)
+    addDepthSilhouette(mat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-terrain')
     const mesh = new THREE.Mesh(geo, mat)
     mesh.position.z = -20
     this.group.add(mesh)
@@ -112,8 +114,8 @@ export class Seabed {
     }
     geo.computeVertexNormals()
 
-    const mat = new THREE.MeshStandardMaterial({ color: '#8d8471', roughness: 1 })
-    addDepthSilhouette(mat, { start: 52, end: 150, k: 0.6, color: '#0c3c5a' }, 'seabed-pebbles')
+    const mat = new THREE.MeshStandardMaterial({ color: '#8a8067', roughness: 1 })
+    addDepthSilhouette(mat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-pebbles')
     const mesh = new THREE.InstancedMesh(geo, mat, count)
     const m = new THREE.Matrix4()
     const q = new THREE.Quaternion()
@@ -149,7 +151,7 @@ export class Seabed {
     const shellMat = new THREE.MeshStandardMaterial({
       color: '#e8dcc5', roughness: 0.8, side: THREE.DoubleSide,
     })
-    addDepthSilhouette(shellMat, { start: 52, end: 150, k: 0.6, color: '#0c3c5a' }, 'seabed-shells')
+    addDepthSilhouette(shellMat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-shells')
     const shells = new THREE.InstancedMesh(shellGeo, shellMat, 36)
     for (let i = 0; i < 36; i++) {
       const x = rand(-68, 68), z = rand(-82, 14)

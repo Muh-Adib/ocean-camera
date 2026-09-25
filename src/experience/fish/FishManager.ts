@@ -120,13 +120,14 @@ export class FishManager {
    *  (wall constellation eye in projection mode, swim camera otherwise) */
   orbitCenter = new THREE.Vector3(0, 2.2, 0)
   /** pass ring distance from the camera (m) — “mengitari kamera dari dekat” */
-  passRadius = 3.4
+  passRadius = 3.7
   /** tangential speed along the pass ring (m/s) */
   passSpeed = 2.2
   /** rest between two passes (s) — keeps the “satu per satu” rhythm readable */
   private passGap = 2.4
   private passTimer = 1.5
   private passCursor = 0
+  private passFlip = 1
   private activePass: { entry: Entry; fish: number } | null = null
 
   constructor(scene: THREE.Scene, obstacles: Obstacle[], quality: QualityConfig, anemones: THREE.Vector3[]) {
@@ -196,6 +197,12 @@ export class FishManager {
       e.school.update(dt, time, field, this.obstacles, this.cameraWorld, this.speedScale, pellets, threats)
     }
     this.updatePasses(dt)
+    // painted-fish retreat follows the swimmer — re-evaluate periodically
+    this.guestTick -= dt
+    if (this.guestTick <= 0) {
+      this.guestTick = 0.7
+      if (this.custom.size) this.refreshGuests()
+    }
     // write matrices
     const camDir = new THREE.Vector3()
     for (const e of this.entries) {
@@ -305,15 +312,22 @@ export class FishManager {
     const dx = f.pos.x - this.orbitCenter.x
     const dz = f.pos.z - this.orbitCenter.z
     const seed = Math.atan2(dz, dx)
+    // every pass varies: ring distance, pace, orbit direction, height and
+    // bob — no two crossings ride the same lane (varied, natural, never a
+    // procession on one fixed rail)
+    this.passFlip = -this.passFlip
     pick.entry.school.pass = {
       fish: pick.fish,
       center: this.orbitCenter,          // live reference — tracks the camera
-      radius: this.passRadius,
-      speed: this.passSpeed,
+      radius: this.passRadius * rand(0.8, 1.28),
+      speed: this.passSpeed * rand(0.82, 1.2),
       angle: seed,
       travel: 0,
       travelGoal: Math.PI * 2 + 0.9,     // a full loop, then it drifts free
       done: false,
+      dir: this.passFlip > 0 ? 1 : -1,
+      yOff: rand(-0.7, 0.7),
+      yWave: rand(0.2, 0.55),
     }
     this.activePass = pick
   }
@@ -416,18 +430,37 @@ export class FishManager {
     this.refreshGuests()
   }
 
-  /** while painted fish swim, the regular reef fish stay hidden */
+  /** while painted fish swim, nearby reef fish give way — but the rest of
+   *  the tank keeps living (an empty aquarium feels dead; the child's fish
+   *  still own the foreground within RETREAT_R of their school) */
   private guestsHidden = false
+  private guestTick = 0
+  private static RETREAT_R = 28
 
   private refreshGuests() {
-    const hide = this.custom.size > 0
-    if (hide !== this.guestsHidden) {
-      this.guestsHidden = hide
+    const customEntries = [...this.custom.values()]
+      .map((r) => r.entry)
+      .filter((e) => e.visible && e.mesh.visible)
+    const customSet = new Set([...this.custom.values()].map((r) => r.entry))
+    if (!customEntries.length) {
+      if (this.guestsHidden) {
+        this.guestsHidden = false
+        for (const e of this.entries) {
+          if (!customSet.has(e)) e.mesh.visible = e.visible
+        }
+      }
+      return
     }
-    const customEntries = new Set([...this.custom.values()].map((r) => r.entry))
+    const centers = customEntries.map((e) => e.school.centroid)
     for (const e of this.entries) {
-      e.mesh.visible = e.visible && (customEntries.has(e) ? true : !hide)
+      if (customSet.has(e)) { e.mesh.visible = e.visible; continue }
+      let retreat = false
+      for (const c of centers) {
+        if (e.school.centroid.distanceTo(c) < FishManager.RETREAT_R) { retreat = true; break }
+      }
+      e.mesh.visible = e.visible && !retreat
     }
+    this.guestsHidden = true
   }
 
   /** true while the regular reef fish are hidden for the painted ones */

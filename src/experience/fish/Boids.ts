@@ -50,6 +50,9 @@ export interface PassState {
   travel: number               // radians traversed so far (done ≥ travelGoal)
   travelGoal: number           // total arc for this pass (~1.6 loops)
   done: boolean                // set when the fish may rejoin free swim
+  dir: 1 | -1                  // orbit direction — alternates so passes vary
+  yOff: number                 // personal height offset around the ring (m)
+  yWave: number                // vertical bob amplitude for this pass (m)
 }
 
 export interface FieldCtx {
@@ -308,13 +311,13 @@ export class School {
     let passIdx = -1
     if (this.pass && this.pass.fish < n) {
       const ps = this.pass
-      ps.angle += (ps.speed / Math.max(1.2, ps.radius)) * dt
+      ps.angle += ps.dir * (ps.speed / Math.max(1.2, ps.radius)) * dt
       ps.travel += (ps.speed / Math.max(1.2, ps.radius)) * dt
       if (ps.travel >= ps.travelGoal) ps.done = true
       passIdx = ps.fish
       passTgt = new THREE.Vector3(
         ps.center.x + Math.cos(ps.angle) * ps.radius,
-        ps.center.y + 0.35 * Math.sin(ps.angle * 2.3),
+        ps.center.y + ps.yOff + ps.yWave * Math.sin(ps.angle * 2.3),
         ps.center.z + Math.sin(ps.angle) * ps.radius,
       )
     }

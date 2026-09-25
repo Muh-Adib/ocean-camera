@@ -29,8 +29,8 @@ export class WaterSurface {
         uFieldRadius: sharedUniforms.uFieldRadius,
         uFieldStrength: sharedUniforms.uFieldStrength,
         uOpacity: { value: 0 },
-        uDeep: { value: new THREE.Color('#05304a') },
-        uBright: { value: new THREE.Color('#b8e8ff') },
+        uDeep: { value: new THREE.Color('#0d7d9c') },
+        uBright: { value: new THREE.Color('#dcf8ff') },
       },
       vertexShader: /* glsl */`
         uniform float uTime;
@@ -98,7 +98,9 @@ export class WaterSurface {
                      * smoothstep(0.0, 0.16, vUv.y) * smoothstep(1.0, 0.84, vUv.y);
           // 360° correction: raise the base so the shimmering ceiling
           // reads from mid-slopes too, not only straight overhead
-          float a = uOpacity * edge * (0.52 + win * 0.5);
+          // (alpha floor kept low — the turquoise DOME shows through the
+          // distant ceiling so it never turns into a grey overcast lid)
+          float a = uOpacity * edge * (0.4 + win * 0.6);
           gl_FragColor = vec4(col, a);
           // OUTPUT/PREVIEW PARITY — see SceneManager dome note
           #include <tonemapping_fragment>

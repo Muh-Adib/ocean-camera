@@ -374,6 +374,10 @@ function fishBumpTexture(): THREE.CanvasTexture {
 export interface BodySpec {
   profile: number[]       // control radii, tail → nose
   w: number; h: number; len: number
+  /** per-species hull shaping — globular species (puffer) suppress the
+   *  reef-fish lateral compression / dorsal pinch / keel so the body
+   *  reads as a true sphere instead of a squeezed egg */
+  deform?: { comp?: number; pin?: number; belly?: number }
 }
 
 export interface Hull {
@@ -396,6 +400,11 @@ export function makeHull(spec: BodySpec): Hull {
   const smooth = resampleProfile(spec.profile, RINGS)
   const L = spec.len, H = spec.h, W = spec.w
   const bell = (t: number, c: number, w: number) => Math.exp(-((t - c) * (t - c)) / (2 * w * w))
+  // species-tunable hull shaping (defaults shaped for laterally-compressed
+  // reef fish; globular species like the puffer override them near zero)
+  const COMP = spec.deform?.comp ?? 0.22
+  const PIN = spec.deform?.pin ?? 0.4
+  const BELLY = spec.deform?.belly ?? 0.16
 
   const pos: number[] = [], uv: number[] = [], idx: number[] = []
 
@@ -403,9 +412,9 @@ export function makeHull(spec: BodySpec): Hull {
     const t = i / (RINGS - 1)
     const r = smooth[i]
     const z = (-0.5 + t) * L
-    const comp = 0.22 * bell(t, 0.55, 0.27)        // lateral compression mid-body
-    const pin = 0.4 * bell(t, 0.52, 0.3)           // dorsal ridge narrowing
-    const belly = 0.16 * bell(t, 0.34, 0.26)       // keel flattening
+    const comp = COMP * bell(t, 0.55, 0.27)        // lateral compression mid-body
+    const pin = PIN * bell(t, 0.52, 0.3)           // dorsal ridge narrowing
+    const belly = BELLY * bell(t, 0.34, 0.26)      // keel flattening
     for (let j = 0; j <= RAD; j++) {
       const u = j / RAD
       const a = u * Math.PI * 2                    // 0 = belly seam, 0.5 = dorsal line
@@ -485,7 +494,7 @@ export function makeHull(spec: BodySpec): Hull {
   }
   const widthAt = (z: number) => {
     const t = stat(z)
-    const comp = 0.22 * bell(t, 0.55, 0.27)
+    const comp = COMP * bell(t, 0.55, 0.27)
     return radiusAt(z) * (1 - comp)
   }
   // exact flank x at (y, z) — includes the dorsal pinch so features seated
@@ -493,8 +502,8 @@ export function makeHull(spec: BodySpec): Hull {
   const surfaceXAt = (z: number, y: number) => {
     const t = stat(z)
     const r = radiusAt(z)
-    const comp = 0.22 * bell(t, 0.55, 0.27)
-    const pin = 0.4 * bell(t, 0.52, 0.3)
+    const comp = COMP * bell(t, 0.55, 0.27)
+    const pin = PIN * bell(t, 0.52, 0.3)
     const yHalf = Math.max(1e-5, r * H)
     const cy = clamp(y / yHalf, -0.96, 0.96)
     const sx = Math.sqrt(Math.max(0, 1 - cy * cy))
@@ -660,11 +669,14 @@ export function makePectoralFan(size: number, color: THREE.Color, rays = 6, isPa
   return g
 }
 
-/** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry and active paddle */
+/** pectoral fin rooted inside the flank at the hull surface with exact bilateral symmetry and active paddle.
+ *  Rest pose = swept BACK and DOWN along the flank (miring, menempel badan):
+ *  rotateZ droops the blade, rotateY(+φ) sweeps it toward the tail —
+ *  the fin plane leans onto the body instead of standing upright. */
 function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 6, true)
-  g.rotateY(0.78)    // sweep BACKWARD toward the tail + hug the flank (was -0.42 — fins stuck out forward/upright)
-  g.rotateZ(0.12)
+  g.rotateZ(-0.35)   // droop the blade toward the belly
+  g.rotateY(1.0)     // sweep back along the flank (tip toward -z, hugging the body)
   g.translate(rAt * 0.78, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -681,11 +693,12 @@ function placePectoral(side: 1 | -1, size: number, color: THREE.Color, rAt: numb
   return g
 }
 
-/** paired pelvic fins on the belly with exact bilateral symmetry */
+/** paired pelvic fins on the belly with exact bilateral symmetry —
+ *  blades fold back under the body, hugging the belly line */
 function placePelvic(side: 1 | -1, size: number, color: THREE.Color, rAt: number, y: number, z: number): THREE.BufferGeometry {
   const g = makePectoralFan(size, color, 5, false)
-  g.rotateY(0.34)    // sweep back toward the tail
-  g.rotateX(-0.42)   // hug the belly (less downward flare)
+  g.rotateZ(-0.5)    // fold the blade down against the belly
+  g.rotateY(0.75)    // sweep it back toward the tail
   g.translate(rAt * 0.42, y, z)
   if (side === -1) {
     g.scale(-1, 1, 1)
@@ -820,9 +833,15 @@ export const SPECIES_DEFS: Record<SpeciesKey, SpeciesDef> = {
     },
   },
   pufferfish: {
-    // porcupinefish / pufferfish — globular spherical egg tapering smoothly
-    // into slender caudal peduncle; big round friendly eyes, cute beak
-    body: { profile: [0.05, 0.13, 0.30, 0.45, 0.52, 0.54, 0.52, 0.42, 0.18], w: 1.14, h: 1.0, len: 0.54 },
+    // porcupinefish / pufferfish — a true GLOBE: full spherical plateau
+    // across the middle of the body, then a quick drop into a short
+    // slender caudal peduncle. Hull shaping (comp/pin/belly) suppressed so
+    // the ball is never squeezed into an egg. Big round friendly eyes, beak.
+    body: {
+      profile: [0.05, 0.13, 0.30, 0.45, 0.52, 0.54, 0.52, 0.42, 0.18],
+      w: 1.14, h: 1.0, len: 0.88,
+      deform: { comp: 0.05, pin: 0.07, belly: 0.05 },
+    },
     tail: [0.15, 0.095, 0.04],
     dorsal: [[0.02, 0.08], [-0.14, 0.05]],
     anal: [[0.0, 0.07], [-0.14, 0.04]],
@@ -1071,18 +1090,19 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
 
 /** shared material factory per species (scale bump, swim-bend, fin flutter, fresnel rim).
  *  opts.puff → pufferfish defence display: `aPuff` (per-instance 0..1) inflates
- *  the hull radially while spike tips (aSpike weight) extend off the skin. */
+ *  the hull radially while spike tips (aSpike weight) extend off the skin.
+ *  opts.roughness/metalness/rim → per-use finish (painted fish go matte). */
 export function makeFishMaterial(
   texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string,
-  opts: { puff?: boolean } = {},
+  opts: { puff?: boolean; roughness?: number; metalness?: number; rim?: number } = {},
 ): THREE.MeshStandardMaterial {
   const mat = new THREE.MeshStandardMaterial({
     map: texture,
     bumpMap: fishBumpTexture(),
     bumpScale: 0.5,
     vertexColors: true,
-    roughness: 0.32,      // wet, slick skin
-    metalness: 0.26,      // faint iridescent sheen under the key light
+    roughness: opts.roughness ?? 0.32,      // wet, slick skin
+    metalness: opts.metalness ?? 0.26,      // faint iridescent sheen under the key light
     side: THREE.DoubleSide,
   })
   mat.onBeforeCompile = (shader) => {
@@ -1090,7 +1110,7 @@ export function makeFishMaterial(
     shader.uniforms.uSwimAmp = { value: swimAmp }
     shader.uniforms.uSwimFreq = { value: swimFreq }
     shader.uniforms.uRimColor = { value: new THREE.Color('#a8dff2') }
-    shader.uniforms.uRimStrength = { value: 0.5 }
+    shader.uniforms.uRimStrength = { value: opts.rim ?? 0.5 }
     shader.vertexShader = `
       uniform float uTime, uSwimAmp, uSwimFreq;
       attribute float aPhase;

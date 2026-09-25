@@ -22,6 +22,7 @@ import { Seaweed } from './environment/Seaweed'
 import { WaterSurface } from './environment/WaterSurface'
 import { ReefDecor } from './environment/ReefDecor'
 import { Biomes } from './environment/Biomes'
+import { FarReef } from './environment/FarReef'
 import { ParticleField } from './particles/ParticleField'
 import { BubbleSystem } from './particles/Bubbles'
 import { SpongeBubbles } from './particles/SpongeBubbles'
@@ -111,6 +112,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   const surface = new WaterSurface(sceneMgr.scene)
   const decor = new ReefDecor(sceneMgr.scene, seabed.heightAt)
   const biomes = new Biomes(sceneMgr.scene, seabed.heightAt, seaweed.uniforms)
+  // distant silhouette reef banks — the ocean continues into layered haze
+  // in EVERY heading (no more blank white-blue walls east/south/west)
+  const farReef = new FarReef(sceneMgr.scene, seabed.heightAt)
   let sponges = new SpongeSystem(sceneMgr.scene, seabed.heightAt, cfg.coralDetail, limestone.growthSpots)
   let obstacles = [...rocks.obstacles, ...coral.obstacles, ...limestone.obstacles, ...sponges.obstacles, ...arena.obstacles]
 
@@ -592,6 +596,7 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
         return [b.min.toArray().map((n) => Math.round(n * 10) / 10), b.max.toArray().map((n) => Math.round(n * 10) / 10)]
       })(),
       spongeEmitters: sponges.emitters.length,
+      farReef: farReef.stats(),
       arena: arena.stats(),
       tier: cfg.tier,
     }),

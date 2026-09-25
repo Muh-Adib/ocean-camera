@@ -5,8 +5,8 @@ import * as THREE from 'three'
 import { PerformanceManager } from './PerformanceManager'
 import { sharedUniforms } from './sharedUniforms'
 
-const COLOR_DEEP = new THREE.Color('#0a6e86')
-const FOG_COLOR = new THREE.Color('#25b2c6')
+const COLOR_DEEP = new THREE.Color('#0a7893')
+const FOG_COLOR = new THREE.Color('#1dadc4')
 
 export class SceneManager {
   renderer: THREE.WebGLRenderer
@@ -25,7 +25,7 @@ export class SceneManager {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, perf.config.dpr))
     this.renderer.setSize(window.innerWidth, window.innerHeight)
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
-    this.renderer.toneMappingExposure = 1.26
+    this.renderer.toneMappingExposure = 1.19
     this.canvas = this.renderer.domElement
     this.canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;display:block;'
     this.canvas.dataset.oceanGl = '1'   // vibrance grade hooks this exact canvas
@@ -34,8 +34,10 @@ export class SceneManager {
     // ---- scene & fog ----
     this.scene = new THREE.Scene()
     this.scene.background = COLOR_DEEP.clone()
-    // bright lagoon haze — the reef reads clearly to ~90 m in every direction
-    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0132)
+    // bright lagoon haze — the reef reads clearly to ~110 m in every direction
+    // (lower density than the first pass: the far rings must stay VISIBLE
+    // layers, not a milky white-blue wall)
+    this.fog = new THREE.FogExp2(FOG_COLOR.clone(), 0.0098)
     this.scene.fog = this.fog
 
     // ---- camera ----
@@ -67,12 +69,11 @@ export class SceneManager {
       depthWrite: false,
       fog: false,
       uniforms: {
-        // deeper lagoon blues (reference: "deep blue water tones") — a
-        // softer horizon contrast lets far reef read as HAZY blue depth
-        // instead of hard black cutouts
-        uTop: { value: new THREE.Color('#96e2e4') },
-        uMid: { value: new THREE.Color('#249dbd') },
-        uBottom: { value: new THREE.Color('#084f66') },
+        // cheerful tropical lagoon: sunlit turquoise zenith, clear cyan mid,
+        // saturated teal depth — vivid, never pale milk
+        uTop: { value: new THREE.Color('#8ce8ec') },
+        uMid: { value: new THREE.Color('#1fa3c6') },
+        uBottom: { value: new THREE.Color('#075a74') },
         uEnergy: sharedUniforms.uEnergy,
         uTime: sharedUniforms.uTime,
       },
@@ -92,9 +93,9 @@ export class SceneManager {
           vec3 c = h > 0.0
             ? mix(uMid, uTop, pow(h, 0.75))
             : mix(uMid, uBottom, pow(-h, 0.6));
-          // depth-of-field falloff: darken toward the lower rim of the
-          // arena so the far reef sinks into blue silhouette
-          c *= mix(0.5, 1.06, smoothstep(-0.55, 0.28, h));
+          // depth-of-field falloff: the far rim sinks gently toward the
+          // deep lagoon colour — a soft vertical fade, never a hard band
+          c *= mix(0.62, 1.08, smoothstep(-0.55, 0.3, h));
           // — 360° correction: looking UP must read as LIGHT, not void —
           // a soft zenith glow + slow caustic veils so the overhead
           // direction carries the sun even when the surface plane is
@@ -132,9 +133,9 @@ export class SceneManager {
     const mat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       uniforms: {
-        uTop: { value: new THREE.Color('#96e2e4') },
-        uMid: { value: new THREE.Color('#249dbd') },
-        uBottom: { value: new THREE.Color('#084f66') },
+        uTop: { value: new THREE.Color('#8ce8ec') },
+        uMid: { value: new THREE.Color('#1fa3c6') },
+        uBottom: { value: new THREE.Color('#075a74') },
       },
       vertexShader: /* glsl */`
         varying vec3 vWorld;
@@ -158,7 +159,7 @@ export class SceneManager {
     temp.add(dome)
     const rt = pmrem.fromScene(temp, 0, 0.1, 200)
     this.scene.environment = rt.texture
-    this.scene.environmentIntensity = 0.3
+    this.scene.environmentIntensity = 0.42
     pmrem.dispose()
     geo.dispose()
     mat.dispose()
