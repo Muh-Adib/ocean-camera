@@ -37,6 +37,10 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
+# persistent JSON mirrors (fish tank, projection settings) live here —
+# mount a volume on /app/data to keep them across image upgrades
+ENV FISH_TANK_FILE=/app/data/.fish-tank.json
+ENV PROJECTION_SETTINGS_FILE=/app/data/.projection-settings.json
 
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
@@ -48,10 +52,30 @@ COPY --from=builder /app/public ./public
 RUN mkdir .next && chown nextjs:nodejs .next
 # writable home for the optional self-signed TLS cert (ENABLE_HTTPS=1)
 RUN mkdir .certs && chown nextjs:nodejs .certs
+# writable data home: the fish tank + projection settings mirror JSON
+# survives container restarts here (process.env.FISH_TANK_FILE points
+# into this dir — /app itself stays read-only for the nextjs user)
+RUN mkdir data && chown nextjs:nodejs data
 
 # Copy standalone build output
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+# ------------------------------------------------------------------
+# DEPENDENCY COMPLETENESS — the turbopack build's file trace omits
+# next/dist/compiled/webpack/* (standalone server never loads webpack
+# during the build), but the programmatic `next()` API in our custom
+# server.js requires it lazily when reading next.config at boot →
+# containers crashed in a loop with:
+#   Cannot find module 'next/dist/compiled/webpack/webpack-lib'
+# Ship the COMPLETE next package plus its runtime deps from the
+# builder stage so every require inside the package always resolves.
+# (outputFileTracingIncludes in next.config.ts is the first layer of
+# this fix — this copy is the belt-and-suspenders layer.)
+# ------------------------------------------------------------------
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/next ./node_modules/next
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@next/env ./node_modules/@next/env
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
 
 # ------------------------------------------------------------------
 # PHONE CONTROL IN PRODUCTION — the custom server REPLACES the

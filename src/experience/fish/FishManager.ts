@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------
 import * as THREE from 'three'
 import { School, type FieldCtx, type SchoolParams } from './Boids'
-import { buildFish, makeFishMaterial, updateFishMaterialTime, SPECIES_TINTS, type SpeciesKey } from './FishGeometryFactory'
+import { buildFish, makeFishMaterial, updateFishMaterialTime, updateFishMaterialGlow, SPECIES_TINTS, type SpeciesKey } from './FishGeometryFactory'
 import { buildCustomFish, makeCustomFishMaterial } from './CustomFish'
 import type { Obstacle } from '../environment/Rocks'
 import type { Pellet } from './Feeding'
@@ -119,12 +119,20 @@ export class FishManager {
   /** live view point the painted fish orbit around — injected by main.ts
    *  (wall constellation eye in projection mode, swim camera otherwise) */
   orbitCenter = new THREE.Vector3(0, 2.2, 0)
+  /**
+   * LIVE eye points of every OUTPUT camera (filled by main.ts each frame in
+   * projection mode). The pass sequencer CYCLES through them so each wall /
+   * projector regularly gets its own close fly-by — with a single wall this
+   * collapses to the same behaviour as orbitCenter. Entries are live Vector3
+   * references kept current by the projection rig.
+   */
+  eyePoints: THREE.Vector3[] = []
   /** pass ring distance from the camera (m) — “mengitari kamera dari dekat” */
   passRadius = 3.7
   /** tangential speed along the pass ring (m/s) */
   passSpeed = 2.2
   /** rest between two passes (s) — keeps the “satu per satu” rhythm readable */
-  private passGap = 2.4
+  private passGap = 1.6
   private passTimer = 1.5
   private passCursor = 0
   private passFlip = 1
@@ -228,7 +236,17 @@ export class FishManager {
     }
     // swim shader time
     for (const m of this.mats) updateFishMaterialTime(m, time)
-    this.custom.forEach((c) => updateFishMaterialTime(c.mat, time))
+    this.custom.forEach((c) => {
+      updateFishMaterialTime(c.mat, time)
+      // spawn celebration — freshly scanned paintings shimmer for their
+      // first seconds in the water, then fade to the matte painted finish
+      if (c.glowT > 0) {
+        c.glowT -= dt
+        const k = Math.max(0, Math.min(1, c.glowT / 2.5))   // soft fade at the tail
+        const ramp = Math.min(1, (FishManager.GLOW_S - c.glowT) * 2.5)   // quick ease-in
+        updateFishMaterialGlow(c.mat, k * (0.55 + 0.45 * ramp))
+      }
+    })
   }
 
   /** camera world position is injected by main each frame */
@@ -263,8 +281,10 @@ export class FishManager {
   }
 
   // ------------------------------------------------------------ custom painted fish
+  /** SPAWN GLOW — how long a freshly imported painting shines (s) */
+  static GLOW_S = 15
   /** one small school per imported painting, keyed by design id */
-  private custom = new Map<string, { entry: Entry; mat: THREE.MeshStandardMaterial; texture: THREE.Texture }>()
+  private custom = new Map<string, { entry: Entry; mat: THREE.MeshStandardMaterial; texture: THREE.Texture; glowT: number }>()
 
   /**
    * DEFAULT BEHAVIOUR of painted (imported-image) fish — “selalu bergerak
@@ -307,10 +327,14 @@ export class FishManager {
     this.passCursor = (this.passCursor + 1) % queue.length
     const pick = queue[this.passCursor]
     const f = pick.entry.school.fish[pick.fish]
+    // each pass orbits ONE output camera — the sequencer walks the wall
+    // ring so every projector regularly gets its own close fly-by
+    const centers = this.eyePoints.length ? this.eyePoints : [this.orbitCenter]
+    const center = centers[this.passCursor % centers.length]
     // seed the ring phase from the fish's current bearing → it BLEEDS into
     // the arc instead of turning across it
-    const dx = f.pos.x - this.orbitCenter.x
-    const dz = f.pos.z - this.orbitCenter.z
+    const dx = f.pos.x - center.x
+    const dz = f.pos.z - center.z
     const seed = Math.atan2(dz, dx)
     // every pass varies: ring distance, pace, orbit direction, height and
     // bob — no two crossings ride the same lane (varied, natural, never a
@@ -318,7 +342,7 @@ export class FishManager {
     this.passFlip = -this.passFlip
     pick.entry.school.pass = {
       fish: pick.fish,
-      center: this.orbitCenter,          // live reference — tracks the camera
+      center,                            // live reference — tracks the camera
       radius: this.passRadius * rand(0.8, 1.28),
       speed: this.passSpeed * rand(0.82, 1.2),
       angle: seed,
@@ -375,8 +399,10 @@ export class FishManager {
    * same number for the same painting.
    * While ANY painted design swims, the regular reef fish hide so
    * the child's own fish are the stars of the tank.
+   * opts.bornAt — the design's server timestamp; designs younger than
+   * GLOW_S shimmer with a bioluminescent spawn glow (new-import moment).
    */
-  addCustomDesign(id: string, texture: THREE.Texture, count?: number) {
+  addCustomDesign(id: string, texture: THREE.Texture, count?: number, opts?: { bornAt?: number }) {
     this.removeCustomDesign(id)
 
     const { geometry } = buildCustomFish()
@@ -411,7 +437,10 @@ export class FishManager {
       school, mesh, phaseAttr, puffAttr: null, dummy: new THREE.Object3D(), visible: true,
     }
     this.entries.push(entry)
-    this.custom.set(id, { entry, mat, texture })
+    // a design scanned moments ago celebrates its arrival; re-pulled or
+    // long-lived designs never glow (age check against the server stamp)
+    const age = opts?.bornAt ? (Date.now() - opts.bornAt) / 1000 : Infinity
+    this.custom.set(id, { entry, mat, texture, glowT: Math.max(0, FishManager.GLOW_S - age) })
     this.refreshGuests()
   }
 
@@ -469,8 +498,12 @@ export class FishManager {
   }
 
   /** painted designs currently swimming (QA) */
-  customInfo(): { id: string; fish: number }[] {
-    return [...this.custom.entries()].map(([id, rec]) => ({ id, fish: rec.entry.school.fish.length }))
+  customInfo(): { id: string; fish: number; glow: number }[] {
+    return [...this.custom.entries()].map(([id, rec]) => ({
+      id,
+      fish: rec.entry.school.fish.length,
+      glow: Math.max(0, Math.round(rec.glowT * 10) / 10),
+    }))
   }
 
   /** QA: painted-only mode state */

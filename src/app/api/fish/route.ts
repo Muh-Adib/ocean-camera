@@ -23,6 +23,11 @@
 //   POST { action:'clear', session }
 //   POST { action:'choreo', session, state }        ← FishDirector push
 //
+// CAP — the wahana tank holds at most MAX_DESIGNS paintings: adding beyond
+// the cap ARCHIVES the oldest designs out of the tank automatically (the
+// scanned source images stay untouched in the operator's folder — only the
+// in-tank copies rotate out) so the water never overfills.
+//
 // In-memory with a best-effort .fish-tank.json mirror so the tank
 // survives dev-server restarts on the show machine.
 // ---------------------------------------------------------------
@@ -52,7 +57,9 @@ interface TankStore {
   loaded: boolean
 }
 
-const MAX_DESIGNS = 12
+// 150 designs × 1-3 swimmers each is the wahana ceiling the operator asked
+// for — beyond that the oldest paintings rotate out automatically.
+const MAX_DESIGNS = 150
 const MAX_DATAURL = 480_000   // ~480 KB per design keeps the poll cheap
 const MAX_SESSIONS = 16       // LRU beyond that — plenty for a venue network
 const MAX_CHOREO = 200_000    // choreography document cap (waypoints are tiny)
@@ -92,7 +99,10 @@ function store(): TankStore {
   return fresh
 }
 
-const FILE = () => path.join(process.cwd(), '.fish-tank.json')
+// FISH_TANK_FILE — the Docker image points this into the writable /app/data
+// volume so the tank survives container restarts; dev keeps the cwd mirror.
+const FILE = () =>
+  process.env.FISH_TANK_FILE || path.join(process.cwd(), '.fish-tank.json')
 
 function cleanSession(raw: unknown): string {
   const s = typeof raw === 'string' ? raw.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 24) : ''
@@ -205,12 +215,14 @@ export async function POST(req: Request) {
       if (!url) return err('design must be an image data URL ≤ 480 KB', 400)
       const id = `fish-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
       const design: FishDesign = { id, name: sanitizeName(body.design.name), url, at: Date.now() }
-      // newest wins — cap the tank and evict the oldest imports
+      // newest wins — cap the tank and ARCHIVE the oldest imports out of
+      // the water (source images on disk are never touched)
       t.designs.push(design)
-      while (t.designs.length > MAX_DESIGNS) t.designs.shift()
+      let evicted = 0
+      while (t.designs.length > MAX_DESIGNS) { t.designs.shift(); evicted++ }
       t.v++
       void persist()
-      return Response.json({ ok: true, v: t.v, id, designs: t.designs })
+      return Response.json({ ok: true, v: t.v, id, evicted, designs: t.designs })
     }
 
     if (body.action === 'remove' && typeof body.id === 'string') {

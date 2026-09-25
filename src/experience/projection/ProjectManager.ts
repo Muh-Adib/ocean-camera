@@ -25,6 +25,9 @@ export interface ProjectHost {
   /** karst tower configuration (raw JSON — sanitized on both ends) */
   towerCfg: unknown
   setTowerCfg(raw: unknown, opts?: { silent?: boolean }): void
+  /** far-sea backdrop variant id ('reef' | 'deep' | 'lagoon') */
+  backdropId: string
+  setBackdrop(id: string, opts?: { silent?: boolean }): void
   /** wall-edge snapping (span edits re-aim neighbours) — live getter */
   snapWalls: boolean
   setSnapWalls(on: boolean): void
@@ -208,7 +211,7 @@ export class ProjectManager {
       qr: { host: this.host.qrHost, show: this.host.qrShow },
       snapWalls: this.host.snapWalls,
       tank: { session: this.host.tankSession },
-      env: { towers: this.host.towerCfg ?? undefined },
+      env: { towers: this.host.towerCfg ?? undefined, backdrop: this.host.backdropId ?? undefined },
     }
   }
 
@@ -231,12 +234,19 @@ export class ProjectManager {
     // quality: saved value wins; legacy/missing falls to ULTRA — the wall
     // must match the studio preview's detail (operator request)
     const quality = QUALITY_LEVELS.includes(out.quality as never) ? (out.quality as QualityLevel) : 'ultra'
+    // WAHANA logo — only accept small image data URLs (import tampering guard)
+    const logo = typeof out.logo === 'string' && out.logo.startsWith('data:image/') && out.logo.length <= 300_000
+      ? out.logo
+      : undefined
     this.host.setOutput({
       width: clampNum(out.width, 1920, 320, 16384),
       height: clampNum(out.height, 1080, 240, 8640),
       renderScale: clampNum(out.renderScale, 1, 0.1, 1),
       quality,
       vibrance: clampNum(out.vibrance, 1, 0.5, 1.8),
+      // wahana display flags ride the project so every output follows
+      fullscreen: out.fullscreen === true,
+      ...(logo ? { logo } : {}),
     })
     this.host.surfaces.replaceAll(surfaces)
     // QR host setting — 'auto' or a surface id (fall back to auto when stale)
@@ -255,6 +265,11 @@ export class ProjectManager {
     const towers = (p.env as { towers?: unknown } | undefined)?.towers
     if (towers !== undefined && towers !== null) {
       this.host.setTowerCfg(towers, { silent: true })
+    }
+    // far-sea backdrop variant — absent on old projects (keep the current photo)
+    const backdrop = (p.env as { backdrop?: unknown } | undefined)?.backdrop
+    if (typeof backdrop === 'string') {
+      this.host.setBackdrop(backdrop, { silent: true })
     }
     return true
   }

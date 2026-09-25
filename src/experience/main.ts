@@ -295,6 +295,9 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     outputOnly,
     // tower edits ride the show project — every /output re-plants too
     onTowerConfig: (raw) => { applyTowerConfig(raw) },
+    // far-sea backdrop variant rides the show project — every output swaps
+    // its distant-water photo in sync (reef / deep / lagoon)
+    onBackdrop: (id) => { backdrop.setVariant(id) },
   })
 
 
@@ -306,6 +309,16 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   projection.fishTank = fishTank
   fishTank.start()
   disposers.push(() => fishTank.stop())
+
+  // live eye-point cache for the pass sequencer (one Vector3 per surface id,
+  // updated in place each frame — no per-frame allocation)
+  const eyePointCache = new Map<string, THREE.Vector3>()
+
+  // dedicated /output page — boot straight into the clean projection
+  // composite (session link / autosave / relay push, no editor chrome).
+  // Regressed once (a48681e dropped this line silently) — the projector
+  // feed must ALWAYS enter output mode when outputOnly is set.
+  if (outputOnly) projection.enterOutputOnly()
 
   // phone-camera hand signals (WebSocket from /control-mobile) feed the SAME
   // GestureEngine as the local camera — identical swipe/push/pull/palm/fist
@@ -486,9 +499,24 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
     cameraRig.update(dt)
     fish.cameraWorld.copy(cameraRig.group.position)
     // painted fish orbit around the point the room actually watches from:
-    // the wall constellation eye in projection mode, the swim camera otherwise
-    if (projection.active) projection.eyePoint(fish.orbitCenter)
-    else fish.orbitCenter.copy(cameraRig.group.position)
+    // the wall constellation eye in projection mode, the swim camera otherwise.
+    // The per-camera eye list lets the pass sequencer walk the wall ring so
+    // EVERY projector gets its own close fly-by (cam 1, cam 2, …).
+    if (projection.active) {
+      projection.eyePoint(fish.orbitCenter)
+      const eyes = fish.eyePoints
+      eyes.length = 0
+      for (const s of projection.surfaces.surfaces) {
+        if (!s.enabled) continue
+        let v = eyePointCache.get(s.id)
+        if (!v) { v = new THREE.Vector3(); eyePointCache.set(s.id, v) }
+        v.set(s.camera.position[0], s.camera.position[1], s.camera.position[2])
+        eyes.push(v)
+      }
+    } else {
+      fish.orbitCenter.copy(cameraRig.group.position)
+      fish.eyePoints.length = 0
+    }
     lighting.update(dt)
 
     // seaweed current blends ambient wander + gesture bias

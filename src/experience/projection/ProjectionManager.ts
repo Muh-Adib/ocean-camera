@@ -27,6 +27,7 @@ import { getVibrance, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN } from '../look/vi
 import { QrOverlay } from '../remote/QrOverlay'
 import { WallQr } from '../remote/WallQr'
 import { deriveSpanH, fitSliceToRatio, glueWalls, seamAudit } from './SpanChain'
+import { isBackdropVariant, BACKDROP_VARIANTS } from '../environment/OceanBackdrop'
 import type { ProjectionOutput, ProjectionProject, ProjectionSurface, QualityLevel, QrShowMode, ScreenFit } from './ProjectionTypes'
 import { QUALITY_LEVELS, QUALITY_PROFILES, resolveQuality } from './ProjectionTypes'
 import { sanitizeTowerConfig, type TowerConfig } from '../environment/LimestoneReef'
@@ -39,6 +40,8 @@ export interface ProjectionDeps {
   outputOnly?: boolean
   /** karst tower config arrived (studio edit / project load / relay push) */
   onTowerConfig?: (cfg: TowerConfig) => void
+  /** far-sea backdrop variant changed (rides the project → every output follows) */
+  onBackdrop?: (id: string) => void
 }
 
 const AUTOSAVE_DELAY = 900
@@ -158,6 +161,15 @@ export class ProjectionManager {
    * studio's session automatically.
    */
   tankSession = 'main'
+  /** far-sea backdrop variant — rides the project, applied on every screen */
+  backdropId = 'reef'
+  /**
+   * OUTPUT SLICE — 1-based index into the ENABLED surfaces (from ?out=N on
+   * the /output page). Set ⇒ this machine renders ONLY that surface's
+   * picture, stretched edge-to-edge: cam 1 → output 1, cam 2 → output 2
+   * for split-wall venues (each projector is its own browser/machine).
+   */
+  sliceIndex: number | null = null
   /** phone-camera hand signals forwarded to the ocean (set by main.ts) */
   onPhoneHand: ((h: HandFrame | null) => void) | null = null
   phoneOn = false
@@ -189,6 +201,8 @@ export class ProjectionManager {
       setQrShow: (mode, opts) => { self.setQrShow(mode, opts) },
       get towerCfg() { return self.towerCfg },
       setTowerCfg: (raw, opts) => { self.setTowerCfg(raw, opts) },
+      get backdropId() { return self.backdropId },
+      setBackdrop: (id, opts) => { self.setBackdrop(id, opts) },
       get snapWalls() { return self.snapWalls },
       setSnapWalls: (on) => { self.snapWalls = on },
       get tankSession() { return self.tankSession },
@@ -315,6 +329,36 @@ export class ProjectionManager {
     }
   }
 
+  /**
+   * Far-sea backdrop variant ('reef' | 'deep' | 'lagoon'). The ocean swaps
+   * its distant-water photo through the deps callback and (unless silent)
+   * the choice rides the project push so every output switches in sync.
+   */
+  setBackdrop(id: string, opts: { silent?: boolean } = {}) {
+    if (!isBackdropVariant(id)) return
+    const changed = id !== this.backdropId
+    this.backdropId = id
+    this.deps.onBackdrop?.(id)
+    if (!opts.silent && changed) {
+      this.broadcastSoon()
+      this.scheduleAutosave()
+      this.syncCurrentSessionRecord()
+      this.ui?.refreshAll()
+      const label = BACKDROP_VARIANTS.find((v) => v.id === id)?.label ?? id
+      this.deps.toast(`Far-sea backdrop: ${label}`, 2600)
+    }
+  }
+
+  /**
+   * Keep the ACTIVE published session record fresh — a kiosk /output boot
+   * from the link (studio closed) must see the latest settings too, not
+   * only the ones published at snapshot time.
+   */
+  private syncCurrentSessionRecord() {
+    if (!this.currentSession) return
+    try { this.project.updateSessionProject(this.currentSession.id, this.project.serialize()) } catch { /* noop */ }
+  }
+
   /** the visibility rule the wall QR follows this frame */
   private qrWant(): boolean {
     if (!this.outputLive) return false
@@ -409,6 +453,35 @@ export class ProjectionManager {
     linkedSpanEdit(this.surfaces.surfaces, s, 'v', spans.v)
     this.surfaces.emit()
     return { yaw: s.camera.yaw, pitch: s.camera.pitch, spanH: s.camera.span.h, spanV: s.camera.span.v }
+  }
+
+  /**
+   * WAHANA SETUP — declare the physical wall in METRES (width × height,
+   * plus the viewer distance the projection is calibrated for). Every
+   * enabled surface receives its real-size share proportional to its
+   * output-rect width — a 2-projector split hands each half its exact
+   * metres — and the angular spans re-derive so the picture is aspect-true
+   * and sharp on the physical screen area (no stretching, no cut frame).
+   * This is the same REAL-SIZE flow the CAMERA tab exposes per surface.
+   */
+  applyWallSize(w: number, h: number, d: number) {
+    const list = this.surfaces.surfaces.filter((s) => s.enabled)
+    if (!list.length) return
+    this.surfaces.snapshot()
+    const totalW = list.reduce((a, s) => a + Math.max(1, s.output.width), 0)
+    for (const s of list) {
+      const share = Math.max(1, s.output.width) / totalW
+      const real = { w: Math.max(0.5, w * share), h: Math.max(0.5, h), d: Math.max(0.5, d) }
+      s.camera.real = real
+      // absolute geometry wins — release any proportion lock (same as the UI path)
+      delete s.camera.span.ratioW
+      delete s.camera.span.ratioH
+      const spans = realSizeToSpan(real.w, real.h, real.d)
+      linkedSpanEdit(this.surfaces.surfaces, s, 'h', spans.h)
+      linkedSpanEdit(this.surfaces.surfaces, s, 'v', spans.v)
+    }
+    this.surfaces.emit()
+    this.syncCurrentSessionRecord()
   }
 
   /** QA: QR overlay geometry — the wall QR (in-projection) plus the DOM fallback */
@@ -549,10 +622,16 @@ export class ProjectionManager {
       if (!restored) this.applyPreset('flat-screen', { history: false, toast: false })
     }
 
+    // OUTPUT SLICE — ?out=N makes this machine show ONLY surface N's picture
+    // (split wall: projector 1 = right half, projector 2 = left half)
+    const outParam = parseInt(params.get('out') || '', 10)
+    if (Number.isFinite(outParam) && outParam >= 1) this.sliceIndex = Math.min(8, outParam)
+
     this.wireSyncChannel()
     this.wireRelay()
     this.syncAll()
     this.setOutputLive(true)
+    this.applyFullscreenFlag()
     this.buildOutputOverlay(restored, missingSession)
 
     // ?pattern=grid — start with a calibration pattern already up
@@ -570,12 +649,14 @@ export class ProjectionManager {
    * Falls back to the registry link when the snapshot would make the URL
    * impractically long (huge meshes).
    */
-  async portableSessionLink(id: string, name?: string): Promise<string> {
+  async portableSessionLink(id: string, name?: string, out?: number): Promise<string> {
     const rec = this.project.getSession(id)
     // the link is opened on OTHER machines — when the studio browses
     // itself as localhost, swap in the server's LAN address
     const origin = await phoneOrigin()
-    const base = `${origin}/output?s=${id}`
+    // ?out=N — a split-wall link: this output shows ONLY projector N's slice
+    const slice = out && out >= 1 ? `&out=${Math.min(8, Math.round(out))}` : ''
+    const base = `${origin}/output?s=${id}${slice}`
     if (!rec) return base
     const label = encodeURIComponent((name ?? rec.name).slice(0, 48))
     try {
@@ -657,6 +738,7 @@ export class ProjectionManager {
       // portable boots keep their URL fresh too — the bookmarked link
       // always reopens the newest show, even on a machine with no registry
       if (this.portableBoot) this.schedulePortableUrlRefresh()
+      this.applyFullscreenFlag()
       this.syncOutputOverlay()
     }
     return this.liveLinked
@@ -729,6 +811,25 @@ export class ProjectionManager {
     this.deps.container.appendChild(el)
     this.overlay = el
 
+    // WAHANA display layer — venue logo watermark (rides the project) and
+    // the fullscreen invite for boots where the browser refused the silent
+    // auto-fullscreen (browsers need one gesture). Both sit OUTSIDE the
+    // auto-hiding panel: the logo is always on the wall, the pill hides
+    // itself as soon as fullscreen is engaged.
+    const logo = document.createElement('img')
+    logo.id = 'pm-out-logo'
+    logo.alt = 'Venue logo'
+    el.appendChild(logo)
+    const pill = document.createElement('button')
+    pill.id = 'pm-out-fspill'
+    pill.type = 'button'
+    pill.textContent = '⛶ TAP FOR FULLSCREEN'
+    pill.addEventListener('click', () => this.requestFullscreen())
+    el.appendChild(pill)
+    const onFsChange = () => this.syncOutputOverlay()
+    document.addEventListener('fullscreenchange', onFsChange)
+    this.unsubs.push(() => document.removeEventListener('fullscreenchange', onFsChange))
+
     el.querySelector('#pm-out-session')?.addEventListener('change', (e) => {
       const id = (e.target as HTMLSelectElement).value
       if (!id) return
@@ -796,8 +897,21 @@ export class ProjectionManager {
       const sess = this.currentSession ? `SESSION "${this.currentSession.name}" · ` : ''
       const portable = this.portableBoot ? 'PORTABLE LINK · ' : ''
       const live = this.liveLinked ? (this.liveFresh() ? 'LIVE LINK · ' : 'HOLDING · ') : ''
-      info.textContent = `${sess}${portable}${live}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()} · ${this.screenFit.toUpperCase()}${rtTxt}`
+      const slice = this.sliceSurface() ? `SLICE ${this.sliceIndex} — ONLY PROJECTOR ${this.sliceIndex} · ` : ''
+      info.textContent = `${sess}${portable}${live}${slice}${n} surface${n === 1 ? '' : 's'} · ${this.output.width}×${this.output.height} · ${this.qualityLabel()} · ${this.screenFit.toUpperCase()}${rtTxt}`
     }
+    // WAHANA watermark + fullscreen invite state
+    const logoEl = this.overlay.querySelector('#pm-out-logo') as HTMLImageElement | null
+    if (logoEl) {
+      if (this.output.logo) {
+        if (logoEl.getAttribute('src') !== this.output.logo) logoEl.src = this.output.logo
+        logoEl.classList.add('pm-show')
+      } else {
+        logoEl.classList.remove('pm-show')
+      }
+    }
+    const pill = this.overlay.querySelector('#pm-out-fspill')
+    if (pill) pill.classList.toggle('pm-show', this.output.fullscreen === true && !document.fullscreenElement)
     if (ssel) this.refreshSessionSelect(ssel)
     if (qsel) {
       const cur = this.output.quality
@@ -858,6 +972,9 @@ export class ProjectionManager {
   // ------------------------------------------------------------ data sync
   private syncAll() {
     const ids = new Set<string>()
+    // slice mode follows the enabled-surface order — a disable/reorder in the
+    // studio instantly re-targets which wall THIS machine renders
+    this.outputMgr.setSlice(this.sliceSurface()?.id ?? null)
     this.surfaces.surfaces.forEach((s, i) => {
       ids.add(s.id)
       this.cameras.sync(s)
@@ -1064,6 +1181,7 @@ export class ProjectionManager {
       // on the dedicated /output page the browser blocks silent auto-fullscreen;
       // the overlay's FULLSCREEN button (a real gesture) does it instead
       if (!this.outputOnly) this.requestFullscreen()
+      else this.applyFullscreenFlag()
       if (!this.outputOnly) this.deps.toast('Projection output — ESC returns to the studio', 2400)
     } else if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => { /* ignore */ })
@@ -1076,6 +1194,44 @@ export class ProjectionManager {
     if (!document.fullscreenElement) {
       el.requestFullscreen?.().catch(() => { /* user/agent refusal — window mode still works */ })
     }
+  }
+
+  /**
+   * WAHANA — fullscreen-from-settings. The project carries a fullscreen
+   * flag; the /output page (and live studio output) attempt to honour it
+   * automatically at boot and on every settings push. Browsers refuse
+   * silent requests on a cold boot — the overlay then shows its
+   * TAP FOR FULLSCREEN pill until one tap (any gesture) engages it.
+   */
+  setFullscreenFlag(on: boolean) {
+    this.output.fullscreen = on === true
+    this.applyFullscreenFlag()
+    this.broadcastSoon()
+    this.scheduleAutosave()
+    this.syncCurrentSessionRecord()
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  /** WAHANA — venue logo watermark (small data URL riding the project) */
+  setOutputLogo(dataUrl: string | null) {
+    if (dataUrl && dataUrl.startsWith('data:image/') && dataUrl.length <= 300_000) {
+      this.output.logo = dataUrl
+    } else {
+      delete this.output.logo
+    }
+    this.broadcastSoon()
+    this.scheduleAutosave()
+    this.syncCurrentSessionRecord()
+    this.ui?.refreshAll()
+    this.syncOutputOverlay()
+  }
+
+  private applyFullscreenFlag() {
+    if (this.output.fullscreen !== true) return
+    if (!this.outputOnly && !this.outputLive) return
+    this.requestFullscreen()
+    this.syncOutputOverlay()
   }
 
   setViewThrough(id: string | null) {
@@ -1305,6 +1461,17 @@ export class ProjectionManager {
    * camera's base position (the room eye). The painted-fish camera-pass
    * orbits around it, so the artworks sweep close past every wall.
    */
+  /**
+   * The surface this machine's OUTPUT SLICE shows (or null = full composite).
+   * 1-based over the ENABLED surfaces in project order — surface 1 is
+   * “cam 1 → output 1”, surface 2 is “cam 2 → output 2”.
+   */
+  sliceSurface(): ProjectionSurface | null {
+    if (this.sliceIndex == null) return null
+    const list = this.surfaces.surfaces.filter((s) => s.enabled)
+    return list[this.sliceIndex - 1] ?? null
+  }
+
   eyePoint(out = new THREE.Vector3()): THREE.Vector3 {
     const list = this.surfaces.surfaces.filter((s) => s.enabled)
     if (!list.length) return out.set(0, 2.2, 0)
@@ -1341,8 +1508,12 @@ export class ProjectionManager {
 
     // 1) shared world → every enabled surface camera → its own RT
     if (!this.qaFrozen) {
+      const sliceId = this.sliceSurface()?.id ?? null
       for (const s of this.surfaces.surfaces) {
         if (!s.enabled) continue
+        // OUTPUT SLICE mode: this machine only needs ITS wall's picture —
+        // skip every other render target entirely (split-wall GPU saving)
+        if (sliceId && s.id !== sliceId) continue
         const entry = this.outputMgr.getEntry(s.id)
         if (!entry) continue
         const cam = this.cameras.sync(s)
@@ -1358,7 +1529,16 @@ export class ProjectionManager {
 
     // 2) screen pass — fit mode fills the physical screen (no black bars)
     if (this.outputLive) {
-      this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight, this.screenFit)
+      const slice = this.sliceSurface()
+      if (slice) {
+        // cam N → output N: this projector shows ONLY its own wall's
+        // picture, mapped edge-to-edge onto the screen from the slice
+        // rect's own position in output space (split-wall venue, one
+        // machine or browser tab per projector)
+        this.outputMgr.updateCameraSlice(slice.output.x, slice.output.y, slice.output.width, slice.output.height)
+      } else {
+        this.outputMgr.updateCamera(this.output.width, this.output.height, window.innerWidth, window.innerHeight, this.screenFit)
+      }
       this.outputMgr.renderComposite(r)
       return
     }

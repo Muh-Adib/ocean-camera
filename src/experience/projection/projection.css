@@ -841,3 +841,44 @@ body.projection-studio-open #gesture-view { display: none !important; }
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* ---------------- WAHANA: output watermark + fullscreen invite ---------------- */
+/* venue logo (rides the project → syncs to every output machine) */
+#pm-out-logo {
+  position: fixed;
+  right: 26px;
+  bottom: 20px;
+  height: 58px;
+  max-width: 190px;
+  object-fit: contain;
+  z-index: 2147483000;
+  pointer-events: none;
+  opacity: 0.92;
+  filter: drop-shadow(0 2px 12px rgba(0, 10, 20, 0.55));
+  display: none;
+}
+#pm-out-logo.pm-show { display: block; }
+
+/* one-gesture fullscreen invite — shown only while the project's
+   fullscreen flag is on but the browser refused the silent attempt */
+#pm-out-fspill {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 2147483000;
+  display: none;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(140, 235, 255, 0.55);
+  background: rgba(4, 34, 48, 0.82);
+  color: #cdf3ff;
+  font: 600 0.78rem/1 'Segoe UI', system-ui, sans-serif;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+#pm-out-fspill:hover { background: rgba(10, 60, 80, 0.9); transform: translateY(-1px); }
+#pm-out-fspill.pm-show { display: inline-flex; }

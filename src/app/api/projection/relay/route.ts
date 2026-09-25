@@ -18,6 +18,8 @@ export async function GET() {
     project: s.project,
     updatedAt: s.updatedAt,
     studioSeenAt: s.studioSeenAt,
+    // live /output screens (SSE subscribers) — the SETUP tab's session panel
+    screens: relayStore.screens,
   })
 }
 

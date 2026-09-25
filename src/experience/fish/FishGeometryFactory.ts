@@ -1091,7 +1091,10 @@ export function buildFish(key: SpeciesKey): { geometry: THREE.BufferGeometry; te
 /** shared material factory per species (scale bump, swim-bend, fin flutter, fresnel rim).
  *  opts.puff → pufferfish defence display: `aPuff` (per-instance 0..1) inflates
  *  the hull radially while spike tips (aSpike weight) extend off the skin.
- *  opts.roughness/metalness/rim → per-use finish (painted fish go matte). */
+ *  opts.roughness/metalness/rim → per-use finish (painted fish go matte).
+ *  uGlow — SPAWN CELEBRATION: every freshly scanned painting glows for its
+ *  first seconds in the water (FishManager drives the value down to 0). The
+ *  uniform exists on ALL fish materials so one shader family serves both. */
 export function makeFishMaterial(
   texture: THREE.CanvasTexture, swimAmp: number, swimFreq: number, cacheKey: string,
   opts: { puff?: boolean; roughness?: number; metalness?: number; rim?: number } = {},
@@ -1111,6 +1114,8 @@ export function makeFishMaterial(
     shader.uniforms.uSwimFreq = { value: swimFreq }
     shader.uniforms.uRimColor = { value: new THREE.Color('#a8dff2') }
     shader.uniforms.uRimStrength = { value: opts.rim ?? 0.5 }
+    shader.uniforms.uGlow = { value: 0 }          // 0..1 spawn-glow envelope
+    shader.uniforms.uGlowColor = { value: new THREE.Color('#8ff4ff') }
     shader.vertexShader = `
       uniform float uTime, uSwimAmp, uSwimFreq;
       attribute float aPhase;
@@ -1153,6 +1158,9 @@ export function makeFishMaterial(
     shader.fragmentShader = `
       uniform vec3 uRimColor;
       uniform float uRimStrength;
+      uniform float uTime;
+      uniform float uGlow;
+      uniform vec3 uGlowColor;
     ` + shader.fragmentShader
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>', `
       {
@@ -1160,11 +1168,16 @@ export function makeFishMaterial(
         vec3 vDir = normalize(vViewPosition);
         float fres = pow(clamp(1.0 - abs(dot(normalize(vNormal), vDir)), 0.0, 1.0), 3.0);
         outgoingLight += uRimColor * fres * uRimStrength;
+        // spawn celebration — a shimmering bioluminescent halo over the whole
+        // body (edge-weighted so the silhouette sparks first), driven by the
+        // CPU-side uGlow envelope for the fish's first seconds in the tank
+        float glowPulse = 0.78 + 0.22 * sin(uTime * 5.2);
+        outgoingLight += uGlowColor * uGlow * glowPulse * (fres * 0.65 + 0.35);
       }
       #include <opaque_fragment>
     `)
   }
-  mat.customProgramCacheKey = () => cacheKey + '-v4'
+  mat.customProgramCacheKey = () => cacheKey + '-v5'
   return mat
 }
 
@@ -1184,4 +1197,10 @@ export function bindFishTime(mat: THREE.MeshStandardMaterial, getTime: () => num
 export function updateFishMaterialTime(mat: THREE.MeshStandardMaterial, t: number) {
   const shaders = (mat.userData.shaders as { uniforms: { uTime: { value: number } } }[] | undefined) ?? []
   for (const s of shaders) s.uniforms.uTime.value = t
+}
+
+/** push the spawn-glow envelope into a fish material (0 = no glow) */
+export function updateFishMaterialGlow(mat: THREE.MeshStandardMaterial, g: number) {
+  const shaders = (mat.userData.shaders as { uniforms: { uGlow: { value: number } } }[] | undefined) ?? []
+  for (const s of shaders) s.uniforms.uGlow.value = g
 }

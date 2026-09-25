@@ -27,6 +27,9 @@ export type RelayListener = (event: 'relay' | 'hb', data: unknown) => void
 class RelayStore {
   state: RelayState = { rev: 0, project: null, updatedAt: 0, studioSeenAt: 0 }
   private listeners = new Set<RelayListener>()
+  /** live SSE subscribers — every /output page opens one stream, so this
+   *  is how many projector screens are currently connected to the show */
+  screens = 0
 
   /** studio pushed new state — bump rev and fan out to every subscriber */
   push(project: unknown) {
@@ -47,7 +50,11 @@ class RelayStore {
 
   subscribe(listener: RelayListener): () => void {
     this.listeners.add(listener)
-    return () => { this.listeners.delete(listener) }
+    this.screens = this.listeners.size
+    return () => {
+      this.listeners.delete(listener)
+      this.screens = this.listeners.size
+    }
   }
 
   private emit(event: 'relay' | 'hb', data: unknown) {

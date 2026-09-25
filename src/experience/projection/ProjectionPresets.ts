@@ -60,6 +60,27 @@ export const PRESETS: PresetDef[] = [
     ],
   },
   {
+    id: 'split-2x1',
+    label: 'Split Wall — 2 Projectors',
+    hint: 'One wide wall, two projectors: projector 1 = RIGHT half, projector 2 = LEFT half. Publish, then open /output?out=1 on the right machine and /output?out=2 on the left',
+    build: (W, H) => [
+      // projector 1 — RIGHT half of the wall (yaw −15.5 covers −31°..0°)
+      finish(createSurface({
+        name: 'Projector 1 · Right',
+        output: rect(0.5, 0, 0.5, 1, W, H),
+        camera: cam(-15.5, 0, 58, { h: 31, v: 40 }),
+        gridResolution: RES,
+      })),
+      // projector 2 — LEFT half of the wall (yaw +15.5 covers 0°..+31°)
+      finish(createSurface({
+        name: 'Projector 2 · Left',
+        output: rect(0, 0, 0.5, 1, W, H),
+        camera: cam(15.5, 0, 58, { h: 31, v: 40 }),
+        gridResolution: RES,
+      })),
+    ],
+  },
+  {
     id: 'cinema-screen',
     label: 'Cinema Screen',
     hint: 'Wide 2.39:1 style slice with a longer lens',

@@ -18,12 +18,32 @@
 import * as THREE from 'three'
 import { sharedUniforms } from '../core/sharedUniforms'
 
+/**
+ * Backdrop variants — the operator can swap the far-sea mood from the
+ * studio (SETUP tab); the choice rides the projection project, so every
+ * /output machine switches in sync. Each variant is ONE small photo
+ * (~100-160 KB) — offline-friendly and single draw call.
+ */
+export interface BackdropVariant { id: string; label: string; file: string }
+export const BACKDROP_VARIANTS: BackdropVariant[] = [
+  { id: 'reef', label: 'Reef Sunlight (default)', file: '/textures/ocean-backdrop.png' },
+  { id: 'deep', label: 'Deep Abyss', file: '/textures/ocean-backdrop-deep.png' },
+  { id: 'lagoon', label: 'Sunny Lagoon', file: '/textures/ocean-backdrop-lagoon.png' },
+]
+export function isBackdropVariant(id: unknown): id is string {
+  return typeof id === 'string' && BACKDROP_VARIANTS.some((v) => v.id === id)
+}
+
 export class OceanBackdrop {
   readonly mesh: THREE.Mesh
   private mat: THREE.ShaderMaterial
   private placeholder: THREE.DataTexture
   private tex: THREE.Texture
   private loaded = false
+  /** currently applied variant id (defaults to the classic reef photo) */
+  variant = 'reef'
+  /** bumped when a new variant photo arrives — QA can await it */
+  variantRev = 0
 
   constructor(scene: THREE.Scene, fogColor: THREE.Color) {
     // 1×1 fog-colour placeholder — no black flash while the photo streams in
@@ -110,6 +130,32 @@ export class OceanBackdrop {
     if (this.loaded && this.mat.uniforms.uMap.value === this.placeholder) {
       this.mat.uniforms.uMap.value = this.tex
     }
+  }
+
+  /**
+   * Switch the far-sea photograph at runtime — safe to call with the same
+   * id (no-op). Streams the new PNG, then swaps the sampler and disposes
+   * the old texture; the placeholder shows through only if the first photo
+   * has not arrived yet.
+   */
+  setVariant(id: string) {
+    if (!isBackdropVariant(id) || id === this.variant) return
+    const def = BACKDROP_VARIANTS.find((v) => v.id === id)
+    if (!def) return
+    this.variant = id
+    const next = new THREE.TextureLoader().load(def.file, () => {
+      next.colorSpace = THREE.SRGBColorSpace
+      next.wrapS = THREE.MirroredRepeatWrapping
+      next.wrapT = THREE.ClampToEdgeWrapping
+      next.repeat.x = 2
+      next.anisotropy = 4
+      this.mat.uniforms.uMap.value = next
+      if (this.mat.uniforms.uMap.value === this.placeholder) this.loaded = true
+      const old = this.tex
+      this.tex = next
+      old.dispose()
+      this.variantRev++
+    })
   }
 
   /** QA: has the photo finished streaming? */

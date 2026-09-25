@@ -18,6 +18,7 @@ import { getVibrance, onVibranceChange, setVibrance, VIBRANCE_MAX, VIBRANCE_MIN 
 import { downloadFishTemplate, TEMPLATE_URL } from '../fish/FishTemplate'
 import { processFishImage } from '../fish/FishScan'
 import { FolderSync } from '../fish/FolderSync'
+import { BACKDROP_VARIANTS } from '../environment/OceanBackdrop'
 import { REEF_SITES } from '../environment/ReefSites'
 import type { FishDirector, SchoolFlow } from '../fish/FishDirector'
 
@@ -94,6 +95,7 @@ export class ProjectionEditorUI {
           <button data-tab="calibration" class="pm-tab">CALIBRATION</button>
           <button data-tab="fish" class="pm-tab pm-tab-fish">FISH STUDIO</button>
           <button data-tab="project" class="pm-tab">PROJECT</button>
+          <button data-tab="setup" class="pm-tab pm-tab-setup">SETUP & SESSIONS</button>
         </div>
         <div class="pm-tab-body" id="pm-tab-body"></div>
       </div>
@@ -241,6 +243,7 @@ export class ProjectionEditorUI {
     else if (tab === 'calibration') this.buildCalibrationPane()
     else if (tab === 'project') this.buildProjectPane()
     else if (tab === 'fish') this.buildFishPane()
+    else if (tab === 'setup') this.buildSetupPane()
     gsap.fromTo(this.tabBody, { opacity: 0.35 }, { opacity: 1, duration: 0.25, ease: 'power1.out' })
     this.refreshAll()
   }
@@ -2139,9 +2142,179 @@ export class ProjectionEditorUI {
     this.chromeTimer = window.setTimeout(() => this.chrome.classList.remove('pm-chrome-visible'), 2600)
   }
 
+  // ------------------------------------------------------------ SETUP & SESSIONS tab — wahana settings
+  private setupPollTimer = 0
+
+  private buildSetupPane() {
+    const { body } = this.pane('SETUP & SESSIONS — wahana proyeksi')
+    window.clearInterval(this.setupPollTimer)
+
+    // ---- physical wall area in metres → real-size cameras everywhere ----
+    const gWall = this.collap(body, 'AREA PROYEKSI — LUAS TEMBAK (METER)', true)
+    const first = this.pm.surfaces.surfaces.find((s) => s.enabled)
+    const real = first?.camera.real
+    let wVal = real?.w ?? 4
+    let hVal = real?.h ?? 3
+    let dVal = real?.d ?? 6
+    const wallRow = document.createElement('div')
+    wallRow.className = 'pm-btn-row'
+    wallRow.appendChild(this.numField('LEBAR (M)', wVal, 4, (v) => { wVal = v }, 0.5, 100))
+    wallRow.appendChild(this.numField('TINGGI (M)', hVal, 4, (v) => { hVal = v }, 0.5, 50))
+    wallRow.appendChild(this.numField('JARAK (M)', dVal, 4, (v) => { dVal = v }, 0.5, 100))
+    wallRow.appendChild(this.btn('APPLY KE SEMUA WALL', () => {
+      this.pm.applyWallSize(wVal, hVal, dVal)
+      this.pm.depsToast(`Area ${wVal} × ${hVal} m diterapkan (jarak ${dVal} m)`, 3200)
+      this.showTab('setup')
+    }, 'pm-btn-sm'))
+    gWall.appendChild(wallRow)
+    gWall.appendChild(this.hint('Ukur area tembak di tembok (berapa kali berapa meter) dan jarak penonton, lalu APPLY. Tiap surface menerima porsi ukuran nyata sesuai lebar output-nya — hasil: gambar proporsional, tidak melar, dan tepat memenuhi layar.'))
+
+    // ---- split view — 2 projectors on one wall ----
+    const gSplit = this.collap(body, 'SPLIT VIEW — 2 PROYEKTOR (KANAN / KIRI)', true)
+    const splitRow = document.createElement('div')
+    splitRow.className = 'pm-btn-row'
+    splitRow.appendChild(this.btn('1 PROYEKTOR (FLAT)', () => {
+      this.pm.applyPreset('flat-screen')
+      this.showTab('setup')
+    }, 'pm-btn-sm'))
+    splitRow.appendChild(this.btn('2 PROYEKTOR — SPLIT 2×1', () => {
+      this.pm.applyPreset('split-2x1')
+      this.pm.depsToast('Split wall: surface 1 = KANAN (output 1) · surface 2 = KIRI (output 2)', 4200)
+      this.showTab('setup')
+    }, 'pm-btn-sm'))
+    gSplit.appendChild(splitRow)
+
+    const pubRow = document.createElement('div')
+    pubRow.className = 'pm-row'
+    const nameIn = document.createElement('input')
+    nameIn.type = 'text'
+    nameIn.className = 'pm-input pm-input-grow'
+    nameIn.maxLength = 48
+    nameIn.placeholder = this.pm.currentSession ? `${this.pm.currentSession.name} (update)` : 'Nama sesi — mis. WAHANA A'
+    pubRow.append(nameIn, this.btn('PUBLISH', () => {
+      const name = nameIn.value.trim() || this.pm.currentSession?.name || `Sesi ${this.pm.listSessions().length + 1}`
+      this.pm.publishSession(name)
+      this.showTab('setup')
+    }, 'pm-btn-sm'))
+    gSplit.appendChild(pubRow)
+
+    const cur = this.pm.currentSession
+    if (cur) {
+      const linkRow = document.createElement('div')
+      linkRow.className = 'pm-btn-row'
+      linkRow.appendChild(this.btn('COPY LINK OUTPUT 1 (KANAN)', async () => {
+        const url = await this.pm.portableSessionLink(cur.id, cur.name, 1)
+        const ok = await copyText(url)
+        this.pm.depsToast(ok ? 'Link OUTPUT 1 (kanan) dicopy — buka di mesin proyektor kanan' : 'Copy gagal — coba lagi', 3400)
+      }, 'pm-btn-sm'))
+      linkRow.appendChild(this.btn('COPY LINK OUTPUT 2 (KIRI)', async () => {
+        const url = await this.pm.portableSessionLink(cur.id, cur.name, 2)
+        const ok = await copyText(url)
+        this.pm.depsToast(ok ? 'Link OUTPUT 2 (kiri) dicopy — buka di mesin proyektor kiri' : 'Copy gagal — coba lagi', 3400)
+      }, 'pm-btn-sm'))
+      linkRow.appendChild(this.btn('OPEN OUTPUT ↗', () => window.open('/output', '_blank', 'noopener'), 'pm-btn-sm'))
+      gSplit.appendChild(linkRow)
+      gSplit.appendChild(this.hint('Link sudah berisi ?out=1 / ?out=2: proyektor kanan HANYA menampilkan kamera 1, proyektor kiri HANYA kamera 2. Setting otomatis ter-load dari link dan tetap LIVE mengikuti studio (juga lintas mesin).'))
+    } else {
+      gSplit.appendChild(this.hint('PUBLISH dulu (kasih nama sesi) untuk mendapat link per proyektor: output 1 = kanan, output 2 = kiri.'))
+    }
+
+    // ---- display — fullscreen from settings + venue logo ----
+    const gDisp = this.collap(body, 'DISPLAY — FULLSCREEN & LOGO', true)
+    gDisp.appendChild(this.check('FULLSCREEN otomatis saat output hidup (dari setting)', this.pm.output.fullscreen === true, (on) => this.pm.setFullscreenFlag(on)))
+    const logoRow = document.createElement('div')
+    logoRow.className = 'pm-btn-row'
+    const logoIn = document.createElement('input')
+    logoIn.type = 'file'
+    logoIn.accept = 'image/*'
+    logoIn.className = 'pm-input pm-input-grow'
+    logoIn.addEventListener('change', async () => {
+      const file = logoIn.files?.[0]
+      if (!file) return
+      try {
+        const dataUrl = await downscaleLogo(file)
+        this.pm.setOutputLogo(dataUrl)
+        this.pm.depsToast('Logo tersimpan — muncul di semua output', 2800)
+      } catch {
+        this.pm.depsToast('Logo gagal dibaca — coba file PNG/JPG lain', 3000)
+      }
+      this.showTab('setup')
+    })
+    logoRow.appendChild(logoIn)
+    if (this.pm.output.logo) {
+      logoRow.appendChild(this.btn('HAPUS LOGO', () => {
+        this.pm.setOutputLogo(null)
+        this.showTab('setup')
+      }, 'pm-btn-sm pm-btn-danger'))
+    }
+    gDisp.appendChild(logoRow)
+    gDisp.appendChild(this.hint('Fullscreen diatur dari sini (browsers kadang minta satu tap — output menampilkan tombol TAP FOR FULLSCREEN bila perlu). Logo di-upload sekali, ikut tersimpan di file show, dan tampil sebagai watermark di setiap layar — termasuk saat berjalan offline.'))
+
+    // ---- far-sea backdrop variant (syncs to every output) ----
+    const gBg = this.collap(body, 'BACKGROUND LAUT — VARIAN', true)
+    const bgRow = document.createElement('div')
+    bgRow.className = 'pm-row'
+    bgRow.appendChild(this.labelEl('BACKDROP'))
+    const bgSel = document.createElement('select')
+    bgSel.className = 'pm-select pm-select-sm'
+    for (const v of BACKDROP_VARIANTS) {
+      const o = document.createElement('option')
+      o.value = v.id
+      o.textContent = v.label.toUpperCase()
+      if (this.pm.backdropId === v.id) o.selected = true
+      bgSel.appendChild(o)
+    }
+    bgSel.addEventListener('change', () => {
+      this.pm.setBackdrop(bgSel.value)
+      this.showTab('setup')
+    })
+    bgRow.appendChild(bgSel)
+    gBg.appendChild(bgRow)
+    gBg.appendChild(this.hint('Ganti suasana laut jauh: Reef Sunlight (standar), Deep Abyss (gelap dramatis), atau Sunny Lagoon (hijau segar). Pilihan tersinkron otomatis ke semua layar output — foto kecil ~120 KB, tetap ringan untuk mode offline.'))
+
+    // ---- session management — show session + live screen count ----
+    const gSess = this.collap(body, 'MANAJEMEN SESI — SHOW & SCREENS', true)
+    const sRow = document.createElement('div')
+    sRow.className = 'pm-row'
+    sRow.appendChild(this.labelEl('SHOW SESSION'))
+    const sIn = document.createElement('input')
+    sIn.type = 'text'
+    sIn.className = 'pm-input pm-input-grow'
+    sIn.maxLength = 24
+    sIn.value = this.pm.tankSession
+    sIn.placeholder = 'main'
+    sRow.append(sIn, this.btn('SET SESSION', () => {
+      const id = sIn.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '') || 'main'
+      this.pm.setTankSession(id)
+      this.rememberSession(id)
+      this.pm.depsToast(`Show session: ${id} — tank ikan + remote HP mengikutinya`, 3000)
+      this.showTab('setup')
+    }, 'pm-btn-sm'))
+    gSess.appendChild(sRow)
+
+    const stat = document.createElement('div')
+    stat.className = 'pm-readout'
+    gSess.appendChild(stat)
+    const pollScreens = async () => {
+      try {
+        const res = await fetch('/api/projection/relay', { cache: 'no-store' })
+        const data = await res.json() as { screens?: number; studioSeenAt?: number }
+        const n = typeof data.screens === 'number' ? data.screens : 0
+        const live = !!data.studioSeenAt && Date.now() - data.studioSeenAt < 70000
+        stat.innerHTML = `<span>SCREENS ONLINE: ${n}</span><span>STUDIO RELAY: ${live ? 'LIVE' : 'IDLE'}</span><span>SESSION AKTIF: ${this.pm.tankSession}</span>`
+      } catch {
+        stat.innerHTML = '<span>SCREENS ONLINE: — (relay tidak terjangkau)</span>'
+      }
+    }
+    void pollScreens()
+    this.setupPollTimer = window.setInterval(() => { void pollScreens() }, 4000)
+    gSess.appendChild(this.hint('Setiap tab /output yang hidup terhitung di SCREENS ONLINE. Show session memisahkan tank ikan hasil scan + remote HP antar show/venue di server yang sama.'))
+  }
+
   // ------------------------------------------------------------ teardown
   dispose() {
     window.clearInterval(this.previewTimer)
+    window.clearInterval(this.setupPollTimer)
     window.clearTimeout(this.chromeTimer)
     this.folderSync.dispose()
     this.disposers.forEach((d) => d())
@@ -2195,5 +2368,36 @@ async function copyText(text: string): Promise<boolean> {
     } catch {
       return false
     }
+  }
+}
+
+/**
+ * Shrink an uploaded logo to a small watermark data URL (≤ ~300 KB):
+ * longest side 320 px, PNG for transparency — JPEG fallback when the PNG
+ * would exceed the project's logo budget. The result rides the show file,
+ * so every output screen (and the offline package) shows the same mark.
+ */
+async function downscaleLogo(file: File): Promise<string> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error('logo decode failed'))
+      img.src = url
+    })
+    const maxSide = 320
+    const scale = Math.min(1, maxSide / Math.max(img.width, img.height))
+    const w = Math.max(1, Math.round(img.width * scale))
+    const h = Math.max(1, Math.round(img.height * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    canvas.getContext('2d')!.drawImage(img, 0, 0, w, h)
+    const png = canvas.toDataURL('image/png')
+    if (png.length <= 300_000) return png
+    return canvas.toDataURL('image/jpeg', 0.85)
+  } finally {
+    URL.revokeObjectURL(url)
   }
 }

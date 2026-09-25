@@ -131,6 +131,14 @@ export interface ProjectionOutput {
   quality: QualityLevel // which hardware profile is active
   /** composite saturation boost — 1 = untouched, 1.18 default vividity */
   vibrance?: number
+  /** WAHANA — auto-enter fullscreen when the output boots / goes live.
+   *  Browsers still require one gesture for silent boots; the overlay
+   *  surfaces a TAP FOR FULLSCREEN pill whenever the flag is on but the
+   *  browser refused the silent attempt. */
+  fullscreen?: boolean
+  /** WAHANA — venue logo as a small data URL (≤ ~150 KB), watermarked on
+   *  every output screen. Rides the project → syncs to all outputs. */
+  logo?: string
 }
 
 /**
@@ -192,8 +200,8 @@ export interface ProjectionProject {
   snapWalls?: boolean
   /** active show session — isolates the fish tank + phone remote per venue */
   tank?: { session?: string }
-  /** environment extras — karst tower configuration (sanitized on apply) */
-  env?: { towers?: unknown }
+  /** environment extras — karst towers + far-sea backdrop variant (sanitized on apply) */
+  env?: { towers?: unknown; backdrop?: string }
 }
 
 export const PROJECT_VERSION = 2

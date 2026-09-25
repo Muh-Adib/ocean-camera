@@ -35,6 +35,15 @@ export class OutputManager {
   private entries = new Map<string, SurfaceEntry>()
   private readBuf: ImageData | null = null
   private readCanvas: HTMLCanvasElement | null = null
+  /**
+   * OUTPUT SLICE mode — when set, only this surface's mesh stays visible in
+   * the composite (per-projector screen: cam 1 → output 1, cam 2 → output 2).
+   */
+  sliceId: string | null = null
+
+  setSlice(id: string | null) {
+    this.sliceId = id
+  }
 
   /** GPU texture ceiling — set from the renderer right after construction */
   maxTexSize = 4096
@@ -76,6 +85,21 @@ export class OutputManager {
     this.camera.right = outputW / 2 + halfW
     this.camera.top = outputH / 2 - halfH
     this.camera.bottom = outputH / 2 + halfH
+    this.camera.updateProjectionMatrix()
+  }
+
+  /**
+   * OUTPUT SLICE mapping — like 'stretch', but anchored at the slice rect's
+   * own origin inside output space: the mesh stays where the project put it
+   * (e.g. the right half at x 960..1920) while the ortho camera frames
+   * EXACTLY that rect, mapped edge-to-edge onto the physical screen.
+   */
+  updateCameraSlice(x: number, y: number, w: number, h: number) {
+    if (w <= 0 || h <= 0) return
+    this.camera.left = x
+    this.camera.right = x + w
+    this.camera.top = y
+    this.camera.bottom = y + h
     this.camera.updateProjectionMatrix()
   }
 
@@ -131,7 +155,7 @@ export class OutputManager {
     }
     entry.order = index
     entry.mesh.renderOrder = index
-    entry.mesh.visible = s.enabled
+    entry.mesh.visible = s.enabled && (!this.sliceId || this.sliceId === s.id)
 
     if (entry.res !== s.warp.gridResolution || entry.gridSig !== this.gridSignature(s)) {
       this.rebuildGeometry(entry, s)

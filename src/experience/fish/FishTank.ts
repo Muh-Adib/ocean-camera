@@ -112,7 +112,7 @@ export class FishTank {
   private async pullFull(v: number, cv = this.choreoV) {
     const res = await fetch(`/api/fish?full=1&session=${encodeURIComponent(this.session)}`, { cache: 'no-store' })
     if (!res.ok) throw new Error(`tank full ${res.status}`)
-    const data = await res.json() as { v?: number; designs?: { id: string; name: string; url: string }[]; choreoV?: number; choreo?: unknown }
+    const data = await res.json() as { v?: number; designs?: { id: string; name: string; url: string; at?: number }[]; choreoV?: number; choreo?: unknown }
     const designs = (Array.isArray(data.designs) ? data.designs : [])
       .filter((d) => d && typeof d.id === 'string' && typeof d.url === 'string')
     const ids = new Set(designs.map((d) => d.id))
@@ -121,13 +121,14 @@ export class FishTank {
     for (const id of this.fish.customIds()) {
       if (!ids.has(id)) this.fish.removeCustomDesign(id)
     }
-    // additions — textures decode async, add as they arrive
+    // additions — textures decode async, add as they arrive; the server
+    // timestamp rides along so brand-new scans spawn with their glow
     let added = false
     await Promise.all(designs.map(async (d) => {
       if (this.fish.hasCustomDesign(d.id)) return
       try {
         const texture = await loadTexture(d.url)
-        this.fish.addCustomDesign(d.id, texture)
+        this.fish.addCustomDesign(d.id, texture, undefined, { bornAt: typeof d.at === 'number' ? d.at : undefined })
         added = true
       } catch { /* broken image — skip this design */ }
     }))
