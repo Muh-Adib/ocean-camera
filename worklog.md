@@ -1349,3 +1349,17 @@ Work Log:
 
 Stage Summary:
 - Semua asset 3D kini di-grade dengan kurva vibrance yang melindungi warna vivid sambil mengangkat pastel/muted ke candy, plus relief mikro prosedural (mottling albedo + micro-bump normal) yang membuat karang, batu, pasir, sponge, limestone ter-shading nyata di bawah matahari & kaustik — bukan lagi permukaan airbrush pucat. Ikan prosedural dan hasil scan dinaankan vibrance-nya (scan art pastel kini pop dari air biru), exposure/sun naik dan ambient diturunkan untuk kontras form. Deployment wahana tidak tersentuh — semua perubahan murni shader/material/lighting.
+
+---
+Task ID: 49
+Agent: main (Super Z)
+Task: "tolong cek ulang implementasi sebelumnya sepertinya belum lengkap" — audit kelengkapan treatment vibrance/detail shading + pulihkan repo dari rollback
+
+Work Log:
+- TEMUAN KRITIS INFRASTRUKTUR: antara sesi, repo lokal ter-ROLLBACK ke commit lama 0931350 (era Task 43) dan remote origin HILANG dari config — audit awal menemukan SpecialCreatures.ts (hiu/pari/kura-kura) "kembali" + grade Task 48 hilang; semuanya artefak rollback, BUKAN regresi kode. PULIHKAN: git remote add origin + fetch + reset --hard origin/main (= 025f4ed, Task 48 utuh). Pada base benar, penghapusan SpecialCreatures (Task 46) TERNYATA sudah lengkap — tidak ada hiu/pari/kura-kura di lineage aktif. PELAJARAN: setiap sesi baru WAJIB cek `git log -1` + `git remote -v` sebelum bekerja.
+- AUDIT MATERIAL-MATERIAL YANG TERLEWAT di Task 48 (di base 025f4ed): (1) ReefDecor.ts (bintang laut, landak laut, kerang) — plain MeshStandardMaterial tanpa sea-light, pucat di antara karang ter-grade; (2) kerang Seabed (#e8dcc5) — hanya silhouette; (3) Seaweed.ts — ShaderMaterial custom dengan hijau gelap tetap (0.05,0.22,0.16 / 0.22,0.62,0.44), tidak respons cahaya; (4) KELP_FRAG Biomes — gradasi olive muted (tip 0.46,0.44,0.16).
+- FIX: ReefDecor dapat addSeaLight (detail 0.12/bump 0.34/rim 0.13) — satu draw call, senada keluarga terumbu; kerang Seabed dikomposisikan injectCaustic (saturate 1.25/detail 0.1/bump 0.3) + injectSilhouette dalam SATU onBeforeCompile (addDepthSilhouette menimpa onBeforeCompile — pola komposisi wajib); import addDepthSilhouette tak terpakai dibersihkan; Seaweed FRAG dijenuhkan (deep 0.07,0.30,0.20 / tip 0.26,0.76,0.52 + shimmer naik); KELP_FRAG dijenuhkan (stipe 0.20,0.26,0.08 / blade 0.38,0.43,0.12 / tip 0.58,0.55,0.18 — golden-green).
+- VERIFIKASI: tsc 0 error, eslint bersih; dev server restart di base benar (rm .next/dev); QA agent-browser: boot OK, reveal + view utama — karang kaya warna (grade Task 48 utuh), kelp kuning-hijau cerah, tanpa hiu/pari/kura-kura, 0 page error, 0 console error; screenshot qa-49-front.png.
+
+Stage Summary:
+- Implementasi vibrance + detail shading kini BENAR-BENAR menyeluruh: semua keluarga aset statis (karang, arena, sponge, limestone, batu, biome statics, pasir, kerang, reef decor) hidup dalam keluarga sea-light yang sama, dan semua flora shader-custom (seaweed, kelp) berwarna jenuh yang hidup. Repo lokal dipulihkan dari rollback eksternal ke state remote terbaru; lineage aktif terkonfirmasi bersih dari hiu/pari/kura-kura.

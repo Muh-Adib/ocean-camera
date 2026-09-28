@@ -68,10 +68,11 @@ const FRAG = /* glsl */`
   varying float vHeight;
   varying float vFlect;
   void main() {
-    vec3 deep = vec3(0.05, 0.22, 0.16);
-    vec3 tip = vec3(0.22, 0.62, 0.44);
+    // saturated sea-grass greens — vivid blades against the blue water
+    vec3 deep = vec3(0.07, 0.30, 0.20);
+    vec3 tip = vec3(0.26, 0.76, 0.52);
     vec3 col = mix(deep, tip, vHeight * vHeight);
-    col += vec3(0.10, 0.16, 0.05) * vFlect;                 // gesture shimmer
+    col += vec3(0.12, 0.20, 0.06) * vFlect;                 // gesture shimmer
     col *= 0.8 + uEnergy * 0.35;
     float alpha = smoothstep(0.0, 0.12, vUv.y) * (0.92);
     // darken the very base where it roots into sand

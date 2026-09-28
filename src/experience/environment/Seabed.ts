@@ -6,7 +6,7 @@
 import * as THREE from 'three'
 import { SEABED_Y, fbm2, noise2, rand, mulberry32 } from '../utils/math'
 import { sharedUniforms } from '../core/sharedUniforms'
-import { addDepthSilhouette, injectSilhouette } from './depthSilhouette'
+import { injectSilhouette } from './depthSilhouette'
 import { injectCaustic } from './causticInject'
 
 export class Seabed {
@@ -164,7 +164,13 @@ export class Seabed {
     const shellMat = new THREE.MeshStandardMaterial({
       color: '#e8dcc5', roughness: 0.8, side: THREE.DoubleSide,
     })
-    addDepthSilhouette(shellMat, { start: 58, end: 165, k: 0.42, color: '#0f5270' }, 'seabed-shells')
+    // shells catch the sea light like everything else (pale cream needs the
+    // vibrance + grain to not read as flat plastic chips on the graded sand)
+    shellMat.onBeforeCompile = (shader) => {
+      injectCaustic(shader, { scale: 0.55, strength: 0.16, sideBias: 0.25, deepen: 0.9, saturate: 1.25, detail: 0.1, bump: 0.3 })
+      injectSilhouette(shader, { start: 58, end: 165, k: 0.42, color: '#0f5270' })
+    }
+    shellMat.customProgramCacheKey = () => 'seabed-shells'
     const shells = new THREE.InstancedMesh(shellGeo, shellMat, 36)
     for (let i = 0; i < 36; i++) {
       const x = rand(-68, 68), z = rand(-82, 14)

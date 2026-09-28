@@ -74,14 +74,15 @@ const KELP_FRAG = /* glsl */`
   varying float vHeight;
   varying float vFlect;
   void main() {
-    vec3 holdfast = vec3(0.055, 0.075, 0.035);
-    vec3 stipe   = vec3(0.16, 0.20, 0.07);
-    vec3 blade   = vec3(0.30, 0.34, 0.11);
-    vec3 tip     = vec3(0.46, 0.44, 0.16);
+    // golden-green kelp gradient — brighter, saturated, alive in the blue
+    vec3 holdfast = vec3(0.06, 0.085, 0.035);
+    vec3 stipe   = vec3(0.20, 0.26, 0.08);
+    vec3 blade   = vec3(0.38, 0.43, 0.12);
+    vec3 tip     = vec3(0.58, 0.55, 0.18);
     vec3 col = mix(holdfast, stipe, smoothstep(0.0, 0.3, vHeight));
     col = mix(col, blade, smoothstep(0.25, 0.65, vHeight));
     col = mix(col, tip, smoothstep(0.6, 1.0, vHeight));
-    col += vec3(0.10, 0.13, 0.04) * vFlect;                 // gesture shimmer
+    col += vec3(0.12, 0.16, 0.05) * vFlect;                 // gesture shimmer
     col *= 0.82 + uEnergy * 0.35;
     float alpha = smoothstep(0.0, 0.1, vUv.y) * 0.96;
     col *= mix(0.5, 1.0, smoothstep(0.0, 0.3, vUv.y));

@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { mulberry32 } from '../utils/math'
 import { insideReefFootprint } from './ReefSites'
+import { addSeaLight } from './causticInject'
 
 interface ReefDecorCounts {
   stars: number
@@ -171,6 +172,10 @@ export class ReefDecor {
       roughness: 0.88,
       metalness: 0.02,
     })
+    // starfish/urchins/shells live IN the light too — same sea-light family
+    // as the reef (was plain standard material: read pale against the graded
+    // corals around them)
+    addSeaLight(mat, { scale: 0.55, strength: 0.5, rim: 0.13, detail: 0.12, bump: 0.34 }, 'reef-decor')
     this.mesh = new THREE.Mesh(merged, mat)
     this.group.add(this.mesh)
     scene.add(this.group)
