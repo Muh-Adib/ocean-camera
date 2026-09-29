@@ -78,6 +78,24 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@next/env ./node_mod
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@swc/helpers ./node_modules/@swc/helpers
 
 # ------------------------------------------------------------------
+# DEPENDENCY COMPLETENESS, round 2 — next@16 loads next.config.ts at
+# boot through next/dist/compiled/browserslist, which require()s two
+# EXTERNAL packages via optional-style requires that the file trace
+# skips → containers crash-looped with:
+#   Cannot find module 'baseline-browser-mapping'
+# Ship them explicitly. Also ship the @next/swc-<platform> native
+# binding: transpiling next.config.ts at boot needs it, and without
+# it next tries to DOWNLOAD a wasm fallback from the network — which
+# silently fails in the offline wahana deployment.
+# (outputFileTracingIncludes in next.config.ts is the first layer for
+# the two npm packages; the glob keeps the swc copy arch-agnostic —
+# x64 and arm64 builders each install their own musl binding.)
+# ------------------------------------------------------------------
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/baseline-browser-mapping ./node_modules/baseline-browser-mapping
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/caniuse-lite ./node_modules/caniuse-lite
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@next/swc-* ./node_modules/@next/
+
+# ------------------------------------------------------------------
 # PHONE CONTROL IN PRODUCTION — the custom server REPLACES the
 # generated standalone server.js. It serves the same Next.js app AND
 # owns the WebSocket hub at /ws/control on THE SAME port, so the

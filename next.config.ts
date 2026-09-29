@@ -13,9 +13,20 @@ const nextConfig: NextConfig = {
   // `next()` API used by our custom server.js requires it lazily when
   // reading this config at boot. Force-include the compiled loaders so
   // any standalone output is self-sufficient.
+  //
+  // Same failure class, round 2 — "Cannot find module
+  // 'baseline-browser-mapping'": loading next.config.ts at boot pulls
+  // in next/dist/compiled/browserslist, which require()s the external
+  // packages baseline-browser-mapping and caniuse-lite through
+  // optional-style requires that the file trace skips. Force-include
+  // them so standalone boots without the Dockerfile whitelist.
   // ---------------------------------------------------------------
   outputFileTracingIncludes: {
-    "/**": ["./node_modules/next/dist/compiled/webpack/**"],
+    "/**": [
+      "./node_modules/next/dist/compiled/webpack/**",
+      "./node_modules/baseline-browser-mapping/**",
+      "./node_modules/caniuse-lite/**",
+    ],
   },
   typescript: {
     ignoreBuildErrors: true,
