@@ -1363,3 +1363,19 @@ Work Log:
 
 Stage Summary:
 - Implementasi vibrance + detail shading kini BENAR-BENAR menyeluruh: semua keluarga aset statis (karang, arena, sponge, limestone, batu, biome statics, pasir, kerang, reef decor) hidup dalam keluarga sea-light yang sama, dan semua flora shader-custom (seaweed, kelp) berwarna jenuh yang hidup. Repo lokal dipulihkan dari rollback eksternal ke state remote terbaru; lineage aktif terkonfirmasi bersih dari hiu/pari/kura-kura.
+
+---
+Task ID: 50
+Agent: main (Super Z)
+Task: "tolong rebase dan perbaiki error ini di runtime" — container crash-loop `Cannot find module 'baseline-browser-mapping'` di /app (deployment Docker wahana)
+
+Work Log:
+- REBASE: lokal sudah sinkron dengan origin/main (e4d8b19) sebelum dikerjakan — tidak ada commit yang perlu di-rebase; perbaikan langsung di atas state terbaru.
+- AKAR MASALAH: next@16.1.3 memuat next.config.ts saat boot via rantai server.js → next() → config.js → transpile-config.js → swc/options.js → build/utils.js → compiled/browserslist/index.js, yang require() DUA paket eksternal: baseline-browser-mapping (v2.9.15) + caniuse-lite/dist/unpacker/*. Whitelist COPY stage runner Dockerfile hanya mengirim next, @next/env, @swc/helpers, ws — paket-paket itu tidak pernah sampai ke /app/node_modules. Trace standalone juga melewatkannya karena require bergaya opsional (dalam try/catch) di-skip NFT — kelas kegagalan yang sama dengan insiden webpack-lib sebelumnya.
+- TEMUAN TAMBAHAN (dicegah sebelum kambuh): transpile next.config.ts di boot butuh binding native @next/swc-linux-<arch>-musl; jika hilang, next mencoba DOWNLOAD wasm fallback dari jaringan (downloadWasmSwc) yang pasti gagal di wahana offline → binding wajib ikut ke image.
+- FIX DUA LAPIS: (1) next.config.ts outputFileTracingIncludes +./node_modules/baseline-browser-mapping/** +./node_modules/caniuse-lite/** (layer pertama, ikut ke semua standalone); (2) Dockerfile runner COPY eksplisit kedua paket + glob /app/node_modules/@next/swc-* → node_modules/@next/ (arch-agnostic, x64/arm64 masing-masing dapat binding build-nya) dengan komentar penyebab lengkap. Plus .gitignore /.next-prod/ (artefak verifikasi CI) dan revert tsconfig.json yang ditulis-ulang otomatis oleh next build.
+- VERIFIKASI END-TO-END: tsc 0 error, eslint bersih; production build lokal (NEXT_DIST_DIR=.next-prod bunx next build) sukses; inspeksi standalone → baseline-browser-mapping + caniuse-lite + next/dist/compiled/webpack IKUT, @next/swc-* memang tak pernah di-trace (ditutup COPY Dockerfile); boot test meniru layout /app (standalone + server.js + ws + binding + NODE_ENV=production seperti ENV kontainer) di port 3100 → "ocean server ready (prod)", / , /output, /control-mobile, /remote semua HTTP 200, /api/fish JSON valid, NOL "Cannot find module"; catatan boot test: trace hanya mengirim varian react *.production.js jadi NODE_ENV=production wajib (kontainer sudah set).
+- Push 6edaf0e → origin/main (lokal = remote).
+
+Stage Summary:
+- Container wahana tidak lagi crash-loop saat memuat next.config.ts: paket eksternal yang dibutuhkan compiled browserslist (baseline-browser-mapping, caniuse-lite) kini ter-force-include di standalone DAN di-copy eksplisit di image runner, ditambah binding swc native untuk transpile TS config offline. Diverifikasi dengan production build + boot test penuh yang mensimulasikan layout kontainer. Pengguna tinggal git pull + rebuild image di mesin deployment.
