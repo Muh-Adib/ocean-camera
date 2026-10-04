@@ -9,8 +9,12 @@
 //
 // Emits per-frame hand samples: mirrored palm position (0..1),
 // openness (0 fist → 1 open), scale (distance proxy for push/pull).
+//
+// LAZY LOAD — the tasks-vision module is ~300 KB of JS and the WASM
+// backend is ~9 MB, so both are fetched ONLY when the user actually
+// starts gesture control (dynamic import inside start()). The
+// initial page load ships zero MediaPipe bytes.
 // ---------------------------------------------------------------
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
 import { damp } from '../utils/math'
 import { extractHandSample, mirrorLandmarks } from './handMath'
 export { extractHandSample, mirrorLandmarks } from './handMath'
@@ -159,16 +163,19 @@ export class HandTracker {
     //    GPU → CPU fallback; every step is time-boxed so the button
     //    can never spin forever
     try {
-      const fileset = await withTimeout(FilesetResolver.forVisionTasks(WASM_PATH), 12000, 'wasm fileset')
+      // first gesture start on this page load → fetch the engine chunk
+      // (import() caches, so subsequent starts resolve instantly)
+      const vision = await withTimeout(import('@mediapipe/tasks-vision'), 12000, 'tasks-vision module')
+      const fileset = await withTimeout(vision.FilesetResolver.forVisionTasks(WASM_PATH), 12000, 'wasm fileset')
       try {
-        this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
+        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
           runningMode: 'VIDEO',
           numHands: NUM_HANDS,
         }), 20000, 'gpu landmarker')
       } catch {
         // some devices/drivers reject the GPU delegate — CPU still runs fine
-        this.landmarker = await withTimeout(HandLandmarker.createFromOptions(fileset, {
+        this.landmarker = await withTimeout(vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
           runningMode: 'VIDEO',
           numHands: NUM_HANDS,

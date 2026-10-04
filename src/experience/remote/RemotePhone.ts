@@ -20,7 +20,11 @@
 // up (30 Hz push, no per-frame HTTP), and falls back to the old
 // POST + SSE relay automatically while the socket is down.
 // ---------------------------------------------------------------
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+// LAZY LOAD — only the TYPE is imported statically (erased at build);
+// the engine itself (~300 KB JS + ~9 MB WASM) is fetched via dynamic
+// import() inside start(), so opening the remote page costs zero
+// MediaPipe bytes until the user actually starts the camera.
+import type { HandLandmarker } from '@mediapipe/tasks-vision'
 import { extractHandSample, mirrorLandmarks } from '../interaction/handMath'
 import type { Landmark } from '../interaction/HandTracker'
 import { RemoteSocket } from './RemoteSocket'
@@ -322,15 +326,16 @@ export function bootRemotePhone(container: HTMLElement): RemotePhoneHandle {
       })
       video.srcObject = stream
       await video.play()
-      const fileset = await FilesetResolver.forVisionTasks(WASM_PATH)
+      const vision = await import('@mediapipe/tasks-vision')
+      const fileset = await vision.FilesetResolver.forVisionTasks(WASM_PATH)
       try {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
+        landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
           runningMode: 'VIDEO',
           numHands: 2,
         })
       } catch {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
+        landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
           runningMode: 'VIDEO',
           numHands: 2,

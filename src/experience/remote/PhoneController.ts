@@ -21,7 +21,11 @@
 //     browser itself; the UI now says so plainly and the sticks
 //     keep working.
 // ---------------------------------------------------------------
-import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision'
+// LAZY LOAD — only the TYPE is imported statically (erased at build);
+// the engine itself (~300 KB JS + ~9 MB WASM) is fetched via dynamic
+// import() inside camStart(), so opening the phone controller costs
+// zero MediaPipe bytes until the camera is actually started.
+import type { HandLandmarker } from '@mediapipe/tasks-vision'
 import type { Landmark } from '../interaction/HandTracker'
 import { extractHandSample, mirrorLandmarks } from '../interaction/handMath'
 import { PhoneLink, cleanSessionId, type HandMetrics } from './RemoteLink'
@@ -377,14 +381,15 @@ export function mountPhoneController(root: HTMLElement): () => void {
     video.srcObject = stream
     camStatus.textContent = 'loading hand tracking…'
     try {
-      const fileset = await FilesetResolver.forVisionTasks(WASM_PATH)
+      const vision = await import('@mediapipe/tasks-vision')
+      const fileset = await vision.FilesetResolver.forVisionTasks(WASM_PATH)
       try {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
+        landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'GPU' },
           runningMode: 'VIDEO', numHands: 2,
         })
       } catch {
-        landmarker = await HandLandmarker.createFromOptions(fileset, {
+        landmarker = await vision.HandLandmarker.createFromOptions(fileset, {
           baseOptions: { modelAssetPath: MODEL_PATH, delegate: 'CPU' },
           runningMode: 'VIDEO', numHands: 2,
         })
