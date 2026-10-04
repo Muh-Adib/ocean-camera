@@ -1379,3 +1379,18 @@ Work Log:
 
 Stage Summary:
 - Container wahana tidak lagi crash-loop saat memuat next.config.ts: paket eksternal yang dibutuhkan compiled browserslist (baseline-browser-mapping, caniuse-lite) kini ter-force-include di standalone DAN di-copy eksplisit di image runner, ditambah binding swc native untuk transpile TS config offline. Diverifikasi dengan production build + boot test penuh yang mensimulasikan layout kontainer. Pengguna tinggal git pull + rebuild image di mesin deployment.
+
+---
+Task ID: 51
+Agent: main (Super Z)
+Task: "apakah kita bisa menggunakan engine playcanvas untuk memperingan kinerja dan juga loading time nya?" — konsultasi + eksekusi opsi terpilih: lazy-load MediaPipe
+
+Work Log:
+- KONSULTASI PlayCanvas: jawab TIDAK untuk proyek ini — data: public/mediapipe = 26MB (2 varian WASM ~9MB) + tasks-vision di-import statis di 3 file, jauh lebih besar dari engine mana pun (three core ~150KB gzip); FPS ditentukan draw call/shader/fillrate, dan instancing (FishManager, Seabed, Rocks, bubbles) + pixelRatio cap sudah ada; migrasi = tulis ulang total semua onBeforeCompile grade (caustic/vibrance/micro-bump Task 44/48/49) di sistem shader PlayCanvas yang beda + risiko regresi visual. PlayCanvas masuk akal hanya untuk proyek baru berbasis editor visual.
+- EKSEKUSI LAZY-LOAD MEDIAPIPE (opsi kemenangan cepat yang disetujui user "ya"): import statis {FilesetResolver, HandLandmarker} di HandTracker.ts / RemotePhone.ts / PhoneController.ts diganti dynamic import() DI DALAM start()/camStart() (dipanggil hanya saat pengguna mengaktifkan kamera/gesture); file lain tetap import type (terhapus saat build). HandTracker membungkus import() dengan withTimeout 12s 'tasks-vision module' agar tombol tak spin selamanya.
+- INSIDEN ROLLBACK EKSTERNAL KE-2 (pola sama dengan Task 49): repo lokal ter-rollback lagi ke 0931350 (era Task 43), remote origin HILANG, next.config.ts kembali ke template polos (fix baseline-browser-mapping Task 50 hilang dari lokal) — SEMUA kerja tetap aman di GitHub (origin/main = c3a6cd1). PEMULIHAN: git remote add origin + fetch + reset --hard origin/main; 3 file lazy-load selamat sebagai working-tree diff, diverifikasi murni edit lazy-load vs origin/main sebelum di-apply kembali. PELAJARAN (ulang): setiap sesi WAJIB `git log -1` + `git remote -v` dulu.
+- VERIFIKASI: tsc 0 error, eslint bersih; production build NEXT_DIST_DIR=.next-prod sukses; 4 chunk async berisi tasks-vision (~164KB total: 136K vision bundle + 3 kecil) TIDAK direferensikan HTML awal /, /remote, /control-mobile (dicek semua script/link src); boot-test standalone NODE_ENV=production port 3100: semua halaman 200, chunk vision bundle ter-serve 200 (135KB) saat dibutuhkan; dev server di-restart bersih (rm .next — lock basi + proses stale pid 1063 memegang port 3000 ikut dibersihkan); QA browser: window.__ocean object, 0 page error, screenshot qa-51-lazy-boot.png. CATATAN: dev-mode turbopack mem-fetch stub 1KB chunk dinamis saat boot (perilaku dev saja; prod HTML tidak memuatnya).
+- Push d27aeba → origin/main (lokal = remote).
+
+Stage Summary:
+- Loading awal halaman utama, /remote, dan /control-mobile kini NOL byte MediaPipe — JS engine (~300KB) dan WASM (~9MB) baru diambil saat gesture control benar-benar diaktifkan (dan hanya sekali, import() ter-cache). PlayCanvas ditolak dengan data; optimasi Three.js lanjutan (progressive world build, KTX2, LOD /output) siap dikerjakan bila diminta. Insiden rollback eksternal ke-2 terdokumentasi dan dipulihkan tanpa kehilangan kerja.
