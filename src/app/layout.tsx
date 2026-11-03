@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import BuildVersionGuard from "@/components/BuildVersionGuard";
 
 export const metadata: Metadata = {
   title: "The Living Ocean — An Ocean That Can Feel You",
@@ -37,6 +38,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className="antialiased" style={{ margin: 0, background: "#02111f", overflow: "hidden" }}>
+        <BuildVersionGuard />
         {children}
       </body>
     </html>

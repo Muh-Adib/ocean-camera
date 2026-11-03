@@ -39,6 +39,27 @@ const dev = process.env.NODE_ENV !== 'production'
 const app = next({ dev, hostname: '0.0.0.0', port })
 const handle = app.getRequestHandler()
 
+// ------------------------------------------------------------------
+// BUILD VERSION GUARD — wahana tabs (projector /output, controllers)
+// stay open for DAYS across image upgrades. A tab running the old
+// build posts stale Server Action IDs at the new server and spams:
+//   Error: Failed to find Server Action "...". This request might be
+//   from an older or newer deployment.
+// The client guard (src/components/BuildVersionGuard.tsx) polls this
+// endpoint and reloads itself once when the build changes, so every
+// tab self-heals after a deployment. Served here — not as a Next
+// route — so dev and the standalone container behave identically.
+// ------------------------------------------------------------------
+const BUILD_ID = (() => {
+  // standalone's build dir mirrors distDir — cover the default (.next in
+  // the container), a custom NEXT_DIST_DIR, and the dist-root copy
+  const dirs = [process.env.NEXT_DIST_DIR || '.next', '.next']
+  for (const d of dirs) {
+    try { return fs.readFileSync(path.join(__dirname, d, 'BUILD_ID'), 'utf8').trim() } catch { /* try next location */ }
+  }
+  return 'dev'   // dev has no BUILD_ID — the guard simply never fires
+})()
+
 /**
  * TLS material for ENABLE_HTTPS=1. The phone CAMERA (getUserMedia) only
  * works in a secure context — localhost counts, but http://<lan-ip> does
@@ -84,9 +105,21 @@ const cleanSession = (v) => {
 }
 
 app.prepare().then(() => {
+  // tiny build-version endpoint handled BEFORE Next (no route needed)
+  const handleWithBuildId = (req, res) => {
+    let p = ''
+    try { p = new URL(req.url, 'http://x').pathname } catch { /* bad url — fall through */ }
+    if (p === '/api/build-id') {
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify({ buildId: BUILD_ID }))
+      return
+    }
+    handle(req, res)
+  }
+
   const server = tls
-    ? createHttpsServer(tls, (req, res) => handle(req, res))
-    : createServer((req, res) => handle(req, res))
+    ? createHttpsServer(tls, (req, res) => handleWithBuildId(req, res))
+    : createServer((req, res) => handleWithBuildId(req, res))
 
   // ---------------- WebSocket hub ----------------
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false })
