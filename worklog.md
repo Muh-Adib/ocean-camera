@@ -1394,3 +1394,19 @@ Work Log:
 
 Stage Summary:
 - Loading awal halaman utama, /remote, dan /control-mobile kini NOL byte MediaPipe — JS engine (~300KB) dan WASM (~9MB) baru diambil saat gesture control benar-benar diaktifkan (dan hanya sekali, import() ter-cache). PlayCanvas ditolak dengan data; optimasi Three.js lanjutan (progressive world build, KTX2, LOD /output) siap dikerjakan bila diminta. Insiden rollback eksternal ke-2 terdokumentasi dan dipulihkan tanpa kehilangan kerja.
+
+---
+Task ID: 52
+Agent: main (Super Z)
+Task: "rebase dan cek error ini" + lampiran log runtime container (swc download + Failed to find Server Action)
+
+Work Log:
+- INSIDEN ROLLBACK EKSTERNAL KE-3: lokal HEAD = b5c4922 (commit scaffold ber-UUID), origin/main aman = 477d15c. Pemulihan: reset --hard origin/main. (Remote kali ini TIDAK hilang.)
+- DIAGNOSIS LOG (2 temuan): (1) "Downloading swc package @next/swc-linux-x64-*" → kontainer menjalankan image LAMA pra-Task-50 (binding swc tidak ada di image; di-download darurat — kali ini mesin kebetulan online). Rebuild image dari main terbaru menghilangkan baris ini. (2) "Failed to find Server Action ..." ×3 → tab browser lama (proyektor/controller yang menyala berhari-hari) mengirim action ID build lama ke server baru (version skew); kode kita TIDAK punya satu pun server action (rg "use server" = 0) — error murni dari klien basi, tidak mengganggu pengunjung baru.
+- FIX PERMANEN VERSION SKEW — BuildVersionGuard: server.js menyajikan GET /api/build-id (BUILD_ID dibaca dari .next/BUILD_ID standalone, fallback NEXT_DIST_DIR, fallback 'dev') SEBELUM handler Next; komponen klien BuildVersionGuard.tsx (dipasang di root layout) poll 60 detik + visibilitychange; jika buildId berubah → location.reload() SEKALI, dengan cooldown sessionStorage 30 detik anti-loop. Tab wahana kini self-heal setiap deployment tanpa refresh manual.
+- VERIFIKASI: node --check server.js OK, tsc 0 error, eslint bersih; build produksi sukses (BUILD_ID = aY5LJB1f0pOId74t9P5K_ ikut di standalone); boot-test port 3100: /api/build-id mengembalikan ID nyata, 4 halaman 200, log bersih; browser: guard ter-poll (1 fetch, tanpa reload liar); UJI END-TO-END simulasi upgrade — BUILD_ID diubah + server di-restart → poll berikutnya mendeteksi → tab reload sendiri (navigation.type = "reload"), setelahnya stabil (1 poll, tanpa loop).
+- BLOKIR PUSH: PAT github_pat_11AN6... sudah DITOLAK GitHub (GET /user dan /repos → HTTP 401 — dicabut/kedaluwarsa). Commit 9e9863b (guard) + worklog ini tersimpan di lokal; push menunggu PAT baru dari pemilik repo.
+- CATATAN OPERASIONAL untuk user: sekali saja refresh manual tab proyektor lama setelah image baru jalan (tab era pra-guard tidak punya mekanisme ini), setelah itu semua tab berikutnya self-heal.
+
+Stage Summary:
+- Error "Failed to find Server Action" didiagnosis sebagai version-skew tab basi (bukan bug kode) dan dituntaskan permanen dengan build-version guard yang terverifikasi end-to-end (simulasi upgrade → tab reload otomatis, tanpa loop). Baris "Downloading swc" terkonfirmasi sebagai image lama — rebuild image wajib. Repo dipulihkan dari rollback eksternal ke-3. Push tertahan karena PAT dicabut GitHub — commit aman di lokal.
