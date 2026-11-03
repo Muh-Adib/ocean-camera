@@ -7,9 +7,16 @@ import gsap from 'gsap'
 import { rand } from '../utils/math'
 import type { CameraFailure } from '../interaction/HandTracker'
 
+/**
+ * The two entry modes picked from the gate menu. The 3D world boots ONCE —
+ * switching modes only swaps the HUD + opens/closes the operator console,
+ * the canvas is never re-mounted (no repeated world rebuilds).
+ */
+export type OceanMode = 'interaction' | 'studio'
+
 export interface UICallbacks {
-  onDive: () => void
-  onEnableCamera: () => void
+  onEnterMode: (mode: OceanMode, withCamera: boolean) => void
+  onShowMenu: () => void
   onToggleSound: () => void
   onToggleCamera: () => void
   onShowGuide: () => void
@@ -38,10 +45,12 @@ export class UI {
   private camBtn!: HTMLButtonElement
   private visionBtn!: HTMLButtonElement
   private projectionBtn!: HTMLButtonElement
+  private menuBtn!: HTMLButtonElement
   private swimBtn!: HTMLButtonElement
   private feedBtn!: HTMLButtonElement
   private paddleEl: HTMLElement | null = null
   private privacyNote!: HTMLElement
+  private resumeBtn!: HTMLButtonElement
   cb: UICallbacks
 
   constructor(container: HTMLElement, cb: UICallbacks) {
@@ -52,7 +61,7 @@ export class UI {
 
     this.buildVignette()
     this.buildLoading()
-    this.buildIntro()
+    this.buildMenu()
     this.buildHUD()
     this.buildToasts()
   }
@@ -93,7 +102,32 @@ export class UI {
     this.loadingStatus.textContent = 'Loading coral'
     this.loadingEl.appendChild(this.loadingStatus)
 
+    // developer credit — small, unobtrusive, part of the boot theatre
+    const credit = document.createElement('div')
+    credit.className = 'load-credit'
+    credit.appendChild(UI.segiaMark())
+    const note = document.createElement('span')
+    note.textContent = 'DEVELOPED BY SEGIA'
+    credit.appendChild(note)
+    this.loadingEl.appendChild(credit)
+
     this.root.appendChild(this.loadingEl)
+  }
+
+  /**
+   * SEGIA developer mark — a small wave over the wordmark. Pure inline
+   * SVG + text (no raster, no external file) so it renders identically
+   * in the splash, loading screen, menu footer and HUD watermark.
+   */
+  static segiaMark(): HTMLElement {
+    const el = document.createElement('span')
+    el.className = 'segia-mark'
+    el.setAttribute('aria-label', 'Developed by Segia')
+    el.innerHTML =
+      '<svg viewBox="0 0 38 10" width="34" height="9" fill="none" aria-hidden="true">' +
+      '<path d="M1 6.5 Q 5.5 1.5, 10 6.5 T 19 6.5 T 28 6.5 T 37 6.5" stroke="currentColor" ' +
+      'stroke-width="1.5" stroke-linecap="round"/></svg><i>SEGIA</i>'
+    return el
   }
 
   private loadingStep = 0
@@ -116,11 +150,11 @@ export class UI {
       opacity: 0, duration: 1.1, ease: 'power2.inOut',
       onComplete: () => { this.loadingEl.style.display = 'none' },
     })
-    this.showIntro()
+    this.showMenu()
   }
 
-  // ------------------------------------------------------------ intro
-  private buildIntro() {
+  // ------------------------------------------------------------ mode menu (gate)
+  private buildMenu() {
     this.introEl = document.createElement('section')
     this.introEl.id = 'ocean-intro'
     this.introEl.setAttribute('aria-label', 'Ocean introduction')
@@ -141,47 +175,106 @@ export class UI {
 
     const sub = document.createElement('p')
     sub.className = 'intro-sub reveal'
-    sub.innerHTML = 'Move your hand<br/>and watch the ocean respond.'
+    sub.innerHTML = 'Pick your journey — dive as a visitor, or run the show.'
 
-    const actions = document.createElement('div')
-    actions.className = 'intro-actions reveal'
+    // ------- the two separated interfaces (visitors vs operators) -------
+    const cards = document.createElement('div')
+    cards.className = 'mode-cards reveal'
+
+    const cardV = document.createElement('div')
+    cardV.className = 'mode-card'
+    cardV.innerHTML =
+      '<div class="mode-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">' +
+      '<path d="M2 12c4-5.2 10.5-5.2 14.5-.6L22 7.4v9.2l-5.5-4C12.5 17.2 6 17.2 2 12z"/></svg></div>' +
+      '<h2>DIRECT INTERACTION</h2>' +
+      '<p>Swim the reef yourself — sway the current with a wave of your hand, feed the schools, meet the fish up close.</p>'
 
     const dive = document.createElement('button')
     dive.id = 'btn-dive'
     dive.className = 'btn-primary'
     dive.textContent = 'DIVE IN'
     dive.setAttribute('aria-label', 'Enter the ocean using mouse or touch')
-    dive.addEventListener('click', () => this.cb.onDive())
+    dive.addEventListener('click', () => this.cb.onEnterMode('interaction', false))
 
     const cam = document.createElement('button')
     cam.id = 'btn-camera'
     cam.className = 'btn-secondary'
-    cam.textContent = 'ENABLE CAMERA'
+    cam.textContent = 'DIVE WITH CAMERA'
     cam.setAttribute('aria-label', 'Enter the ocean using hand gestures via camera')
-    cam.addEventListener('click', () => this.cb.onEnableCamera())
+    cam.addEventListener('click', () => this.cb.onEnterMode('interaction', true))
 
-    actions.appendChild(dive)
-    actions.appendChild(cam)
+    cardV.append(dive, cam)
+
+    const cardS = document.createElement('div')
+    cardS.className = 'mode-card'
+    cardS.innerHTML =
+      '<div class="mode-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">' +
+      '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v8a1.5 1.5 0 0 1-1.5 1.5H14.6l1.55 2.55a.6.6 0 1 1-1.03.62L13.15 16h-2.3l-1.97 3.17a.6.6 0 1 1-1.02-.62L9.4 16H4.5A1.5 1.5 0 0 1 3 14.5v-8z M12 7.4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M12 9.3a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z M17.6 7.2h1.6v1.6h-1.6z"/></svg></div>' +
+      '<h2>STUDIO MODE</h2>' +
+      '<p>Operator console — calibrate projection surfaces, curate the fish tank and tune the reef towers.</p>'
+
+    const studio = document.createElement('button')
+    studio.id = 'btn-studio'
+    studio.className = 'btn-primary'
+    studio.textContent = 'OPEN STUDIO'
+    studio.setAttribute('aria-label', 'Enter the operator studio — projection mapping and tank console')
+    studio.addEventListener('click', () => this.cb.onEnterMode('studio', false))
+
+    cardS.appendChild(studio)
+    cards.append(cardV, cardS)
 
     this.privacyNote = document.createElement('p')
     this.privacyNote.className = 'privacy-note reveal'
     this.privacyNote.textContent =
       'Camera access is used only to detect hand movement. Video is processed locally in your browser and is never uploaded or stored.'
 
-    this.introInner.append(kicker, h1, sub, actions, this.privacyNote)
+    // ------- developer credit + soft-sell CTA (small, quiet) -------
+    const footer = document.createElement('div')
+    footer.className = 'segia-footer reveal'
+    footer.appendChild(UI.segiaMark())
+    const cta = document.createElement('a')
+    cta.className = 'segia-cta'
+    cta.href = 'https://segiatech.com'
+    cta.target = '_blank'
+    cta.rel = 'noopener'
+    cta.innerHTML = 'Want an immersive experience like this? <b>segiatech.com</b>'
+    footer.appendChild(cta)
+
+    // shown when the menu re-opens mid-session (world keeps running behind)
+    this.resumeBtn = document.createElement('button')
+    this.resumeBtn.id = 'menu-resume'
+    this.resumeBtn.className = 'btn-glass'
+    this.resumeBtn.textContent = 'BACK TO THE OCEAN'
+    this.resumeBtn.style.display = 'none'
+    this.resumeBtn.addEventListener('click', () => this.hideMenu())
+
+    this.introInner.append(kicker, h1, sub, cards, this.privacyNote, footer, this.resumeBtn)
     this.introEl.appendChild(this.introInner)
     this.root.appendChild(this.introEl)
   }
 
-  private showIntro() {
+  /**
+   * Reveal the mode gate. `resume` = the visitor already dived and opened
+   * the menu again — quick fade, plus the BACK TO THE OCEAN escape hatch;
+   * the cinematic reveal stagger only plays on first entry.
+   */
+  showMenu(resume = false) {
+    this.resumeBtn.style.display = resume ? 'inline-flex' : 'none'
     this.introEl.style.display = 'flex'
+    // hideMenu fades the inner wrapper to opacity 0 — restore it, or a
+    // re-opened menu would be an empty dimmed shell (caught in QA)
+    gsap.set(this.introInner, { opacity: 1, y: 0 })
+    if (resume) {
+      gsap.to(this.introEl, { opacity: 1, duration: 0.45, ease: 'power2.out' })
+      return
+    }
     gsap.to(this.introEl, { opacity: 1, duration: 1.2, ease: 'power2.out' })
     gsap.fromTo('.reveal',
       { y: 26, opacity: 0 },
       { y: 0, opacity: 1, duration: 1.4, stagger: 0.16, ease: 'power3.out', delay: 0.3 })
   }
 
-  hideIntro(onComplete?: () => void) {
+  hideMenu(onComplete?: () => void) {
     return gsap.timeline({ onComplete: () => onComplete?.() })
       .to(this.introInner, { opacity: 0, y: -20, duration: 0.8, ease: 'power2.in' })
       .to(this.introEl, { opacity: 0, duration: 0.7, ease: 'power2.inOut' }, '-=0.3')
@@ -191,7 +284,7 @@ export class UI {
   setCameraButtonLoading(loading: boolean) {
     const btn = document.getElementById('btn-camera') as HTMLButtonElement | null
     if (btn) {
-      btn.textContent = loading ? 'PREPARING HAND TRACKING…' : 'ENABLE CAMERA'
+      btn.textContent = loading ? 'PREPARING HAND TRACKING…' : 'DIVE WITH CAMERA'
       btn.disabled = loading
     }
   }
@@ -208,16 +301,28 @@ export class UI {
     controls.setAttribute('role', 'toolbar')
     controls.setAttribute('aria-label', 'Ocean controls')
 
+    this.menuBtn = this.iconButton('menu', 'Back to the mode menu', this.cb.onShowMenu, 'M12 3l9 8h-3v9h-5v-6h-2v6H6v-9H3z')
     this.soundBtn = this.iconButton('sound', 'Sound', this.cb.onToggleSound, 'M4 9v6h4l5 4V5L8 9H4z M16.5 12a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4z')
     this.camBtn = this.iconButton('cam', 'Camera hand tracking', this.cb.onToggleCamera, 'M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z M9 3l-1.5 2h-3A2.5 2.5 0 0 0 2 7.5v9A2.5 2.5 0 0 0 4.5 19h15a2.5 2.5 0 0 0 2.5-2.5v-9A2.5 2.5 0 0 0 19.5 5h-3L15 3H9z')
     this.swimBtn = this.iconButton('swim', 'Free swim — explore the open ocean', this.cb.onToggleSwim, 'M2 12c4-5.2 10.5-5.2 14.5-.6L22 7.4v9.2l-5.5-4C12.5 17.2 6 17.2 2 12z')
+    this.swimBtn.classList.add('visitor-only')
     this.feedBtn = this.iconButton('feed', 'Scatter food — feed the fish (G)', this.cb.onFeed, 'M12 3.2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M6.2 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M17.8 8.6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M9 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M15 15a2 2 0 1 1 0 4 2 2 0 0 1 0-4z')
+    this.feedBtn.classList.add('visitor-only')
     this.visionBtn = this.iconButton('vision', 'Gesture camera view — see how the detection works', this.cb.onToggleGestureView, 'M12 5c-5 0-9.3 3.1-11 7.5C2.7 16.9 7 20 12 20s9.3-3.1 11-7.5C21.3 8.1 17 5 12 5z M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z')
+    this.visionBtn.classList.add('visitor-only')
     this.projectionBtn = this.iconButton('projection', 'Projection mapping studio — multi-surface output', this.cb.onToggleProjection, 'M3 6.5A1.5 1.5 0 0 1 4.5 5h15A1.5 1.5 0 0 1 21 6.5v8a1.5 1.5 0 0 1-1.5 1.5H14.6l1.55 2.55a.6.6 0 1 1-1.03.62L13.15 16h-2.3l-1.97 3.17a.6.6 0 1 1-1.02-.62L9.4 16H4.5A1.5 1.5 0 0 1 3 14.5v-8z M12 7.4a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z M12 9.3a1.6 1.6 0 1 1 0 3.2 1.6 1.6 0 0 1 0-3.2z M17.6 7.2h1.6v1.6h-1.6z')
+    this.projectionBtn.classList.add('studio-only')
     const helpBtn = this.iconButton('help', 'Gesture guide', this.cb.onShowGuide, 'M11 18h2v-2h-2v2z M12 6a4 4 0 0 0-4 4h2a2 2 0 1 1 4 0c0 .9-.4 1.4-1.2 2-.9.7-1.8 1.4-1.8 3h2c0-.7.4-1.1 1.1-1.7.9-.7 1.9-1.5 1.9-3.3A4 4 0 0 0 12 6z M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z')
 
-    controls.append(this.soundBtn, this.camBtn, this.swimBtn, this.feedBtn, this.visionBtn, this.projectionBtn, helpBtn)
+    controls.append(this.menuBtn, this.soundBtn, this.camBtn, this.swimBtn, this.feedBtn, this.visionBtn, this.projectionBtn, helpBtn)
     this.hudEl.appendChild(controls)
+
+    // SEGIA developer watermark — tiny, quiet, both modes (never on /output:
+    // that page hides the whole UI root)
+    const wm = document.createElement('div')
+    wm.className = 'segia-watermark'
+    wm.appendChild(UI.segiaMark())
+    this.hudEl.appendChild(wm)
 
     // touch forward paddle — hold to glide ahead while free-swimming
     this.paddleEl = document.createElement('button')
@@ -305,6 +410,16 @@ export class UI {
 
   setProjectionActive(active: boolean) {
     this.projectionBtn.classList.toggle('is-active', active)
+  }
+
+  /**
+   * Swap the HUD between the two separated interfaces. The canvas, the
+   * world and every system keep running — only toolbar visibility flips
+   * (CSS: .visitor-only / .studio-only), so mode changes never re-render
+   * the 3D scene.
+   */
+  setMode(mode: OceanMode) {
+    this.hudEl.dataset.mode = mode
   }
 
   // ------------------------------------------------------ camera help

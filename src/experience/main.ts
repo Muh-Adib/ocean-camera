@@ -38,6 +38,7 @@ import { PointerFallback } from './interaction/PointerFallback'
 import { SwimController } from './interaction/SwimController'
 import { AudioManager } from './audio/AudioManager'
 import { UI } from './ui/UI'
+import type { OceanMode } from './ui/UI'
 import { GestureView } from './ui/GestureView'
 import { ProjectionManager } from './projection/ProjectionManager'
 import { RemoteHands } from './remote/RemoteHands'
@@ -244,10 +245,11 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
 
   // ---------------- UI ----------------
   let entered = false
+  let mode: OceanMode = 'interaction'
   const gestureView = outputOnly ? null : new GestureView(container)
   const ui = new UI(container, {
-    onDive: () => enterExperience(false),
-    onEnableCamera: () => enterExperience(true),
+    onEnterMode: (nextMode, withCamera) => enterExperience(nextMode, withCamera),
+    onShowMenu: () => ui.showMenu(true),
     onToggleSound: () => {
       const muted = !audio.isMuted
       audio.setMuted(muted)
@@ -378,15 +380,51 @@ function bootInner(container: HTMLElement, disposers: (() => void)[], outputOnly
   disposers.push(() => window.removeEventListener('keydown', onFeedKey))
 
   // ---------------- enter flow ----------------
-  function enterExperience(withCamera: boolean) {
-    if (entered) return
-    entered = true
+  /**
+   * Mode switch WITHOUT touching the scene graph: flips the HUD toolbar
+   * (CSS classes) and opens/closes the operator console. The world, the
+   * canvas and every system keep running — switching Studio ⇄ Interaction
+   * never rebuilds or re-renders anything heavy (that was the complaint:
+   * everything lived in one mixed interface and re-initialised on change).
+   */
+  function applyMode(next: OceanMode, announce = true) {
+    mode = next
+    ui.setMode(next)
+    if (next === 'studio') {
+      if (!projection.active) {
+        projection.toggle()
+        ui.setProjectionActive(projection.active)
+      }
+      if (announce) ui.toast('Studio mode — projection console is open.', 2800)
+    } else {
+      if (projection.active) {
+        projection.toggle()
+        ui.setProjectionActive(false)
+      }
+      if (announce) ui.toast('Interaction mode — the ocean is yours.', 2400)
+    }
+  }
 
-    ui.hideIntro(() => {
+  function enterExperience(nextMode: OceanMode, withCamera: boolean) {
+    if (entered) {
+      // mid-session switch from the gate menu — no cinematic, no re-boot:
+      // just swap the interface and lift the menu
+      ui.hideMenu()
+      applyMode(nextMode)
+      return
+    }
+    entered = true
+    mode = nextMode
+
+    ui.hideMenu(() => {
       const introTl = gsap.timeline()
       introTl.add(cameraRig.playIntro(), 0)
       introTl.call(() => { lighting.reveal(); surface.reveal() }, undefined, 2.2)
-      introTl.call(() => ui.showHUD(), undefined, 4.5)
+      introTl.call(() => {
+        ui.showHUD()
+        applyMode(nextMode, false)
+        if (nextMode === 'studio') ui.toast('Studio console ready — calibrate surfaces, import fish, tune the reef.', 4200)
+      }, undefined, 4.5)
       if (perf.isMobile) introTl.call(() => ui.showFallbackNotice(), undefined, 5.2)
 
       // ecosystem wakes up, then settles

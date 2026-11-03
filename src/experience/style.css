@@ -12,6 +12,13 @@
 }
 
 #ocean-ui button { pointer-events: auto; cursor: pointer; }
+#ocean-ui a { pointer-events: auto; }
+
+/* ---------------- separated interfaces (HUD per mode) ----------------
+   data-mode on #ocean-hud: 'interaction' = visitor toolbar,
+   'studio' = operator toolbar. The 3D world never re-renders on switch. */
+#ocean-hud[data-mode='interaction'] .studio-only { display: none; }
+#ocean-hud[data-mode='studio'] .visitor-only { display: none; }
 
 /* ---------------- vignette ---------------- */
 #ocean-vignette {
@@ -73,7 +80,7 @@
   to { transform: translateY(-108vh); opacity: 0; }
 }
 
-/* ---------------- intro ---------------- */
+/* ---------------- mode menu (gate) ---------------- */
 #ocean-intro {
   position: absolute;
   inset: 0;
@@ -82,15 +89,21 @@
   justify-content: center;
   text-align: center;
   z-index: 20;
-  background: linear-gradient(to bottom, rgba(1,10,18,0.62), rgba(2,20,34,0.28) 45%, rgba(1,10,18,0.62));
+  background:
+    radial-gradient(ellipse at 50% 60%, rgba(4, 34, 47, 0.55) 0%, rgba(1, 11, 20, 0.82) 78%),
+    linear-gradient(to bottom, rgba(1,10,18,0.62), rgba(2,20,34,0.28) 45%, rgba(1,10,18,0.62));
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
 }
 .intro-inner {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 1.15rem;
-  padding: 2rem;
-  max-width: 640px;
+  gap: 0.8rem;
+  padding: 1.6rem 1.4rem;
+  max-width: 880px;
+  max-height: 100vh;
+  overflow-y: auto;
 }
 .intro-kicker {
   font-size: 0.72rem;
@@ -100,10 +113,10 @@
   margin: 0;
 }
 .intro-title {
-  font-size: clamp(2.4rem, 6.5vw, 4.6rem);
+  font-size: clamp(2rem, 4.6vw, 3.3rem);
   font-weight: 300;
-  letter-spacing: 0.14em;
-  text-indent: 0.14em;
+  letter-spacing: 0.13em;
+  text-indent: 0.13em;
   margin: 0;
   background: linear-gradient(180deg, #eafcff 0%, #8fd0e8 55%, #4d90b4 100%);
   -webkit-background-clip: text;
@@ -112,19 +125,72 @@
   text-shadow: 0 0 60px rgba(120, 210, 240, 0.25);
 }
 .intro-sub {
-  font-size: clamp(0.95rem, 2.2vw, 1.15rem);
+  font-size: clamp(0.9rem, 2vw, 1.05rem);
   font-weight: 300;
-  line-height: 1.75;
+  line-height: 1.65;
   color: #a8cfdd;
   margin: 0;
 }
-.intro-actions {
+.mode-cards {
   display: flex;
-  gap: 0.9rem;
-  margin-top: 0.8rem;
+  gap: 1rem;
+  margin-top: 0.55rem;
   flex-wrap: wrap;
   justify-content: center;
 }
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  width: 300px;
+  padding: 1.25rem 1.4rem 1.25rem;
+  border-radius: 20px;
+  border: 1px solid rgba(150, 215, 235, 0.2);
+  background: linear-gradient(180deg, rgba(10, 42, 60, 0.55), rgba(4, 22, 36, 0.6));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: transform 0.35s cubic-bezier(0.2, 0.7, 0.3, 1), border-color 0.35s, box-shadow 0.35s;
+}
+.mode-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(160, 228, 248, 0.5);
+  box-shadow: 0 18px 48px rgba(0, 10, 20, 0.45), 0 0 0 1px rgba(120, 210, 240, 0.08) inset;
+}
+.mode-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9fe0f2;
+  background: radial-gradient(circle at 34% 30%, rgba(130, 215, 245, 0.28), rgba(30, 90, 120, 0.18) 70%);
+  border: 1px solid rgba(150, 215, 235, 0.3);
+}
+.mode-card h2 {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: #cdeef9;
+}
+.mode-card p {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(168, 207, 221, 0.9);
+  min-height: 3.2em;
+}
+.mode-card .btn-primary,
+.mode-card .btn-secondary {
+  width: 100%;
+  padding-block: 0.72rem;
+  min-height: 40px;
+}
+
 .btn-primary, .btn-secondary {
   font-family: inherit;
   font-size: 0.78rem;
@@ -150,12 +216,71 @@
 .btn-secondary:hover { border-color: rgba(160, 225, 245, 0.7); transform: translateY(-2px); }
 .btn-primary:disabled, .btn-secondary:disabled { opacity: 0.55; cursor: wait; transform: none; }
 .privacy-note {
-  font-size: 0.68rem;
-  line-height: 1.7;
+  font-size: 0.64rem;
+  line-height: 1.6;
   color: rgba(140, 180, 200, 0.65);
-  max-width: 420px;
-  margin: 0.4rem 0 0;
+  max-width: 460px;
+  margin: 0.15rem 0 0;
 }
+
+/* developer credit + soft-sell CTA (menu footer) */
+.segia-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+.segia-cta {
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  color: rgba(150, 195, 214, 0.66);
+  text-decoration: none;
+  transition: color 0.3s;
+}
+.segia-cta b {
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: rgba(170, 220, 240, 0.85);
+}
+.segia-cta:hover { color: rgba(190, 230, 248, 0.95); }
+.segia-cta:hover b { color: #cdeef9; text-decoration: underline; text-underline-offset: 3px; }
+#menu-resume { margin-top: 0.6rem; }
+
+/* loading-screen credit */
+.load-credit {
+  position: absolute;
+  bottom: max(1.4rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  opacity: 0.7;
+}
+.load-credit span:last-child {
+  font-size: 0.56rem;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: rgba(150, 195, 214, 0.8);
+}
+
+/* HUD watermark — tiny developer signature, bottom-right, non-interactive */
+.segia-watermark {
+  position: absolute;
+  right: max(1.2rem, env(safe-area-inset-right));
+  bottom: max(1.15rem, env(safe-area-inset-bottom));
+  opacity: 0.38;
+  pointer-events: none;
+  transition: opacity 0.6s;
+}
+.segia-watermark .segia-mark {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: #a8d4e4;
+}
+.segia-watermark:hover { opacity: 0.7; }
 
 /* ---------------- HUD ---------------- */
 #ocean-hud { position: absolute; inset: 0; }
@@ -426,7 +551,9 @@
 @media (max-width: 640px) {
   .hud-hints { gap: 0.9rem; }
   .hint { font-size: 0.56rem; }
-  .intro-actions { flex-direction: column; width: 100%; max-width: 300px; }
+  .mode-cards { flex-direction: column; align-items: center; }
+  .mode-card { width: min(300px, 86vw); }
+  .mode-card p { min-height: 0; }
   .guide-card { padding: 1.5rem 1.4rem; }
 }
 

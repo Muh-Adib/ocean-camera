@@ -120,3 +120,142 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ================================================================
+   Boot splash — server-rendered, visible from the very first paint
+   (before any JS). Sits BELOW the experience's own loading theatre
+   (#ocean-loading, z 30) so the handoff between the two is seamless
+   (identical gradient). Lifted via `data-gone` when the experience
+   signals ocean-booted.
+   ================================================================ */
+#ocean-splash {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  background: radial-gradient(ellipse at 50% 60%, #04222f 0%, #010b14 78%);
+  color: #dff3fb;
+  font-family: var(--font-geist-sans), 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: opacity 0.9s ease;
+}
+#ocean-splash[data-gone] {
+  opacity: 0;
+  pointer-events: none;
+}
+.splash-bubbles {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.splash-bubbles span {
+  position: absolute;
+  bottom: -20px;
+  border-radius: 50%;
+  border: 1px solid rgba(160, 220, 240, 0.5);
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.28), rgba(160, 220, 240, 0.05) 62%);
+  animation: splashRise linear infinite;
+}
+@keyframes splashRise {
+  from { transform: translateY(0); opacity: 0; }
+  8% { opacity: 0.85; }
+  to { transform: translateY(-108vh); opacity: 0; }
+}
+.splash-kicker {
+  margin: 0;
+  font-size: 0.68rem;
+  letter-spacing: 0.5em;
+  text-indent: 0.5em;
+  color: #6fb4cc;
+  animation: splashPulse 2.4s ease-in-out infinite;
+}
+.splash-title {
+  margin: 0;
+  font-size: clamp(1.7rem, 5vw, 3.1rem);
+  font-weight: 300;
+  letter-spacing: 0.2em;
+  text-indent: 0.2em;
+  background: linear-gradient(180deg, #eafcff 0%, #8fd0e8 55%, #4d90b4 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  text-shadow: 0 0 60px rgba(120, 210, 240, 0.25);
+  animation: splashPulse 3.2s ease-in-out infinite;
+}
+.splash-status {
+  margin: 0.4rem 0 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #5d8ba0;
+}
+.splash-bar {
+  width: min(240px, 56vw);
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(120, 200, 225, 0.16);
+  overflow: hidden;
+}
+.splash-bar span {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(110, 200, 230, 0.1), #6ec8e6, rgba(110, 200, 230, 0.1));
+  animation: splashSweep 1.6s ease-in-out infinite;
+}
+@keyframes splashSweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(280%); }
+}
+@keyframes splashPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+.splash-credit {
+  position: absolute;
+  bottom: max(1.4rem, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  opacity: 0.75;
+}
+.splash-credit-note {
+  font-size: 0.56rem;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: rgba(150, 195, 214, 0.8);
+}
+@media (prefers-reduced-motion: reduce) {
+  .splash-bubbles span,
+  .splash-kicker,
+  .splash-title { animation: none; opacity: 0.7; }
+  .splash-bar span { animation: none; }
+}
+
+/* ================================================================
+   SEGIA developer mark — shared by splash, loading screen, menu
+   footer and the HUD watermark (inline SVG wave + wordmark text)
+   ================================================================ */
+.segia-mark {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  color: #9fd0e2;
+  line-height: 1;
+  user-select: none;
+}
+.segia-mark i {
+  font-style: normal;
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: inherit;
+}

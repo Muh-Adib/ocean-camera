@@ -1410,3 +1410,35 @@ Work Log:
 
 Stage Summary:
 - Error "Failed to find Server Action" didiagnosis sebagai version-skew tab basi (bukan bug kode) dan dituntaskan permanen dengan build-version guard yang terverifikasi end-to-end (simulasi upgrade → tab reload otomatis, tanpa loop). Baris "Downloading swc" terkonfirmasi sebagai image lama — rebuild image wajib. Repo dipulihkan dari rollback eksternal ke-3. Push tertahan karena PAT dicabut GitHub — commit aman di lokal.
+
+## Task 53 — Loading screen + Segia branding + separated Studio / Interaction interfaces
+**Date:** 2026-11-03 · **Request:** "rebase dulu (PAT baru) → lakukan ulang perbaikan → loading screen di awal + logo Segia kecil sebagai developer → pisahkan antarmuka menuju Studio vs interaksi langsung agar tidak berkali-kali render → UI/UX tema laut + CTA soft-selling segiatech.com kecil"
+
+### 1. Rebase / push (PAT lama revoked)
+- Task 52 commits (9e9863b build-version guard + 6bdfcc8 worklog) were stuck local: push had failed with the revoked PAT. User supplied a new PAT → pushed `477d15c..6bdfcc8`, origin/main = local = 6bdfcc8.
+- Uploaded log file (7hss0wg7…logs….txt) confirmed the live container error is the ALREADY-DIAGNOSED "Failed to find Server Action" version-skew — fix existed locally, just never shipped. After this push, redeploying the container picks up the Task 52 guard.
+
+### 2. Boot splash (first paint, zero JS)
+- `src/app/page.tsx`: server-rendered `#ocean-splash` (radial deep-sea gradient, rising bubbles, "THE LIVING OCEAN", sweep progress bar, SEGIA credit) visible from the very first HTML paint — covers the chunk-download + world-build gap. Lifts on `ocean-booted` event (fired after `bootExperience` returns) with a 30s failsafe. Bubble positions hard-coded → SSR hydration-safe. Styles in `globals.css` (splash sits at z 2, BELOW the experience `#ocean-loading` z 30 — identical gradient = seamless handoff).
+
+### 3. Segia developer branding
+- ZIP's SVGs are CorelDRAW wrappers referencing an embedded PNG (`logo segia_white_Images/…`) that never made it into the archive → they render nothing. Built a self-contained inline **SEGIA wave wordmark** (`UI.segiaMark()` + `.segia-mark` styles) used in: loading screen ("DEVELOPED BY SEGIA"), gate-menu footer, and a subtle bottom-right HUD watermark (opacity .38, pointer-events none, never on /output). Broken Corel SVGs removed from `public/brand/` — real logo can replace the mark anytime.
+
+### 4. Separated interfaces — mode gate (no repeated renders)
+- `UI.ts`: old intro (DIVE IN / ENABLE CAMERA) → **mode gate**: two cards — DIRECT INTERACTION (fish icon; DIVE IN + DIVE WITH CAMERA) and STUDIO MODE (projector icon; OPEN STUDIO). `OceanMode = 'interaction' | 'studio'`; callbacks `onEnterMode`/`onShowMenu` replace `onDive`/`onEnableCamera`; `showMenu(resume)`/`hideMenu()` replace intro methods.
+- `main.ts`: `applyMode(next)` flips `#ocean-hud[data-mode]` + opens (studio) / closes (interaction) the projection console — **scene graph untouched, canvas never re-mounted, world boots once**; mid-session switching via menu = `hideMenu + applyMode`, no cinematic replay. First entry keeps the cinematic; studio auto-opens the console at HUD reveal (4.5s).
+- HUD split via CSS: `.visitor-only` (swim/feed/vision) vs `.studio-only` (projection); menu button + help + sound + camera in both. Watermark both modes.
+- Menu re-open mid-session shows BACK TO THE OCEAN (resume) — **QA-caught bug**: hideMenu faded `.intro-inner` to 0 and resume re-show was an empty shell → `showMenu` now `gsap.set(introInner, {opacity:1, y:0})`.
+
+### 5. UI/UX polish + soft-sell CTA
+- Gate menu restyled (glass cards, mode icons, hover lift, backdrop blur, scroll-safe `max-height:100vh`); compacted (title 3.3rem single-line, tighter gaps) so the whole menu fits a 720p projector/kiosk screen without scrolling.
+- CTA (small, quiet, menu footer): "Want an immersive experience like this? **segiatech.com**" → `https://segiatech.com` (noopener). Privacy note kept.
+
+### Verification
+- tsc clean (repo-own files), eslint clean, `NEXT_DIST_DIR=.next-prod next build` OK.
+- Boot test (standalone + custom server.js, NODE_ENV=production, :3100): `/` `/output` `/remote` 200, `/api/build-id` → `{"buildId":"15RAzrHkvr3tNTFs0lF1-"}` (Task 52 guard intact), splash SSR'd in initial HTML, MediaPipe still absent from initial HTML (Task 51 intact).
+  - Assembly gotcha (cost 2 debug rounds): `next build` overwrites `standalone/server.js` with Next's generic one → must `cp server.js` (root custom) into boot-test; stale `next-server` process also squatted :3100 once (EADDRINUSE → 404s).
+- Headless QA (screenshots in `qa/qa-53-*.png`): loading theatre + SEGIA credit; gate menu (both cards + CTA); interaction HUD (studio-only hidden, watermark present); resume menu full content; studio mode with auto-opened projection console; studio→interaction switch closes editor. Console clean.
+  - Headless GSAP crawls at ~1 FPS (lagSmoothing + software WebGL) — `__ocean.fast()` + patience; real GPUs unaffected.
+
+**Next:** deploy the container image so Task 52's build guard + this UI ship together.
